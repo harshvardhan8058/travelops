@@ -19,6 +19,20 @@ can work from a shared reference instead of re-deciding architecture ad hoc.
 | [07 — Risks and Mitigations](07-risks-and-mitigations.md) | Twelve ways this breaks, and what to do about each |
 | [08 — Blueprint Backlog](08-blueprint-backlog.md) | What is still undesigned, and the order to tackle it |
 
+## Requirements and data
+
+| Doc | What it answers |
+| --- | --- |
+| [09 — Requirements](09-requirements.md) | Functional and non-functional requirements, scope, success criteria |
+| [10 — Data Sources](10-data-sources.md) | Which free APIs and datasets actually work, with verdicts |
+| [11 — Data Model](11-data-model.md) | Postgres schema, ER diagram, full DDL |
+| [12 — Synthetic Data Plan](12-synthetic-data-plan.md) | What must be generated, in what volume, and how |
+
+## Start here if you are picking this up
+
+**[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)** — the decisions still needed, what has been assumed, and
+what is blocked. Read it before treating any other document as settled.
+
 ## Reference
 
 | Doc | Contents |

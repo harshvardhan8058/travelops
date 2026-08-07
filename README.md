@@ -5,8 +5,11 @@ impact, plan a recovery, and execute it — with a hard boundary between what th
 deterministic code decides.
 
 > **Status: design documentation only.** No application code has been written yet, and none should be
-> inferred from these documents. Several areas are explicitly still undesigned — see the
-> [blueprint backlog](docs/08-blueprint-backlog.md).
+> inferred from these documents.
+>
+> Requirements, data sources, schema and the synthetic data plan are done. Several areas remain
+> undesigned — see the [blueprint backlog](docs/08-blueprint-backlog.md) — and a number of decisions are
+> outstanding, listed in [open questions](docs/OPEN-QUESTIONS.md).
 
 ## The idea in one diagram
 
@@ -41,6 +44,11 @@ Start at **[`docs/`](docs/)**.
 | [06 — AI vs Deterministic](docs/06-ai-vs-deterministic.md) | The central design boundary |
 | [07 — Risks and Mitigations](docs/07-risks-and-mitigations.md) | Twelve failure modes |
 | [08 — Blueprint Backlog](docs/08-blueprint-backlog.md) | Open design work, prioritised |
+| [09 — Requirements](docs/09-requirements.md) | Functional and non-functional requirements |
+| [10 — Data Sources](docs/10-data-sources.md) | Free APIs and datasets, evaluated |
+| [11 — Data Model](docs/11-data-model.md) | Postgres schema and ER diagram |
+| [12 — Synthetic Data Plan](docs/12-synthetic-data-plan.md) | What must be generated, and how |
+| **[Open Questions](docs/OPEN-QUESTIONS.md)** | **Decisions still needed — read this first** |
 | [Source Conversation](docs/reference/source-conversation.md) | Original transcript, preserved |
 
 ## Tech direction

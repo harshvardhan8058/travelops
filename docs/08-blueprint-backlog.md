@@ -1,12 +1,16 @@
 # 8. Blueprint Backlog — What Is Still Undocumented
 
 The source conversation proposed expanding these notes into a 150–300 page engineering design
-document. That document does not exist yet, and the items below have **not** been designed — they were
-listed as scope, not answered.
+document. Items below marked ⬜ have **not** been designed — they were listed as scope, not answered.
 
 This file is deliberately a checklist of open work rather than invented content. Filling any row with
 plausible-sounding detail that nobody has actually decided would be worse than leaving it empty,
 because the team would build against fiction.
+
+**Progress since first draft:** items #3, #11 and #12 are now resolved, plus a requirements
+specification ([`09-requirements.md`](09-requirements.md)) that was not on the original list but should
+have been. Most remaining items are blocked on decisions rather than on effort — see
+[`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md).
 
 ## Status legend
 
@@ -19,8 +23,8 @@ because the team would build against fiction.
 | # | Item | Status | Where it lives / should live |
 | --- | --- | :---: | --- |
 | 1 | Complete system architecture | 🟡 | [`01-architecture.md`](01-architecture.md) — layers done, deployment topology not |
-| 2 | Every microservice and API | ⬜ | Needs an OpenAPI-style spec per service |
-| 3 | Database schema (ER diagrams + tables) | ⬜ | Only an incident record shape exists, in [`05-memory-and-rag.md`](05-memory-and-rag.md) |
+| 2 | Every microservice and API | ⬜ | Needs an OpenAPI-style spec per service; blocked on stack choice (B5) |
+| 3 | Database schema (ER diagrams + tables) | ✅ | [`11-data-model.md`](11-data-model.md) — full DDL + ER diagram |
 | 4 | Multi-agent architecture (Planner, Executor, Recovery, Learning) | 🟡 | [`03-agent-design.md`](03-agent-design.md) — contract + roster done, Recovery/Learning agents undefined |
 | 5 | RAG and knowledge graph design | 🟡 | [`05-memory-and-rag.md`](05-memory-and-rag.md) — RAG role clear, knowledge graph not designed |
 | 6 | Event-driven workflow diagrams | 🟡 | [`02-disruption-flow.md`](02-disruption-flow.md) — one scenario only |
@@ -28,8 +32,8 @@ because the team would build against fiction.
 | 8 | Prompt engineering for every agent | ⬜ | Principles in [`04-llm-strategy-groq.md`](04-llm-strategy-groq.md); no actual prompts written |
 | 9 | Groq integration strategy | ✅ | [`04-llm-strategy-groq.md`](04-llm-strategy-groq.md) |
 | 10 | Memory architecture | ✅ | [`05-memory-and-rag.md`](05-memory-and-rag.md) |
-| 11 | Synthetic data generation scripts | ⬜ | |
-| 12 | Free APIs and datasets | ⬜ | Weather / flight sources named but not selected or evaluated |
+| 11 | Synthetic data generation scripts | ✅ | [`12-synthetic-data-plan.md`](12-synthetic-data-plan.md) — volumes, approach, seed scenario |
+| 12 | Free APIs and datasets | ✅ | [`10-data-sources.md`](10-data-sources.md) — evaluated with verdicts |
 | 13 | UI/UX wireframes for every screen | ⬜ | |
 | 14 | Dashboard design | ⬜ | |
 | 15 | Timeline replay engine | ⬜ | |
@@ -51,20 +55,32 @@ because the team would build against fiction.
 
 ## Suggested order of attack
 
-The dependency order matters more than the page count. Roughly:
+The dependency order matters more than the page count.
 
-1. **Decide the scope of the demo first** (#27, #28). Everything else is over-engineering until the
-   demo scenario is fixed.
-2. **Data model** (#3) and **free API/dataset selection** (#12). These constrain every downstream
-   choice, and #12 in particular can invalidate the plan if no suitable free source exists.
-3. **Folder structure and service boundaries** (#7, #2).
+**Done:**
+
+- ~~Free API/dataset selection (#12)~~ — this was the item that could have invalidated the whole plan.
+  It did change it: no free hotel or live flight-status source exists, so both are simulated.
+- ~~Data model (#3)~~ and ~~synthetic data plan (#11)~~ followed once the sources were known.
+
+**Next, in order:**
+
+1. **Answer the blocking questions** in [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md). Hackathon dates,
+   judging criteria, and ops-vs-passenger scope gate everything below.
+2. **Demo scope and script** (#27, #28). Still first among build tasks — everything else is
+   over-engineering until the demo is fixed. Requires B1 and B2 answered.
+3. **Folder structure and service boundaries** (#7, #2). Requires the stack decision (B5).
 4. **Prompts** (#8) — one per LLM node, versioned as files.
-5. **Synthetic data** (#11), because the demo cannot depend on live API availability.
-6. **UI and dashboard** (#13, #14) — last, and only as much as the demo shows.
+5. **UI and dashboard** (#13, #14) — last, and only as much as the demo shows.
 
 Items #15–#17 (replay engine, digital twin, simulation engine) are genuinely interesting but are
 product-scale features. They should be treated as post-hackathon roadmap (#30) unless one of them
 *is* the demo.
+
+One revision to that judgement: **the replay engine (#15) is now nearly free.** The `decision_log`
+table in [`11-data-model.md`](11-data-model.md) already captures the full chronology, so replay becomes
+a read over existing data rather than a subsystem. It is worth keeping. The digital twin and simulation
+engine are not.
 
 ## Missing source artefacts
 
