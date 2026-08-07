@@ -78,15 +78,35 @@ policy-blocked decision, and it demos far better than a confidently wrong action
 
 ## Agent roster
 
+Confirmed roster, reconciled with the Master Blueprint
+([`reference/master-blueprint.md`](reference/master-blueprint.md)):
+
 | Agent | Goal | LLM? |
 | --- | --- | --- |
-| Prediction Agent | Estimate delay probability from conditions | No — model / rules |
-| Planner Agent | Produce an ordered recovery task list | Yes |
-| Hotel Agent | Find and reserve nearby accommodation within budget | No |
-| Passenger / Communication Agent | Dispatch SMS, email, push | Optional (wording) |
+| Prediction Agent | Estimate delay probability from conditions | No — rules engine |
+| Planner Agent | Produce an ordered recovery task list | **Yes** |
+| Flight Recovery Agent | Rebook and reroute affected passengers | No |
+| Hotel Agent | Find and reserve accommodation within budget | No |
+| Transport Agent | Arrange ground transfers | No |
+| Communication Agent | Dispatch email, SMS, push | Optional (wording only) |
+| Finance Agent | Compute compensation and duty of care | No — regulatory rules |
+| Crew Agent | Coordinate and display crew reassignment | No |
 | Connection Agent | Identify at-risk onward connections | No |
-| Gate / Resource Agent | Reassign gates and ground resources | No |
-| Explainer Agent | Justify the chosen plan to a human operator | Yes |
+| Gate / Resource Agent | Reassign gates and stands | No |
+| Analytics Agent | Aggregate incident metrics | No |
+| Learning Agent | Record outcomes; surface precedent | No |
+| Explainer / Report Agent | Justify plans; generate executive summaries | **Yes** |
+
+**Only three of thirteen use the LLM.** That ratio is the architecture working as intended — and it is
+the single most useful fact to have ready when a judge asks whether this is "just a ChatGPT wrapper".
+
+Two bounding notes:
+
+- **Finance Agent must never use the LLM.** Compensation is regulatory and cited — see
+  [`13-compensation-and-policy.md`](13-compensation-and-policy.md). A model computing statutory
+  entitlements is a liability, not a feature.
+- **Crew Agent coordinates; it does not validate legality.** Duty-time legality is a hard regulated
+  domain and is explicitly out of scope. See the crew note in [`DECISIONS.md`](DECISIONS.md).
 
 ## Constraints are not suggestions
 

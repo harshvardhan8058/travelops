@@ -1,6 +1,7 @@
 # 11. Data Model
 
-Resolves backlog item #3. Postgres with `pgvector`, per [`10-data-sources.md`](10-data-sources.md).
+Resolves backlog item #3. Plain Postgres — **no vector extension for the MVP**, per D2 in
+[`DECISIONS.md`](DECISIONS.md).
 
 Tables are grouped by origin, because that determines who owns the data and whether it is ever
 written to at runtime.
@@ -41,7 +42,14 @@ erDiagram
 
     INCIDENT ||--o{ DECISION_LOG : records
     INCIDENT ||--|| INCIDENT_OUTCOME : "concludes with"
-    INCIDENT ||--|| INCIDENT_EMBEDDING : "is indexed by"
+
+    INCIDENT_GROUP ||--o{ INCIDENT : "cascades into"
+    AIRPORT ||--o{ INCIDENT_GROUP : "originates at"
+
+    CREW_MEMBER ||--o{ CREW_ASSIGNMENT : "is rostered by"
+    FLIGHT ||--o{ CREW_ASSIGNMENT : crews
+    TRANSPORT_VENDOR ||--o{ TRANSPORT_BOOKING : supplies
+    HOTEL ||--o{ TRANSPORT_BOOKING : "is served by"
 ```
 
 ---
@@ -329,27 +337,36 @@ CREATE TABLE incident_outcome (
     operator_notes          TEXT
 );
 
-CREATE TABLE incident_embedding (
-    incident_id     BIGINT PRIMARY KEY REFERENCES incident(id),
-    summary_text    TEXT NOT NULL,                -- what gets embedded
-    embedding       VECTOR(384),
-    indexed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX ON incident_embedding
-    USING hnsw (embedding vector_cosine_ops);
+-- Retrieval index: structured, not vector. See D2 in DECISIONS.md
+CREATE INDEX ON incident (trigger_type, severity);
+CREATE INDEX ON incident_outcome (resolved, total_cost_inr);
 ```
 
 `incident_outcome` closes the learning loop. Retrieval must prefer incidents where `resolved = true`
 and cost was low — otherwise the planner learns from failures as readily as successes, which is worse
-than having no memory at all.
+than having no memory at all. That is why the index above is on `(resolved, total_cost_inr)` rather
+than on recency.
 
-`summary_text` is stored alongside the vector deliberately: embeddings are opaque, and when retrieval
-returns something irrelevant you need to see what was actually indexed.
+### Retrieval strategy: SQL, not vectors
 
-⚠️ **`VECTOR(384)` assumes a 384-dimension embedding model** (e.g. a MiniLM-class sentence
-transformer, runnable locally at no cost). Groq does not currently serve embeddings, so embedding
-generation needs its own decision — flagged in [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md).
+**Decided:** no embedding table for the MVP. Precedent is retrieved by structured filtering:
+
+```
+Airport + Trigger + Severity + Weather + Flight type
+        ↓
+      SQL  (prefer resolved = true, low cost)
+        ↓
+Historical incidents → injected into the planner prompt
+```
+
+At ~150 historical incidents this retrieves better precedent than cosine similarity, and it is
+explainable — you can state exactly why a past incident was surfaced, which a judge may well ask.
+Injecting SQL-retrieved precedent into a prompt is still RAG; embeddings are not a prerequisite.
+
+If embeddings are added as a stretch goal, use **BGE Small (384-dim) into Chroma** per
+[`DECISIONS.md`](DECISIONS.md) — not `pgvector`. Store a `summary_text` alongside any vector, because
+embeddings are opaque and you will need to see what was actually indexed when retrieval returns
+something irrelevant.
 
 ## Policy tables
 
@@ -404,13 +421,124 @@ CREATE INDEX ON action (plan_task_id);
 The `booking_segment (flight_id)` index is the one that matters for the demo — it backs the
 connection-risk query, which runs against every passenger on a disrupted flight.
 
-## Deliberately absent
+> **Cascade, crew and ground transport tables are appended at the end of this document** — they were
+> added after the cascading disruption decision. The deliberately-absent list there supersedes any
+> earlier statement about crew being unmodelled.
+
+
+---
+
+## Cascade extension
+
+Added for the cascading disruption scenario confirmed in [`DECISIONS.md`](DECISIONS.md). One weather
+event owns many flight incidents.
+
+```sql
+CREATE TABLE incident_group (
+    id                  BIGSERIAL PRIMARY KEY,
+    reference           TEXT UNIQUE NOT NULL,     -- 'GRP-2026-0807-VOBL'
+    root_cause          TEXT NOT NULL,            -- weather | atc | technical | crew
+    airport_icao        CHAR(4) REFERENCES airport(icao_code),
+    severity            TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'open',
+    opened_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    closed_at           TIMESTAMPTZ,
+    -- denormalised rollups, cheap to maintain but expensive to compute per dashboard poll
+    flights_affected        INTEGER NOT NULL DEFAULT 0,
+    passengers_affected     INTEGER NOT NULL DEFAULT 0,
+    connections_at_risk     INTEGER NOT NULL DEFAULT 0,
+    crew_rotations_affected INTEGER NOT NULL DEFAULT 0,
+    total_cost_inr          INTEGER NOT NULL DEFAULT 0
+);
+
+ALTER TABLE incident
+    ADD COLUMN incident_group_id BIGINT REFERENCES incident_group(id);
+
+CREATE INDEX ON incident (incident_group_id);
+```
+
+The rollup columns exist because the ops dashboard polls frequently, and recomputing "600 passengers
+affected" by joining across eight flights and fourteen thousand booking segments on every poll is
+wasteful. They are maintained by the orchestrator as incidents progress.
+
+`incident_group` is also what makes the executive report meaningful — the report is written about the
+group, not about eight separate incidents.
+
+## Crew
+
+⚠️ **Coordination and display only. No duty-time legality validation** — explicitly out of scope, per
+[`09-requirements.md`](09-requirements.md).
+
+```sql
+CREATE TABLE crew_member (
+    id                  BIGSERIAL PRIMARY KEY,
+    reference           TEXT UNIQUE NOT NULL,     -- 'CRW-0001'
+    full_name           TEXT NOT NULL,            -- synthetic
+    role                TEXT NOT NULL,            -- captain | first_officer | cabin
+    base_airport_icao   CHAR(4) REFERENCES airport(icao_code),
+    duty_start          TIMESTAMPTZ,
+    duty_hours_used     NUMERIC(4,1) NOT NULL DEFAULT 0,
+    duty_hours_limit    NUMERIC(4,1) NOT NULL DEFAULT 13.0   -- indicative flag only
+);
+
+CREATE TABLE crew_assignment (
+    id                  BIGSERIAL PRIMARY KEY,
+    crew_member_id      BIGINT REFERENCES crew_member(id),
+    flight_id           BIGINT REFERENCES flight(id),
+    status              TEXT NOT NULL DEFAULT 'assigned',
+    -- assigned | reassigned | released | at_risk
+    reassigned_from     BIGINT REFERENCES flight(id),
+    action_id           BIGINT REFERENCES action(id),
+    UNIQUE (crew_member_id, flight_id)
+);
+```
+
+`duty_hours_limit` is present so the UI can flag a rotation as *at risk*, which is genuinely useful to a
+controller. It is a **display flag, not a compliance decision** — the distinction must be stated in the
+demo if crew comes up, because claiming legality validation you have not built is the fastest way to
+lose credibility with an aviation-literate judge.
+
+## Ground transport
+
+```sql
+CREATE TABLE transport_vendor (
+    id                  BIGSERIAL PRIMARY KEY,
+    name                TEXT NOT NULL,
+    airport_icao        CHAR(4) REFERENCES airport(icao_code),
+    vehicle_type        TEXT NOT NULL,            -- coach | taxi | shuttle
+    seats_per_vehicle   SMALLINT NOT NULL,
+    vehicles_available  SMALLINT NOT NULL,
+    rate_per_vehicle_inr INTEGER NOT NULL,
+    is_partner          BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE transport_booking (
+    id                  BIGSERIAL PRIMARY KEY,
+    action_id           BIGINT REFERENCES action(id),
+    vendor_id           BIGINT REFERENCES transport_vendor(id),
+    hotel_id            BIGINT REFERENCES hotel(id),
+    vehicles            SMALLINT NOT NULL,
+    passengers          SMALLINT NOT NULL,
+    cost_inr            INTEGER NOT NULL,
+    is_simulated        BOOLEAN NOT NULL DEFAULT TRUE
+);
+```
+
+Transport links `action` to a `hotel`, because ground transfer is a consequence of hotel allocation
+rather than an independent decision. This also matters legally: DGCA duty of care covers hotel
+accommodation **and transfers** together, per
+[`13-compensation-and-policy.md`](13-compensation-and-policy.md).
+
+Per the cut list in [`14-hackathon-plan.md`](14-hackathon-plan.md), if time runs short the Transport
+Agent folds into the Hotel Agent and transfers become a cost line rather than a separate booking.
+
+## Updated deliberately-absent list
 
 | Not modelled | Why |
 | --- | --- |
-| Crew, rosters, duty limits | Out of scope; a hard regulated domain |
+| Crew duty-time legality engine | Hard regulated domain; flags only |
 | Payments, refunds, ledgers | No real money moves |
 | Aircraft maintenance | Not needed for weather disruption |
 | Baggage | Out of scope |
 | Multi-airline interlining | Out of scope |
-| Users, roles, auth | Backlog #19, undesigned |
+| Users, roles, auth | Backlog #19, still undesigned |

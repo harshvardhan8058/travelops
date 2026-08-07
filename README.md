@@ -1,15 +1,15 @@
-# TravelOps AI
+# TravelOps OS
 
-An autonomous multi-agent system for travel disruption recovery: detect a disruption, predict its
-impact, plan a recovery, and execute it — with a hard boundary between what the AI decides and what
-deterministic code decides.
+**The Autonomous Operating System for Travel Recovery.**
 
-> **Status: design documentation only.** No application code has been written yet, and none should be
-> inferred from these documents.
->
-> Requirements, data sources, schema and the synthetic data plan are done. Several areas remain
-> undesigned — see the [blueprint backlog](docs/08-blueprint-backlog.md) — and a number of decisions are
-> outstanding, listed in [open questions](docs/OPEN-QUESTIONS.md).
+When a storm disrupts an airport, TravelOps OS detects it, predicts the impact, plans a recovery,
+executes the deterministic parts autonomously, and records why every decision was made — with a hard
+boundary between what the AI decides and what code decides.
+
+Built for the **TechCon 2026 Hackathon (Coforge)** — theme: *Engineering the Autonomous Enterprise*.
+
+> **Status: design documentation only.** No application code yet. The design is complete enough to
+> build from — see the [sprint plan](docs/14-hackathon-plan.md).
 
 ## The idea in one diagram
 
@@ -28,36 +28,66 @@ deterministic code decides.
         └──────────────── Memory ────────────┘
 ```
 
-The LLM (Groq) is one component inside this, not the centre of it.
+The LLM (Groq) is one component inside this, not the centre of it. **Only 3 of 13 agents use it.**
+
+## What it does
+
+A single weather event cascades:
+
+```
+Storm at BLR → 8 flights → 600 passengers → 22 connections → 11 hotels → 9 crew rotations → report
+```
+
+...and the system handles the recovery, then explains itself.
 
 ## Documentation
 
-Start at **[`docs/`](docs/)**.
+Start at **[`docs/`](docs/)**. If you read three things: [DECISIONS](docs/DECISIONS.md),
+the [sprint plan](docs/14-hackathon-plan.md), and the [demo script](docs/15-demo-script.md).
 
 | | |
 | --- | --- |
-| [01 — System Architecture](docs/01-architecture.md) | What the system is and how it's layered |
+| [DECISIONS](docs/DECISIONS.md) | Every settled decision, with reasoning |
+| [01 — Architecture](docs/01-architecture.md) | System shape and layers |
 | [02 — Disruption Flow](docs/02-disruption-flow.md) | End-to-end worked example |
-| [03 — Agent Design](docs/03-agent-design.md) | Agent contract and response schema |
-| [04 — LLM Strategy (Groq)](docs/04-llm-strategy-groq.md) | Where the model belongs, and where it doesn't |
-| [05 — Memory and Retrieval](docs/05-memory-and-rag.md) | Incident memory and RAG |
-| [06 — AI vs Deterministic](docs/06-ai-vs-deterministic.md) | The central design boundary |
-| [07 — Risks and Mitigations](docs/07-risks-and-mitigations.md) | Twelve failure modes |
-| [08 — Blueprint Backlog](docs/08-blueprint-backlog.md) | Open design work, prioritised |
-| [09 — Requirements](docs/09-requirements.md) | Functional and non-functional requirements |
+| [03 — Agent Design](docs/03-agent-design.md) | Agent contract and roster |
+| [04 — LLM Strategy](docs/04-llm-strategy-groq.md) | Where Groq belongs, and where it doesn't |
+| [05 — Memory](docs/05-memory-and-rag.md) | Incident memory and retrieval |
+| [06 — AI vs Deterministic](docs/06-ai-vs-deterministic.md) | The central boundary |
+| [07 — Risks](docs/07-risks-and-mitigations.md) | Twelve failure modes |
+| [08 — Backlog](docs/08-blueprint-backlog.md) | What's deferred, and why |
+| [09 — Requirements](docs/09-requirements.md) | FR/NFR and scope |
 | [10 — Data Sources](docs/10-data-sources.md) | Free APIs and datasets, evaluated |
-| [11 — Data Model](docs/11-data-model.md) | Postgres schema and ER diagram |
-| [12 — Synthetic Data Plan](docs/12-synthetic-data-plan.md) | What must be generated, and how |
-| **[Open Questions](docs/OPEN-QUESTIONS.md)** | **Decisions still needed — read this first** |
-| [Source Conversation](docs/reference/source-conversation.md) | Original transcript, preserved |
+| [11 — Data Model](docs/11-data-model.md) | Postgres schema and DDL |
+| [12 — Synthetic Data](docs/12-synthetic-data-plan.md) | What must be generated |
+| [13 — DGCA Policy](docs/13-compensation-and-policy.md) | Real compensation rules |
+| [14 — Sprint Plan](docs/14-hackathon-plan.md) | Seven days, four people |
+| [15 — Demo Script](docs/15-demo-script.md) | The 7-minute narrative |
+| [16 — Folder Structure](docs/16-folder-structure.md) | Layout and standards |
+| [Open Questions](docs/OPEN-QUESTIONS.md) | Still unresolved |
 
-## Tech direction
+## Stack
 
 | Concern | Choice |
 | --- | --- |
-| Reasoning / planning LLM | Groq |
-| Prediction | ML model or rule engine — deliberately not an LLM |
-| Agent communication | Events, not direct calls |
-| Agent output | Validated JSON, never free-form text |
-| Planning temperature | 0 – 0.2, for reproducible demos |
-| Budget target | ₹0 – ₹500 |
+| Backend | FastAPI |
+| Frontend | React, TypeScript, Tailwind, shadcn/ui |
+| Database | Postgres |
+| Events | Redis Streams |
+| Reasoning LLM | Groq (`llama-3.3-70b-versatile`) |
+| Prediction | Rules engine — deliberately not an LLM |
+| Retrieval | SQL precedent matching; vectors deferred |
+| Weather | aviationweather.gov METAR/TAF (real, live) |
+| Flight status | Simulated — no usable free feed exists |
+| Deployment | Docker, local |
+| Budget | ₹0 – ₹500 |
+
+Deliberately rejected as overkill: Kubernetes, Kafka, RabbitMQ.
+
+## The five rules
+
+1. The orchestrator is the brain, not the LLM.
+2. Structured output, never prose.
+3. If there is one provably correct answer, write code.
+4. Build a workflow engine, not a chatbot.
+5. The system must survive its own AI failing.
