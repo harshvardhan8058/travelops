@@ -2,10 +2,21 @@
 inclusion: always
 ---
 
-# TravelOps OS — Project Conventions
+# TravelOps AI — Project Conventions
 
-**TravelOps OS — The Autonomous Operating System for Travel Recovery.** Multi-agent travel disruption
-recovery, built for the TechCon 2026 Hackathon (Coforge). Submission ~14 August 2026.
+**Project / use case title: TravelOps AI. Team identity: SkyForge AI (Registration ID 201).**
+
+Multi-agent airline disruption recovery, built for the TechCon 2026 Hackathon (Coforge).
+Industry: Travel Transport Hospitality (TTH) → Airlines Operations. Submission ~14 August 2026.
+
+## Naming — use exactly this
+
+- **SkyForge AI** = the team. Never the product.
+- **TravelOps AI** = the project / use case title. Never rename it.
+- **"TravelOps OS" is retired.** It was an earlier working title and must not appear anywhere.
+- In prose, "an operating layer, not an assistant" is the approved positioning phrase.
+- Team: Harshvardhan Sharma (136764), Karthikeyan D (138062), Harshvardhan Jha (136761),
+  Sabyasachin Biswal (136794). Project: Arcolab. Department: CIMS.
 
 Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
 

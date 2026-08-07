@@ -1,12 +1,18 @@
-# TravelOps OS
+# TravelOps AI
 
-**The Autonomous Operating System for Travel Recovery.**
+**An autonomous operating layer for airline disruption recovery.**
 
-When a storm disrupts an airport, TravelOps OS detects it, predicts the impact, plans a recovery,
+When a storm disrupts an airport, TravelOps AI detects it, predicts the impact, plans a recovery,
 executes the deterministic parts autonomously, and records why every decision was made — with a hard
 boundary between what the AI decides and what code decides.
 
-Built for the **TechCon 2026 Hackathon (Coforge)** — theme: *Engineering the Autonomous Enterprise*.
+| | |
+| --- | --- |
+| **Team** | SkyForge AI (Registration ID 201) |
+| **Project / Use Case** | TravelOps AI |
+| **Industry** | Travel Transport Hospitality (TTH) → Airlines Operations |
+| **Event** | TechCon 2026 Hackathon (Coforge) |
+| **Theme** | Engineering the Autonomous Enterprise |
 
 > **Status: design documentation only.** No application code yet. The design is complete enough to
 > build from — see the [sprint plan](docs/14-hackathon-plan.md).
@@ -64,6 +70,7 @@ the [sprint plan](docs/14-hackathon-plan.md), and the [demo script](docs/15-demo
 | [14 — Sprint Plan](docs/14-hackathon-plan.md) | Seven days, four people |
 | [15 — Demo Script](docs/15-demo-script.md) | The 7-minute narrative |
 | [16 — Folder Structure](docs/16-folder-structure.md) | Layout and standards |
+| [17 — Presentation Prompt](docs/17-presentation-prompt.md) | Gamma prompt for the 3-slide submission |
 | [Open Questions](docs/OPEN-QUESTIONS.md) | Still unresolved |
 
 ## Stack

@@ -1,9 +1,13 @@
-# TravelOps OS — Design Documentation
+# TravelOps AI — Design Documentation
 
-**The Autonomous Operating System for Travel Recovery.**
+**An autonomous operating layer for airline disruption recovery.**
+Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 
 Design documentation for a multi-agent system that detects travel disruptions, plans recovery, executes
 it, and explains every decision.
+
+> **Naming:** *SkyForge AI* is the team. *TravelOps AI* is the project. See
+> [`DECISIONS.md`](DECISIONS.md) for the canonical registration details.
 
 **No application code exists yet.** The design phase is complete enough to start building — see
 [`14-hackathon-plan.md`](14-hackathon-plan.md).
@@ -46,6 +50,7 @@ it, and explains every decision.
 | [14 — Sprint Plan](14-hackathon-plan.md) | Seven days, four people, daily gates |
 | [15 — Demo Script](15-demo-script.md) | 7-minute script, timings, Q&A prep |
 | [16 — Folder Structure](16-folder-structure.md) | Layout, coding standards, `.env` |
+| [17 — Presentation Prompt](17-presentation-prompt.md) | Canonical Gamma prompt for the 3-slide submission |
 | [08 — Backlog](08-blueprint-backlog.md) | What remains undesigned, and what was deliberately deferred |
 
 ## Reference
