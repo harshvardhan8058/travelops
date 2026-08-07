@@ -11,11 +11,37 @@ alongside the choice.
 
 ## The hackathon
 
+### Official registration (canonical — use these exact strings everywhere)
+
+| Field | Value |
+| --- | --- |
+| **Registration ID** | 201 |
+| **Team Name** | SkyForge AI |
+| **Industry** | Travel Transport Hospitality (TTH) |
+| **Sub-Industry** | Airlines Operations |
+| **Project / Use Case Title** | TravelOps AI |
+
+**Naming rule:** *SkyForge AI* is the **team identity**. *TravelOps AI* is the **project / use case
+title**. Write "TravelOps AI, by Team SkyForge AI" — never merge the two into one product name, and never
+use "TravelOps OS" (an earlier working title, now retired).
+
+### Team members
+
+| Name | ID |
+| --- | --- |
+| Harshvardhan Sharma | 136764 |
+| Karthikeyan D | 138062 |
+| Harshvardhan Jha | 136761 |
+| Sabyasachin Biswal | 136794 |
+
+Project: Arcolab · Department: CIMS
+
+### Event
+
 | | |
 | --- | --- |
 | **Event** | TechCon 2026 Hackathon (Coforge) |
 | **Theme** | Engineering the Autonomous Enterprise using AI, internal tools, and open-source technologies |
-| **Use case** | TravelOps OS — Autonomous Travel Operations Platform |
 | **Idea submission** | 7 August 2026 |
 | **Final submission** | ~14 August 2026 |
 | **Working time** | Treat as a 7-day engineering sprint |
@@ -61,14 +87,17 @@ Note that "Use of Internal Tools" is an official criterion we cannot currently d
 
 Present the project as:
 
-> **TravelOps OS — The Autonomous Operating System for Travel Recovery**
+> **TravelOps AI** — an autonomous operating layer for airline disruption recovery.
+> Built by **Team SkyForge AI** (Registration ID 201).
 
-Not "TravelOps AI".
+⚠️ **Superseded.** An earlier draft proposed renaming the product to "TravelOps OS". The registration
+sheet fixes the official title as **TravelOps AI**, so that rename is retired. Registration naming wins
+over positioning preference.
 
-The reasoning is worth preserving: a chatbot answers questions, a dashboard displays data, but an
-*operating system* coordinates people, services and agents to keep operations running. The framing
-emphasises orchestration over assistance, which is precisely what the "Engineering the Autonomous
-Enterprise" criterion rewards.
+The *narrative* framing survives and is still worth using in the pitch: a chatbot answers questions, a
+dashboard displays data, but an **operating layer** coordinates people, services and agents to keep
+operations running. Describe it that way in prose — "an operating layer, not an assistant" — without
+altering the registered title.
 
 The repository remains `travelops` — renaming it buys nothing.
 

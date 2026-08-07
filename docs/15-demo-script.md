@@ -28,7 +28,7 @@ Do **not** open a terminal during the demo unless the point is deliberate. Termi
 > inconsistent between controllers, and afterwards nobody can explain why any particular decision was
 > made.
 >
-> TravelOps OS is not a chatbot that answers questions about this. It's an operating system that does
+> TravelOps AI is not a chatbot that answers questions about this. It's an operating layer that does
 > the work and shows you why."
 
 Do not say "we used AI to..." — say what the system *does*.
@@ -132,7 +132,7 @@ Show the executive report.
 > connections protected — and it's stored with its outcome. The next storm at Bengaluru retrieves this
 > incident as precedent.
 >
-> TravelOps OS. It detects, reasons, decides, executes, and learns. That's the autonomous enterprise,
+> TravelOps AI. It detects, reasons, decides, executes, and learns. That's the autonomous enterprise,
 > in one operational domain."
 
 ---
