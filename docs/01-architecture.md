@@ -83,8 +83,8 @@ goal and tools, rather than an architectural commitment to autonomous chat.
 | Layer | Responsibility | LLM involved? |
 | --- | --- | --- |
 | Ingest | Pull raw signals: weather, flight status, schedules | No |
-| Prediction | Turn signals into a risk estimate (delay probability) | No — ML model or rule engine |
-| Event bus | Emit and route typed events between stages | No |
+| Prediction | Turn signals into a risk estimate (delay probability) | No — rules engine |
+| Event bus | Emit and route typed events between stages — **Redis Streams** | No |
 | Orchestrator | Own workflow state, sequencing, recursion limits, timeouts | No |
 | Planning | Produce a structured recovery plan | Yes |
 | Execution | Carry out individual tasks against real systems | No |

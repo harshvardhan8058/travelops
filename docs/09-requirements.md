@@ -18,18 +18,18 @@ deterministic parts automatically, and records why every decision was made.
 
 ## Primary actor
 
-⚠️ **Assumption: the user is an airline operations controller** working an operations control centre
-dashboard — not a passenger.
+✅ **Confirmed: operations-first.** The primary user is an airline **Operations Controller** working an
+operations control centre dashboard. A passenger portal is a secondary interface, built only if time
+allows.
 
-This assumption drives a lot. An ops-facing tool needs approval gates, cost visibility, and audit
-trails. A passenger-facing tool needs a completely different UI and different data. If the intent is
-passenger-facing, most of the UI requirements below are wrong.
-
-| Actor | Role |
-| --- | --- |
-| Operations controller | Reviews and approves recovery plans; the human in the loop |
-| Passenger | Receives notifications; does not use the system directly |
-| System (autonomous) | Detects, predicts, plans, executes |
+| Actor | Role | Priority |
+| --- | --- | --- |
+| Operations Controller | Reviews and approves recovery plans; the human in the loop | **Primary** |
+| Airline Operations Manager | Oversight across incidents | Secondary |
+| Executive | Reads generated incident and cost reports | Secondary |
+| Customer Support | Handles passenger queries | Secondary |
+| Passenger | Receives notifications; portal is optional | Secondary |
+| System (autonomous) | Detects, predicts, plans, executes | — |
 
 ## Scope
 
@@ -45,14 +45,23 @@ passenger-facing, most of the UI requirements below are wrong.
 **Out of scope**
 
 - Real bookings or payments of any kind
-- Crew rostering and legality checks (a genuinely hard regulated domain)
+- **Crew duty-time legality validation** — a hard regulated domain. Crew *reassignment coordination and
+  display* is in scope; checking legality is not
 - Multi-airline interlining
 - Live flight status ingestion — simulated, per [`10-data-sources.md`](10-data-sources.md)
 - Mobile apps
 - Baggage tracing
 
-⚠️ **Assumption: one disrupted flight at a time.** Cascading multi-flight disruption is the realistic
-case and a much better story, but it multiplies state-management complexity. Flagged for decision.
+✅ **Resolved — cascading disruption is required.** A single weather event must propagate across many
+flights:
+
+```
+Storm → 8 flights → 600 passengers → 22 connections → 11 hotels → 9 crew changes → transport → report
+```
+
+This replaces the earlier single-flight assumption. Consequences: an incident-group concept is needed,
+crew and ground transport become first-class entities, and hotel capacity contention becomes real
+rather than theoretical. See [`DECISIONS.md`](DECISIONS.md).
 
 ## Functional requirements
 

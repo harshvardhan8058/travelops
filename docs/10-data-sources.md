@@ -20,10 +20,11 @@ demo on a ₹0–₹500 budget without a credit card?**
 | Live flight status | **Simulate it** | No free tier is usable — see below |
 | Hotel inventory | **Synthetic** | No free source covers Indian airports — see below |
 | Passenger records | **Synthetic** | Real PII is neither available nor desirable |
-| Email notifications | **Brevo** | 300/day, free permanently, no card |
+| Email (development) | **Mailtrap** | Captures mail without delivering — safe with 600 synthetic passengers |
+| Email (demo only) | **Real Gmail** | 2–3 inboxes you control |
 | SMS notifications | **Simulate + log** | Twilio trial expires in 30 days |
 | Reasoning LLM | **Groq** | Free tier genuinely usable; limits below |
-| Vector storage | **pgvector in Postgres** | One database instead of two |
+| Vector storage | **None for MVP** | SQL retrieval instead — see D2 in [`DECISIONS.md`](DECISIONS.md) |
 
 ---
 
@@ -217,13 +218,18 @@ Practical implications:
 
 ## Storage
 
-Postgres with `pgvector` is the recommended default: incident records, reference data, and embeddings
-live in one system, which means one connection string, one backup, and transactional consistency
-between an incident and its embedding. Multiple 2026 comparisons converge on
-[pgvector being the pragmatic default when you already run Postgres](https://dupple.com/learn/best-vector-databases).
+**Decided: plain Postgres, no vector store for the MVP.** Precedent retrieval uses structured SQL
+filtering on airport, trigger type, severity, weather and flight type.
 
-At demo scale — a few thousand incident records — the performance argument for a dedicated vector
-database does not apply. Chroma running locally is an acceptable alternative if you want zero setup.
+At ~150 historical incidents, a `WHERE` clause retrieves better precedent than cosine similarity, and
+it is explainable in a way embeddings are not — which matters when a judge asks why a particular past
+incident was surfaced. Retrieval-augmented generation does not require embeddings; injecting
+SQL-retrieved precedent into the planner prompt is still RAG.
+
+Chroma plus BGE Small remain in the stack as a **stretch goal**, not a dependency. Should they be added
+later, the earlier recommendation of `pgvector` is still reasonable if you prefer one system over two —
+but [2026 comparisons](https://dupple.com/learn/best-vector-databases) note either is defensible at
+this scale, and the decision has been made to defer both.
 
 ---
 

@@ -42,17 +42,35 @@ Sized for the worked scenario — 180 passengers on the disrupted flight, 47 at-
 nearby hotels — with enough surrounding traffic that the dashboard looks like an operation rather than
 a single row.
 
+Sized for the **cascade** scenario confirmed in [`DECISIONS.md`](DECISIONS.md) — 8 flights, 600
+passengers, 22 at-risk connections, 11 hotels — across the ten airports in D1.
+
 | Entity | Count | Notes |
 | --- | --- | --- |
-| Airports | ~40 | Indian airports + a few international destinations |
-| Runways | ~90 | Real, from OurAirports |
-| Flights | ~600 | One operating day across the airport set |
-| Passengers | ~15,000 | Enough to populate ~600 flights realistically |
-| Bookings | ~13,000 | Some passengers hold multi-segment itineraries |
-| Booking segments | ~18,000 | ~30% connecting, which produces the at-risk connections |
-| Hotels | ~120 | 3–6 per major airport |
+| Airports | **10** | BLR DEL BOM HYD MAA CCU COK GOI AMD PNQ |
+| Runways | ~25 | Real, from OurAirports — needed for crosswind |
+| Flights | ~400 | One operating day across the ten airports |
+| Passengers | ~12,000 | Enough to populate the network realistically |
+| Bookings | ~10,000 | Some hold multi-segment itineraries |
+| Booking segments | ~14,000 | ~30% connecting |
+| Crew members | ~200 | Rosters across the network |
+| Hotels | ~45 | 3–6 per airport; **11 within range of BLR** |
+| Ground transport vendors | ~15 | Coach and taxi capacity per airport |
 | Historical incidents | ~150 | With plans, actions and outcomes, to seed retrieval |
 | Weather observations | ~30 days | Backfilled real history from Open-Meteo |
+
+### Cascade targets
+
+The demo scenario must produce these numbers. Generate backwards from them rather than hoping
+randomness cooperates:
+
+| Target | Value |
+| --- | --- |
+| Flights disrupted by the BLR storm | 8 |
+| Passengers affected | ~600 |
+| Connections at risk | 22 |
+| Hotels in range | 11 |
+| Crew rotations affected | 9 |
 
 ~150 historical incidents is the figure to get right. Fewer and retrieval returns nothing relevant;
 many more and you are generating fiction at a scale that starts to look like the product.
