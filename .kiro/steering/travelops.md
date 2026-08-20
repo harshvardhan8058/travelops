@@ -54,7 +54,14 @@ Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
 9. **Build in phases that each end at a demonstrable system.** Deterministic first, LLM in Phase 3. See
    `docs/20-phased-delivery.md` and cut from the bottom of its cut list.
 
-## UI rules — read `docs/21-design-system.md` before writing any component
+## Parallel work
+
+Six Kiro accounts run against this repo. **Stay inside your stream's owned paths** — see
+`docs/28-parallel-workstreams.md`. Never edit `migrations/`, `models/`, the generated API client,
+`policy_packs/`, compose/Makefile, or this steering file unless your stream owns it. Request the change
+from the owning stream instead.
+
+## UI rules — read `docs/21-design-system.md` and `docs/27-ui-specification.md` before writing any component
 
 - **No purple, violet or indigo. Anywhere.** No gradients, glows, aurora blobs, glassmorphism on cards,
   gradient text, or ✨/🤖 emoji icons. That is the default AI-demo aesthetic and it reads as a template.

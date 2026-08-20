@@ -24,7 +24,11 @@ Still required for `verified` mode: the current primary CAR with revision/effect
 the reported Aug 2024 Part IV revision and Feb 2026 Part II amendment, and SME sign-off in the pack's
 `review.yaml`. This does **not** block Stage 2 engineering.
 
-## 2. Coforge internal tools — blocks only the internal-tool scoring claim
+## 2. Coforge internal tools — deferred by the team
+
+The team is verifying eligibility separately. Until an official tool name **and** actual access are
+confirmed, the internal-tools claim is omitted entirely. No placeholder, no logo, no invented accelerator.
+This affects one scoring line, not the build.
 
 Need an official eligible tool name, internal documentation, actual team access and a real use. Ask the
 mentor, Arcolab/CIMS architecture/platform lead, TechCon SharePoint resources, or
@@ -33,18 +37,15 @@ mentor, Arcolab/CIMS architecture/platform lead, TechCon SharePoint resources, o
 Do not invent a Coforge tool, use a placeholder logo, or integrate something only to tick a box. If
 nothing is available, omit the claim and explain the provider boundary.
 
-## 3. Demo environment — blocks reliable live presentation
+## 3. Demo environment — resolved
 
-Need confirmation that the exact presentation device can run Docker Compose, access GitHub and—if live
-mode is planned—reach AWC, Groq and SMTP. The supplied SharePoint page warns that non-compliant devices
-cannot download/sync, so this must be tested rather than assumed.
-
-Offline fixture mode handles network loss. A Docker/runtime restriction still requires the team's IT or
-project DevOps support.
+The team confirmed Docker runs on the demo machine (2026-08-20). Remaining checks are routine and belong to
+rehearsal: projector legibility at 1920×1080, and the backup recording playing with the network disabled.
 
 ## 4. Credentialed enhancements — do not share secrets
 
-- Groq project API key and account-specific rate-limit screenshot/text
+- Groq project API key — **team creating it now.** The key belongs in local `.env` only; never in chat, a
+  screenshot, an issue or a commit. Share only the console rate limits
 - Mailtrap or approved Gmail/SMTP configuration
 - 2–3 controlled demo recipient addresses stored only in local allowlist
 

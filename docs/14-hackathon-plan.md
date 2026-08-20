@@ -57,12 +57,20 @@ not a blocker to starting, but it means the first milestone is a vertical slice�
 
 ### Team split
 
-| Workstream | Owner | Stage 2 output |
-| --- | --- | --- |
-| Backend/orchestration | Harsh | FastAPI, events, workflow, assurance gate, fixtures |
-| Frontend | Member 2 | Design-system tokens, Ops Board, timeline, assurance panel |
-| Data/integrations | Member 3 | Schema, migrations, seeded dataset, AWC/OurAirports providers |
-| Quality/demo | Member 4 | E2E scenario, source ledger, runbook, first backup recording |
+Six Kiro Pro accounts run six streams with exclusive file ownership. Full allocation, sequencing
+constraints, branch model and session prompts: [`28-parallel-workstreams.md`](28-parallel-workstreams.md).
+
+| Stream | Stage 2 output |
+| --- | --- |
+| A · Core | Compose up, health, config fail-closed, incident state machine, event bus |
+| B · Assurance + Policy | Six checks, fail-closed aggregation, pack loader, charter-mode evaluation |
+| C · Data + Providers | Schema, migrations, seeded fixture, weather/flight/notification providers |
+| D · Services | Delay Risk, Connection, Hotel, Transport, Communication services |
+| E · Frontend shell | Tokens, primitives, typed client, Ops Board, Decision Timeline |
+| F · Frontend workspace | Recovery workspace, assurance panel, policy citation |
+
+**Day one is contract freeze, not parallel building.** Schema, event/task contracts, assurance record
+shape, generated OpenAPI and endpoint fixtures land first; then the streams split.
 
 **Gate:** a clean checkout reaches a resolved incident without calling an LLM. If this does not work,
 do not start Phase 3.
