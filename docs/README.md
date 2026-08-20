@@ -16,7 +16,9 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | 4 | [`24-input-acquisition.md`](24-input-acquisition.md) | Exactly what only the team must arrange, where and by when |
 | 5 | [`25-evaluation-readiness.md`](25-evaluation-readiness.md) | Pass/fail evidence before each checkpoint |
 | 6 | [`26-implementation-contracts.md`](26-implementation-contracts.md) | API, state, auth, security and observability baseline |
-| 7 | [`21-design-system.md`](21-design-system.md) | Premium Operations Room UI; no purple/template styling |
+| 7 | [`21-design-system.md`](21-design-system.md) | How the UI looks: tokens, density, motion. No purple |
+| 8 | [`27-ui-specification.md`](27-ui-specification.md) | What the UI does: every screen, feature and interaction |
+| 9 | [`28-parallel-workstreams.md`](28-parallel-workstreams.md) | Six Kiro accounts, exclusive file ownership, no merge chaos |
 
 ## Architecture and safety
 
@@ -52,6 +54,8 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | [17 — Submitted Deck Prompt](17-presentation-prompt.md) | **Frozen historical artifact; do not edit/regenerate** |
 | [20 — Phased Delivery](20-phased-delivery.md) | Five demonstrable phases |
 | [23 — Stack Alignment](23-stack-alignment.md) | Optional Coforge list and deliberate tool choices |
+| [27 — UI Specification](27-ui-specification.md) | Screens, features, states, keyboard model, feature-to-stage map |
+| [28 — Parallel Workstreams](28-parallel-workstreams.md) | Six-account file ownership, contract freeze, branch model |
 | [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) | Unresolved team-access/review inputs only |
 
 ## Non-negotiable rules

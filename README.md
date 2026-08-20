@@ -67,6 +67,8 @@ labelled.
 5. [`docs/25-evaluation-readiness.md`](docs/25-evaluation-readiness.md) — checkpoint pass/fail checklist
 6. [`docs/21-design-system.md`](docs/21-design-system.md) — premium Operations Room UI; no purple
 7. [`docs/26-implementation-contracts.md`](docs/26-implementation-contracts.md) — API, state, security and observability baseline
+8. [`docs/27-ui-specification.md`](docs/27-ui-specification.md) — every screen, feature and interaction
+9. [`docs/28-parallel-workstreams.md`](docs/28-parallel-workstreams.md) — running six Kiro accounts without merge conflicts
 
 ## Core design documents
 
