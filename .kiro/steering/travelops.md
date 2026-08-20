@@ -6,8 +6,13 @@ inclusion: always
 
 **Project / use case title: TravelOps AI. Team identity: SkyForge AI (Registration ID 201).**
 
-Multi-agent airline disruption recovery, built for the TechCon 2026 Hackathon (Coforge).
-Industry: Travel Transport Hospitality (TTH) → Airlines Operations. Submission ~14 August 2026.
+Multi-component airline disruption recovery, built for the TechCon 2026 Hackathon (Coforge).
+Industry: Travel Transport Hospitality (TTH) → Airlines Operations.
+
+Authoritative checkpoints: idea submission 10 Aug (complete, deck frozen); Stage 1 14–16 Aug; Stage 2
+20–24 Aug; Stage 3 1–2 Sep; semi-finals 9–10 Sep; finals 16 Sep. Use
+`docs/14-hackathon-plan.md` and `docs/25-evaluation-readiness.md`; never reintroduce the retired 7-day
+submission plan.
 
 ## Naming — use exactly this
 
@@ -26,13 +31,14 @@ Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
    agents (Planner, Explainer, Report Generator) + 10 deterministic services**. Never say "13 agents" —
    that was corrected in mentor review as agent inflation. A stateless rules-based service is a tool, not
    an agent.
-2. **Structured output, never prose.** Every agent returns validated JSON matching `AgentResponse`
-   (`status`, `action`, `reason`, `evidence_refs`). The orchestrator never parses English.
-   **`confidence` is not in the contract** — see rule 7.
+2. **Structured outputs, distinct payloads.** Planner, Explainer and Report Generator share a typed
+   envelope (`status`, `reason`, `evidence_refs`, `payload_type`) but use distinct payload contracts.
+   Only `PlannerResponse.tasks[]` contains action enums and enters assurance. The orchestrator never
+   parses English. **`confidence` is not in any execution contract**—see rule 7.
 3. **If there is one provably correct answer, write code.** Compensation, filtering, sorting and
    business rules never touch a model.
 4. **Build a workflow engine, not a chatbot.** There is no conversational UI. Flow is
-   `Event → Planner → Workflow → Agents → Execution`.
+   `Signal → Event → Orchestrator → reasoning proposal/fallback → Assurance Gate → deterministic service → audit`.
 5. **The system must survive its own AI failing.** `LLM_MODE=off` must still complete a recovery via the
    deterministic fallback playbook. This is a demo asset, not just resilience.
 6. **No magic numbers.** Thresholds, budgets and limits come from config. Never hardcode ₹6000.
@@ -77,33 +83,44 @@ into a prompt is still RAG.
 **Docling** (or MarkItDown) is adopted for regulatory PDF → structured clause text, feeding the policy
 packs. Optional if time allows: **Ollama** as a local fallback LLM provider behind the existing interface.
 
-Coforge's suggested open-source AI stack list is **free and suggested, not mandatory**. Do not adopt
-LangGraph, CrewAI, AutoGen, a graph database or SQLite to tick boxes — the custom orchestrator and
-Postgres are deliberate. Rationale per tool: `docs/23-stack-alignment.md`. When presenting, say
-**"open-weight Llama 3.3 70B"** — Groq is only the inference host.
+The open-source list supplied to the team is **optional reference material**, not a mandatory checklist.
+Do not adopt LangGraph, CrewAI, AutoGen, a graph database or SQLite to tick boxes—the custom orchestrator
+and Postgres are deliberate. Rationale per tool: `docs/23-stack-alignment.md`. When presenting, say
+**"open-weight Llama 3.3 70B served through Groq"**; the overall system mixes open-source components,
+an open-weight model and hosted APIs.
 
 ## Data rules
 
-- **Real:** airports and runways (OurAirports, public domain), weather (aviationweather.gov METAR/TAF,
-  no API key), schedules (AIKosh).
-- **Simulated:** flight status. No free live feed is usable — AviationStack allows 100 requests/month,
-  OpenSky returns positions not delay status.
-- **Synthetic:** passengers, hotels, crew, transport. No free hotel API covers Indian airports; real PII
-  is never used.
-- Keep `data/loaders/` (real) separate from `data/generators/` (synthetic) so "which data is real?" is
-  always answerable.
-- Fixed generation seed (`20260807`). Commit the dataset dump; never regenerate during a demo.
+- **Real/public when fetched and archived:** airports/runways (OurAirports), weather (AWC/Open-Meteo).
+- **Planned real, not yet validated:** AIKosh schedules. Until raw file/schema/licence are archived and a
+  loader test passes, schedules are synthetic and must be labelled so.
+- **Simulated:** flight status, bookings/actions, bulk channels.
+- **Synthetic:** passengers, hotels, crew, transport and historical incidents. Real PII is prohibited.
+- Every API/UI datum carries provenance: `real | simulated | synthetic | fixture | unavailable` plus
+  source timestamp where applicable.
+- Keep loaders, generators and fixtures separate. Fixed seed `20260807`; commit the demo dataset and do
+  not regenerate during evaluation.
 
-## Regulatory rules — get these right
+## Regulatory rules — fail closed
 
-Compensation follows **DGCA CAR Section 3, Series M, Part IV**. See `docs/13-compensation-and-policy.md`.
+The current DGCA primary CAR and SME review are not yet in the repo. `docs/13-compensation-and-policy.md`
+is provisional research, not executable law.
 
-- **Weather, ATC and security are force majeure: no cash compensation owed.**
-- **Duty of care still applies regardless of cause** — meals after 2 hours, hotel and transfers after 6
-  hours or when crossing nighttime.
-- **Crew rostering failures are NOT force majeure** — regulators settled this. Cash is owed.
-- Always return `regulation_refs` alongside any amount.
-- Never invent a regulation or a rupee figure. Cite or leave blank.
+- Regulation flow: Trip Context → resolver → **approved, source-hashed policy pack** → deterministic
+  engine → Assurance Gate → cited result.
+- Three policy modes. `demo` = fictional fixture, no citation. `charter` = the encoded MoCA Passenger
+  Charter (Feb 2019) pack, real cited figures behind the badge *pending CAR verification*. `verified` =
+  current primary CAR + SME sign-off, **not reachable yet**. Only `verified` may be described as current law.
+- The charter pack lives at `policy_packs/in-moca-charter-2019/2019.02/`. Delay attracts **no cash
+  compensation** in that instrument; cash exists only for cancellation and denied boarding. Never describe
+  a delay payout.
+- The 24-hour no-charge cancellation rule is `superseded_suspected` (reported Feb 2026 amendment moved it
+  to 48 hours). It must never evaluate and never appear in a demo.
+- Never infer force majeure from a generic `trigger_type`; cause assessment requires pack-defined facts
+  and evidence.
+- Missing source, clause, required fact, pack approval or conflict rule produces `needs_human`.
+- RAG may retrieve/cite text; it never selects jurisdiction, calculates or authorises.
+- Exact team acquisition steps: `docs/24-input-acquisition.md`.
 
 ## Scope boundaries
 
@@ -113,13 +130,17 @@ Compensation follows **DGCA CAR Section 3, Series M, Part IV**. See `docs/13-com
 
 ## Groq budget
 
-~100K tokens/day on the free tier — roughly 25–50 planner calls. Cache aggressively and use
-`LLM_MODE=fixture` for development. Prompts live in `backend/app/llm/prompts/` as versioned files, never
-as inline strings.
+Provider limits are account/model-specific and can change. Read them from the team's Groq console;
+never hardcode a third-party quota estimate. Cache repeated scenarios and use `LLM_MODE=fixture` for
+development. Prompts live in `backend/app/llm/prompts/` as versioned files, never inline.
 
 ## Working style
 
 - `main` must always run. Integrate daily, never big-bang at the end.
 - Freeze the API contract early so frontend can build against stubs.
-- Test the deterministic half properly; assert schemas, not LLM content.
-- Feature freeze the day before submission. No exceptions.
+- Test deterministic services, assurance, idempotency and the demo path; assert schemas, not LLM prose.
+- Feature freeze at least one day before each evaluation.
+- Read `docs/24-input-acquisition.md` before asking the user for data/access; do not ask for anything the
+  development side can source or simulate.
+- Read `docs/25-evaluation-readiness.md` before claiming any stage is ready.
+- `docs/17-presentation-prompt.md` is frozen historical material; never edit it to repair submitted claims.

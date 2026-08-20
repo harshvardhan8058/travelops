@@ -1,0 +1,47 @@
+title: Passenger Charter — Know your rights when you fly
+publisher: Ministry of Civil Aviation, Government of India
+published: 2019-02
+pages: 12
+language: en
+
+# Supplied by the team on 2026-08-20 as a PDF attachment.
+provided_by: team
+received_at: 2026-08-20
+extraction_method: attachment_text_extraction
+
+official_url: https://www.civilaviation.gov.in/sites/default/files/2023-01/Passenger%20Charter%20MoCA%20India%20Feb%202019%20(1).pdf
+
+# The binary PDF is not yet committed to this repository, so no hash exists.
+# A pack cannot reach verified status without the archived file and its hash.
+local_path: source.pdf
+content_sha256: PENDING_ARCHIVAL
+archived: false
+
+self_declared_scope: >-
+  The charter states it is for general guidance and information, and directs readers to
+  the Civil Aviation Requirements, Series M, Section 3, on the DGCA portal for detailed
+  and specific rules. It is therefore treated here as official secondary guidance, not as
+  the primary regulation.
+
+known_or_suspected_supersession:
+  - rule: booking.free_cancel_or_amend_within_24h
+    note: >-
+      Reported February 2026 amendment to CAR Section 3, Series M, Part II moved the
+      no-charge cancellation/amendment window from 24 hours to 48 hours after booking.
+    confidence: unconfirmed_secondary_reporting
+    action: excluded from demo claims until primary source confirms
+  - rule: all Part IV entitlement rules
+    note: >-
+      Secondary sources describe a later revision of CAR Section 3, Series M, Part IV
+      (reported as August 2024). Figures below may have changed.
+    confidence: unconfirmed_secondary_reporting
+    action: pack remains official_guidance_dated
+
+redistribution:
+  status: not_yet_confirmed
+  note: >-
+    Confirm whether the PDF may be redistributed inside this repository. Until then,
+    reference it by official URL and keep only extracted rule metadata in Git.
+
+# Content from the source document is paraphrased in rules.yaml rather than reproduced at
+# length. Full clause text must be read from the archived original.

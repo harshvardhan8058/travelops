@@ -66,7 +66,12 @@ the database, it has much less room to invent one.
 {
   "incident_id": "INC-2026-0714-BLR-01",
   "trigger": { "type": "weather", "airport": "BLR", "wind": 45, "visibility": 800 },
-  "prediction": { "delay_probability": 0.87, "model_version": "rules-v1" },
+  "prediction": {
+    "risk_index": 87,
+    "risk_level": "high",
+    "rule_version": "delay-risk-v1",
+    "factors": ["visibility_below_threshold", "crosswind_elevated"]
+  },
   "plan": ["notify_passengers", "check_connections", "reserve_hotels", "reassign_gate"],
   "execution": [
     { "action": "reserve_hotels", "status": "success", "cost_inr": 4200 }

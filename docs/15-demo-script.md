@@ -1,183 +1,181 @@
-# 15. Demo Script
+# 15. Seven-Minute Demo Script
 
-Resolves backlog item #28. Target: **7 minutes**, structured so that cutting from the end still leaves
-a coherent story.
+This script is the semi-final/final target. Stage 2 uses Acts 0–3 only. Never demonstrate a feature that
+has not passed the relevant gate in [`25-evaluation-readiness.md`](25-evaluation-readiness.md).
 
-The narrative goal is to make one point repeatedly: **this is an operating system that acts, not an
-assistant that answers.**
+## Pre-flight checklist
 
-## Before you start
+- Fixed dataset loaded; `make demo-reset` tested.
+- `bengaluru_storm` fixture ready; never wait for actual bad weather.
+- Browser at 1920×1080, projector-readable zoom, no terminal needed.
+- `LLM_MODE` control visible: `LIVE`, `FIXTURE`, `OFF`.
+- Real-email mode sends only to allowlisted team inboxes; bulk records simulated.
+- Policy badge shows the loaded pack's true status: `DEMO FIXTURE`, `CHARTER · FEB 2019 · PENDING CAR
+  VERIFICATION`, or `VERIFIED`. Never relabel it by hand.
+- Charter-mode test cases pass, including the fail-closed and superseded-rule cases.
+- Backup recording is local and tested without network.
 
-| Check | Why |
-| --- | --- |
-| Frozen dataset loaded from the committed dump | No surprises from regenerated data |
-| Real Gmail inbox open in a visible tab | The notification moment needs a real inbox |
-| `bengaluru_storm` fixture ready to inject | Never wait for real weather |
-| Backup video ready to play | Recorded Day 5, re-recorded Day 6 |
-| Groq kill-switch reachable | Act 6 depends on it |
-| Browser zoom raised | Judges are watching a projector, not your laptop |
+## Act 0 — Frame the problem (30 seconds)
 
-Do **not** open a terminal during the demo unless the point is deliberate. Terminals read as "unfinished".
+> “A major disruption is not one delayed flight. It is a coordination problem across passengers,
+> connections, hotels, crew pairings, gates and communications. TravelOps AI is not a chatbot. It is a
+> bounded operating layer that coordinates the recovery and shows the evidence behind every action.”
 
----
+Do not present “manual, phone-driven and unauditable” as research unless an airline SME has validated it.
+Say “fragmented coordination under time pressure” instead.
 
-## Act 0 — Framing (30s)
+## Act 1 — Operations Room and data honesty (45 seconds)
 
-> "When a storm hits Bengaluru, an airline operations controller starts making phone calls. Rebook
-> passengers, find hotel rooms, protect connections, reassign gates, sort out crew. It's manual, it's
-> inconsistent between controllers, and afterwards nobody can explain why any particular decision was
-> made.
+Show the graphite Operations Room UI and provenance legend.
+
+> “This panel uses a public aviation-weather METAR source when available. Airports and runways come from
+> an archived OurAirports snapshot. Flight status, passengers, hotels, transport and crew are
+> deterministic demo data, labelled on every panel. If the network disappears, the same provider
+> contract switches to a committed fixture.”
+
+If an inspected AIKosh file is present, name it and show its source record. Otherwise call schedules
+synthetic—never “real schedules planned from AIKosh.”
+
+## Act 2 — Deterministic risk with evidence (45 seconds)
+
+Inject the fixture. Show one event, not repeated poll events.
+
+> “Bengaluru crossed our configured high-risk threshold. This is a risk index, not an uncalibrated 87%
+> probability. The contributing factors are explicit: visibility, crosswind relative to runway 09L,
+> and precipitation. A deterministic rule version and source timestamp sit beside the result.”
+
+The deliberate non-use of an LLM here demonstrates engineering judgement.
+
+## Act 3 — Cascade and plan (90 seconds)
+
+**Stage 2 branch:** show the cascade data and deterministic fallback task list. Say: *“Reasoning agents
+arrive in Stage 3; today the same typed workflow runs from a deterministic playbook.”* Do not narrate a
+Groq Planner or matched precedent before those gates pass.
+
+**Stage 3 and later:** use the full narration below.
+
+> “One airport event now touches eight traceable flights, about six hundred synthetic passengers,
+> twenty-two connections and nine crew pairings. The ninth pairing is not a typo: crew map many-to-many
+> to flights, and onward/positioning duties propagate the impact.”
+
+Open the cascade view and let the reviewer count the pairing nodes.
+
+> “The Planner receives typed incident context and an explainably matched precedent. It can propose only
+> known actions and entity IDs. This is one orchestrator, three reasoning agents and ten deterministic
+> services—the submitted slide counted tools as agents; we corrected the terminology after review.”
+
+## Act 4 — Assurance and execution (90 seconds)
+
+Open the Assurance Gate panel before actions run.
+
+> “The model does not authorise this. Six code-level checks do: evidence completeness, source freshness,
+> entity validity, policy, conflicts and action risk. This reservation is medium risk and passes. This
+> bulk external action is high risk, so it stops for operator approval even when the model sounds
+> certain.”
+
+Approve one action. Show simulated hotel/connection/resource records, then the controlled inbox.
+
+> “One allowlisted email was really sent; the remaining bulk messages are simulated records. Every row
+> says which.”
+
+### Regulatory branch
+
+**Charter mode — the current default, and the strongest available version:**
+
+> “Compensation is computed by a deterministic rules engine from the Ministry of Civil Aviation Passenger
+> Charter. Cash here is zero, and note *why*: this instrument provides no monetary compensation for delay
+> at all. Cash exists only for cancellation and denied boarding. The beyond-carrier-control exemption
+> applies too, on the evidence — so there are two independent reasons, and the argument holds even if you
+> disagree with the second.
 >
-> TravelOps AI is not a chatbot that answers questions about this. It's an operating layer that does
-> the work and shows you why."
-
-Do not say "we used AI to..." — say what the system *does*.
-
-## Act 1 — Live operations (45s)
-
-Show the dashboard: 10 Indian airports, live flight board, current weather.
-
-> "This is live weather, right now, from the Aviation Weather Center — the same METAR feed airlines
-> use. Wind, visibility, ceiling, for every airport in the network."
-
-**Why this matters:** it is real and verifiable. A judge can check it on their phone. Lead with the
-part that cannot be faked.
-
-## Act 2 — Prediction with evidence (45s)
-
-Inject the storm. A risk score appears.
-
-> "Conditions at Bengaluru just crossed threshold. The system predicts an 87% probability of
-> significant delay — and note what's next to that number: the evidence. Wind at 24 knots, visibility
-> 800 metres, and crosswind relative to runway 09L. This is a rules engine, not a language model. It's
-> fast, it's reproducible, and it can be audited."
-
-**The point being scored:** you deliberately did *not* use AI here. That demonstrates judgement, and it
-pre-empts the "isn't this just a wrapper around an LLM?" question before it is asked.
-
-## Act 3 — The cascade (90s)
-
-The disruption propagates.
-
-> "One weather event, but look at what it actually touches: 8 flights, 600 passengers, 22 connections
-> now at risk, 11 hotels in range, 9 crew rotations affected.
+> Duty of care is separate and still owed: meals, because block time is 2 hours 45 and the delay passed
+> three hours, and hotel, because this is a 21:10 departure inside the night window.
 >
-> This is the part controllers get wrong under pressure — not any single decision, but holding the whole
-> picture at once."
+> Every figure cites its rule and source. And look at the badge — we label this as the February 2019
+> charter, not the current CAR, because we have not verified it against the latest revision. The engine
+> refuses verified mode until we do.”
 
-Then the plan appears.
+Then show the contrast case, which is the part that proves the engine:
 
-> "The planner is Groq. It gets the disruption context and the retrieved precedent — and here's the
-> precedent it found: a storm at Delhi in July, resolved successfully, hotels allocated first. The plan
-> comes back as validated JSON, not prose. Every task is a known action type, schema-checked before
-> anything executes."
+> “Same delay, same airport, but the cause is crew rostering instead of weather, and it is a cancellation.
+> Now cash is owed — the lesser of the ₹7,500 band and basic fare plus fuel charge. And if I remove the
+> evidence that the weather case was unavoidable despite all reasonable measures, the system does not
+> quietly grant the exemption. It stops and asks a human.”
 
-Point at the retrieved precedent on screen. Memory that visibly changes a decision is far more
-convincing than a claim about RAG.
+**Demo-fixture mode**, if the charter pack is not loaded:
 
-## Act 4 — Execution and the compensation moment (90s)
+> “The policy engine is running a clearly labelled fictional fixture. The architecture is complete, but we
+> do not present unsourced figures as law.”
 
-Tasks execute in parallel.
+Never assert that a weather event automatically equals force majeure. Never present charter figures as the
+current CAR position. Never show the 24-hour free-cancellation rule — it is suspected superseded by a
+February 2026 amendment and is excluded from evaluation.
 
-> "Hotels reserved. Connections flagged. Gates reassigned. Passengers notified —"
+## Act 5 — Replay and explanation (45 seconds)
 
-Switch to the real inbox. A genuine email is sitting there.
+> “Every proposal, failed check, approval and side effect is timestamped and replayable. This is not
+> model-generated history: the Explainer reads immutable records and cited evidence.”
 
-> "— that's a real email, sent by the system, thirty seconds ago."
+Open one timeline item to show actor, evidence, assurance config version and result.
 
-Then the compensation line. **This is the strongest 20 seconds of the demo.**
+## Act 6 — Turn the AI off (45 seconds)
 
-> "Now look at compensation: zero rupees cash. That's not a bug.
->
-> Under DGCA CAR Section 3 Series M Part IV, weather is force majeure, so no cash compensation is owed.
-> But the duty of care still applies — so the system reserved hotels and issued meal vouchers, because
-> the delay exceeds six hours.
->
-> If this same delay had been caused by crew rostering, cash *would* be owed, because regulators have
-> held that rostering failures are within an airline's control. The system knows the difference, and
-> cites the regulation either way."
+Switch `LLM_MODE` to `OFF`, reset and rerun.
 
-**Why this wins:** it is real regulatory nuance that cannot be bluffed, and it demonstrates the
-AI/deterministic boundary in one concrete example. It hits Relevance and Feasibility together.
+> “The reasoning provider is now off. The deterministic fallback still detects, checks connections,
+> allocates simulated resources and prepares notifications. The plan is less adaptive, but passenger
+> recovery does not stop. An autonomous system that dies with one inference API is not autonomous.”
 
-## Act 5 — Replay (45s)
+This is the strongest technical proof. Do not cut it.
 
-Scrub the timeline.
+## Act 7 — Close (30 seconds)
 
-> "Every decision is timestamped and replayable. 09:01 weather alert, 09:03 delay predicted, 09:04
-> recovery generated, 09:06 passengers notified, 09:08 resolved.
->
-> When an operations manager asks what happened at 09:04, this is the answer. Not a log file — the
-> actual decision, its inputs, and its reason."
-
-## Act 6 — Kill the AI (45s)
-
-The differentiating moment. Disable Groq. Re-run.
-
-> "Last thing. I'm going to turn off the LLM entirely.
->
-> Same storm. Recovery still completes — deterministic fallback playbook: notify, check connections,
-> reserve hotels. Degraded, but passengers are still looked after.
->
-> Most AI demos die when the model does. Autonomy that depends on a single API being up isn't autonomy."
-
-**This is the most important 45 seconds in the demo.** It converts "they built an LLM wrapper" into
-"they engineered a system." Protect it in rehearsal; it is the last thing to cut.
-
-## Act 7 — Close (30s)
-
-Show the executive report.
-
-> "The incident closes with a generated executive summary — cost, passengers reaccommodated,
-> connections protected — and it's stored with its outcome. The next storm at Bengaluru retrieves this
-> incident as precedent.
->
-> TravelOps AI. It detects, reasons, decides, executes, and learns. That's the autonomous enterprise,
-> in one operational domain."
-
----
+> “TravelOps AI separates judgment from control: models propose and explain; typed workflows, reviewed
+> policy and deterministic assurance decide what may execute. It is an operating layer, not an
+> assistant—and every claim you saw is traceable to code, evidence or a labelled fixture.”
 
 ## Timing
 
 | Act | Time | Cumulative |
-| --- | --- | --- |
-| 0 Framing | 0:30 | 0:30 |
-| 1 Live ops | 0:45 | 1:15 |
-| 2 Prediction | 0:45 | 2:00 |
-| 3 Cascade | 1:30 | 3:30 |
-| 4 Execution + compensation | 1:30 | 5:00 |
+| --- | ---: | ---: |
+| 0 Frame | 0:30 | 0:30 |
+| 1 Operations + provenance | 0:45 | 1:15 |
+| 2 Risk | 0:45 | 2:00 |
+| 3 Cascade + plan | 1:30 | 3:30 |
+| 4 Assurance + execution | 1:30 | 5:00 |
 | 5 Replay | 0:45 | 5:45 |
-| 6 Kill the AI | 0:45 | 6:30 |
+| 6 AI off | 0:45 | 6:30 |
 | 7 Close | 0:30 | 7:00 |
 
-### If you are over time
+If over time, shorten Acts 1 and 5. Never cut provenance, assurance or Act 6.
 
-Cut in this order: Act 5 (replay) → Act 1 (shorten) → Act 3 (shorten the cascade narration).
-
-**Never cut Act 4's compensation moment or Act 6.** Those two are where the score is.
-
----
-
-## Anticipated questions
+## Q&A
 
 | Question | Answer |
 | --- | --- |
-| "Is this just a ChatGPT wrapper?" | The LLM does planning and explanation only. Prediction is a rules engine, compensation is a regulatory rules table, hotel search is SQL. Act 6 proves the system runs without it. |
-| "Is the data real?" | Weather is live from the Aviation Weather Center. Airports and runways are OurAirports public-domain data. Schedules come from AIKosh. Passengers and hotels are synthetic — no free source provides hotel inventory for Indian airports, and passenger data is deliberately synthetic. |
-| "Why not use a real flight API?" | No free tier is usable — AviationStack allows 100 requests a month, OpenSky gives positions rather than delay status. It is also better for a demo: reproducible and controllable. The data access is behind an interface, so a paid API drops in without touching the agents. |
-| "How do you stop hallucination?" | The planner only emits action types from a known enum against entities retrieved from the database. Output is schema-validated and policy-checked before execution. It cannot invent a hotel. |
-| "What if agents loop forever?" | Hard caps on recursion depth, iterations and wall-clock time, enforced by the orchestrator. |
-| "How is this autonomous rather than automated?" | It decides *what* to do, not just how. The plan is generated per incident from context and precedent, and it escalates to a human when confidence is low. |
-| "Would an airline actually use this?" | Not as-is — real deployment needs crew legality, GDS integration and certification. What it demonstrates is the orchestration pattern, with real regulatory rules and a real weather feed. |
-| "What's the business value?" | Faster recovery, consistent decisions between controllers, and a complete audit trail. The audit trail alone matters given DGCA enforcement action against airlines for withholding compensation. |
-| "Why no chatbot?" | A chatbot answers questions. Operations needs something that acts. Adding a chat box would have made it demo better and work worse. |
+| Is this just an LLM wrapper? | No. Three reasoning agents propose/explain. Ten deterministic services execute behind one orchestrator, and every action is gated in code. It runs with the LLM off. |
+| Why did the slide say 13 agents? | The slide counted tools as agents. Mentor review was right; the precise architecture is 1 orchestrator + 3 reasoning agents + 10 deterministic services. The submitted slide is frozen, but the build and docs use the corrected taxonomy. |
+| Why 9 rotations for 8 flights? | Crew operate multi-leg pairings; cockpit/cabin and positioning duties create many-to-many links. The UI renders the exact nine records and edges. |
+| Can we trust the confidence score? | We do not use one. Execution depends on six verifiable checks. Model self-report, if emitted, is audit metadata only. |
+| How does DGCA scale globally? | Trip context selects reviewed versioned packs; a generic deterministic engine evaluates them; retrieval cites clauses. New concepts may require reviewed DSL extensions, but rules already expressible in the DSL are data changes. |
+| Is the data real? | The UI answers per panel: real public weather and airport snapshots when available; inspected schedules only if archived; synthetic passengers/hotels/crew; simulated flight state and bulk actions. |
+| Are regulatory amounts legally verified? | The figures come from the Ministry of Civil Aviation Passenger Charter, February 2019 — an official publication, so they are real and cited. They are not confirmed against the current CAR revision, so the pack is `official_guidance_dated` and the UI says so. Verified mode is blocked until we archive the primary CAR and get SME sign-off. |
+| Why is there no compensation for a weather delay? | Two independent reasons. First, this instrument provides no cash compensation for delay at all — only care obligations, and a refund-or-rebook choice beyond six hours domestically. Second, the beyond-carrier-control exemption applies on the evidence. Duty of care survives either way. |
+| What if the airline just claims "weather"? | Then it fails. The exemption requires evidence that the cause was external *and* unavoidable despite all reasonable measures. Missing that evidence produces `needs_human`, not an automatic exemption. We have a test case for exactly this. |
+| Why no real flight/hotel API? | No suitable feed has been validated under our budget, coverage and access constraints. Provider interfaces make later replacement local; deterministic simulators make evaluation reliable. |
+| What stops hallucinations? | Action enums, entity validation, policy checks, conflict checks, evidence references and high-risk human approval. Unknowns fail closed. |
+| How is this autonomous? | It constructs a context-specific plan and coordinates permitted actions, but autonomy is bounded by explicit deterministic controls and human approval for risk. |
+| Would an airline deploy this now? | No. Production needs airline-system integrations, IAM, certified crew-legality logic, legal/compliance approval, SLOs and operational change management. This prototype proves the orchestration pattern. |
 
 ## Honesty rules
 
-State plainly that passengers and hotels are synthetic, and that bookings are simulated. Being asked
-and having a clean answer is far better than being caught. The synthetic data is a *forced* constraint
-with a documented reason — that is a defensible position, and it maps to a real finding rather than a
-shortcut.
-
-Do not claim ML where there is a rules engine. "Rules engine, deliberately" is a stronger answer than a
-vague gesture at a model.
+- Do not call fixture or simulator output live.
+- Do not call a risk index a probability without calibration.
+- Do not call a draft or dated policy pack current law. The charter figures are real and official; whether
+  they are *current* is unverified, and the badge must say so.
+- Do not describe a cash payout for a delay. That entitlement does not exist in the charter.
+- Do not claim measured business savings until prototype runs produce the measurement—and label those as
+  prototype results, not airline outcomes.
+- Do not say the AWC source is “the same feed airlines use” without evidence; say “public aviation-
+  weather METAR source.”
+- Never expose personal email addresses, API keys or real passenger data on screen.

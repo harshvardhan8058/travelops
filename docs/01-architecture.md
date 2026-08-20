@@ -1,93 +1,131 @@
 # 1. System Architecture
 
-## The misconception to avoid
+## Product boundary
 
-The default thing people build is not an autonomous system:
-
-```
-User  →  LLM  →  Answer
-```
-
-That is a chatbot. It has no goals, no tools, no memory of outcomes, and nothing happens in the
-world as a result of it running.
-
-## What TravelOps AI is instead
-
-```
-                 TravelOps Orchestrator
-                          │
-        ┌─────────────────┼──────────────────┐
-        │                 │                  │
-   Prediction         Planning         Communication
-     Agent             Agent               Agent
-        │                 │                  │
-        ├──────────── Execution Layer ───────┤
-        │        │            │              │
-   Flight API  Weather     Hotel DB     Notification
-        │        │            │              │
-        └──────────────── Memory ────────────┘
-```
-
-Same thing as a rendered diagram:
+TravelOps AI is not `User → LLM → answer`. It is a typed workflow engine with a deterministic control
+plane. A model may propose and explain; it cannot authorise or execute.
 
 ```mermaid
 flowchart TD
-    ORCH[TravelOps Orchestrator]
+    SIG[Weather provider + flight simulator + demo fixture] --> BUS[Redis Streams]
+    BUS --> ORCH[TravelOps Orchestrator]
 
-    ORCH --> PRED[Prediction Agent]
-    ORCH --> PLAN[Planning Agent]
-    ORCH --> COMM[Communication Agent]
+    ORCH --> PLAN[Planner Agent]
+    ORCH --> EXPL[Explainer Agent]
+    ORCH --> REPORT[Report Generator Agent]
 
-    PRED --> EXEC[Execution Layer]
-    PLAN --> EXEC
-    COMM --> EXEC
+    ORCH --> SVC[10 deterministic services]
+    SVC --> ASSURE[Decision Assurance Gate]
+    PLAN --> ASSURE
+    ASSURE -->|execute / execute_flagged| EXEC[Provider interfaces]
+    ASSURE -->|needs_human| HUMAN[Operations Controller]
+    HUMAN -->|approved| EXEC
 
-    EXEC --> FLIGHT[Flight API]
-    EXEC --> WX[Weather API]
-    EXEC --> HOTEL[Hotel DB]
-    EXEC --> NOTIF[Notification Service]
+    EXEC --> DB[(PostgreSQL)]
+    ORCH --> DB
+    ASSURE --> DB
+    DB --> EXPL
+    DB --> REPORT
 
-    FLIGHT --> MEM[(Memory)]
-    WX --> MEM
-    HOTEL --> MEM
-    NOTIF --> MEM
-
-    MEM -.retrieval.-> PLAN
+    EXEC --> WX[Aviation weather / fixture]
+    EXEC --> FLT[Flight-status simulator]
+    EXEC --> HOTEL[Hotel inventory simulator]
+    EXEC --> NOTIFY[SMTP / simulated bulk channels]
 ```
 
-## The two load-bearing ideas
+## Component taxonomy
 
-**The orchestrator is the brain, not the LLM.** The LLM is one component among many. It is invoked
-at specific points for specific reasoning tasks. It does not sit in the middle of the system.
+### 1 orchestrator
 
-**Most nodes are deterministic.** Weather lookup, hotel search, notification dispatch, compensation
-maths, and policy validation are ordinary code. Only planning, explanation, and message generation
-need a model. See [`06-ai-vs-deterministic.md`](06-ai-vs-deterministic.md) for the full split.
+Owns incident state, task ordering, dependency resolution, retries, idempotency, timeout/iteration caps,
+human approvals and audit correlation. It contains no open-ended language reasoning.
 
-## Preferred framing: a workflow engine, not a swarm
+### 3 reasoning agents
 
-If this were being built as a product rather than a hackathon demo, the right first abstraction is
-**not** "many agents". It is a **workflow engine where each step is a node with clear inputs and
-outputs**.
+| Agent | Purpose | Prohibited |
+| --- | --- | --- |
+| Planner | Proposes ordered recovery tasks from typed context and precedent | Direct execution; unknown action types |
+| Explainer | Converts structured evidence/decisions into operator-readable explanation | Changing a decision or inventing a citation |
+| Report Generator | Produces the incident summary from immutable records | Creating metrics not present in records |
 
-- Some nodes use an LLM — Planner, Explainer, Report Generator.
-- Most nodes are deterministic services — weather lookup, hotel search, notification dispatch,
-  policy validation.
+### 10 deterministic services
 
-This scales better than a collection of agents chatting with each other, and it is significantly
-easier to debug, test, and demonstrate. "Agent" then becomes a naming convention for a node with a
-goal and tools, rather than an architectural commitment to autonomous chat.
+Delay Risk, Flight Recovery, Hotel, Transport, Communication, Compensation, Crew Impact, Connection,
+Gate/Resource, Analytics/Learning. They are typed code and provider calls, not agents.
+
+## Execution boundary
+
+```text
+Model proposal
+  → schema + action-enum validation
+  → entity resolution
+  → Decision Assurance Gate
+  → execute / execute_flagged / needs_human
+  → immutable action + evidence record
+```
+
+The gate checks evidence completeness, source freshness, entity validity, policy compliance, conflicts
+and action risk. LLM self-reported confidence is never used for control flow.
 
 ## Layers
 
-| Layer | Responsibility | LLM involved? |
+| Layer | Responsibility | Model? |
 | --- | --- | --- |
-| Ingest | Pull raw signals: weather, flight status, schedules | No |
-| Prediction | Turn signals into a risk estimate (delay probability) | No — rules engine |
-| Event bus | Emit and route typed events between stages — **Redis Streams** | No |
-| Orchestrator | Own workflow state, sequencing, recursion limits, timeouts | No |
-| Planning | Produce a structured recovery plan | Yes |
-| Execution | Carry out individual tasks against real systems | No |
-| Communication | Draft and dispatch passenger messaging | Optional (wording only) |
-| Memory | Store incidents, plans, costs, outcomes; serve retrieval | No |
-| Explainability | Justify a chosen plan to a human | Yes |
+| Providers | Real/simulated weather, schedules, flight status, notifications | No |
+| Ingest/events | Normalize signals and emit typed events | No |
+| Delay Risk service | Deterministic risk index/level and contributing factors | No |
+| Orchestrator | Workflow state and safety limits | No |
+| Reasoning agents | Plan, explain, report through typed contracts | Yes |
+| Assurance | Deterministic action authorisation | No |
+| Services | Search, calculate, validate, write and dispatch | No |
+| Policy | Resolve reviewed packs and evaluate rules | No |
+| Memory | Store incidents/outcomes and retrieve precedent with SQL | No |
+| UI | Operations control surface, approvals, replay, provenance | No |
+
+## Provider strategy
+
+Every external dependency implements the same provider protocol in `live` and `fixture`/`simulated`
+forms. No vendor API sits on the only path to a checkpoint demonstration.
+
+| Capability | Demo provider | Production adapter later |
+| --- | --- | --- |
+| Weather | AWC live + committed fixture | Airline-approved weather feed |
+| Flight status | Deterministic simulator | Airline operations/flight-status feed |
+| Reaccommodation | Simulated inventory write | PSS/GDS/NDC integration |
+| Hotels/transport | Synthetic inventory + simulated reservation | Contracted accommodation/ground providers |
+| Notifications | Allowlisted SMTP + simulated bulk records | Airline communications platform |
+| LLM | Groq live + recorded fixture + off | Approved enterprise inference gateway |
+
+## Regulatory boundary
+
+```text
+Trip Context → Jurisdiction Resolver → approved versioned Policy Pack
+             → deterministic Rule Engine → Assurance Gate → cited result
+```
+
+Retrieval displays the source clause and grounds explanations. It never selects the law or calculates an
+amount. Pack status controls what may be claimed: `demo` is a fictional fixture, `charter` produces real
+cited figures behind a dated-source badge, and `verified` requires the current primary regulation plus SME
+sign-off. See [`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md).
+
+## Deployment baseline
+
+Local Docker Compose:
+
+- React static/dev server
+- FastAPI/Uvicorn
+- PostgreSQL
+- Redis
+
+No Kubernetes, Kafka, RabbitMQ or graph database. Those would add failure modes without increasing the
+prototype's proof value.
+
+## Non-functional architecture decisions
+
+- UTC storage; explicit local timezone in display.
+- Idempotency key on every mutation.
+- Correlation and incident IDs on every event/log.
+- Immutable assurance and policy evaluation records with config/pack hashes.
+- Provider provenance in every data response.
+- Fixed-seed fixture and one-command reset.
+- `LLM_MODE=off` remains a supported operating mode, not a demo hack.

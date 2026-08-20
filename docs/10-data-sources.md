@@ -3,28 +3,30 @@
 This resolves backlog item #12. Every option below was checked against one question: **can it run a
 demo on a ₹0–₹500 budget without a credit card?**
 
-> Free tiers change often. Figures were verified in August 2026 — re-check before relying on any of
-> them. Where a limit came from a third-party summary rather than the vendor, that is noted.
+> **Status:** discovery research, not a validated integration ledger. Provider plans, quotas, licences and
+> schemas change. Before each evaluation, record `checked_at`, official URL, observed schema, licence,
+> authentication and a successful fixture/live contract test in the source ledger. AIKosh and account-
+> specific Groq limits remain unvalidated.
 >
-> *Content from external sources was rephrased for compliance with licensing restrictions.*
+> *External source content is summarized and rephrased for licensing compliance.*
 
 ## Verdict summary
 
 | Need | Use this | Why |
 | --- | --- | --- |
-| Airport weather (ops-grade) | **aviationweather.gov Data API** | Free, no key, METAR/TAF, gives exactly the fields the Prediction Agent needs |
-| General/forecast weather | **Open-Meteo** | Free, no key, ~10k calls/day, global |
-| Airport & runway reference | **OurAirports CSV** | Public domain, nightly dumps, no key |
-| Flight schedules (India) | **AIKosh flight schedule dataset** | Government open data, India-specific |
-| Delay model training | **BTS On-Time Performance** + **DGCA OTP** | BTS for volume and labelled causes; DGCA for Indian realism |
-| Live flight status | **Simulate it** | No free tier is usable — see below |
-| Hotel inventory | **Synthetic** | No free source covers Indian airports — see below |
-| Passenger records | **Synthetic** | Real PII is neither available nor desirable |
-| Email (development) | **Mailtrap** | Captures mail without delivering — safe with 600 synthetic passengers |
-| Email (demo only) | **Real Gmail** | 2–3 inboxes you control |
-| SMS notifications | **Simulate + log** | Twilio trial expires in 30 days |
-| Reasoning LLM | **Groq** | Free tier genuinely usable; limits below |
-| Vector storage | **None for MVP** | SQL retrieval instead — see D2 in [`DECISIONS.md`](DECISIONS.md) |
+| Airport weather | **Aviation Weather Center Data API** | Public machine-to-machine METAR/TAF; live contract still needs testing |
+| General/forecast weather | **Open-Meteo** | No-key option; attribution and current usage terms must be recorded |
+| Airport & runway reference | **OurAirports CSV** | Public-domain CSV; archive exact snapshot/hash |
+| Flight schedules (India) | **AIKosh candidate dataset** | Page identified; file/schema/licence must be downloaded and inspected before calling it real |
+| Delay-risk research | **BTS On-Time Performance** + **DGCA OTP** | Optional research only; MVP remains deterministic and uncalibrated |
+| Live flight status | **Simulate it** | No suitable feed has been validated under current budget/coverage constraints |
+| Hotel inventory | **Synthetic** | No suitable Indian-airport inventory source has been identified under constraints |
+| Passenger records | **Synthetic** | Real PII is neither needed nor permitted |
+| Email (development) | **Mailtrap or console provider** | Safe capture; requires team account if Mailtrap is used |
+| Email (demo only) | **Allowlisted Gmail/SMTP** | 2–3 controlled inboxes; credentials outside Git |
+| SMS/push/bulk email | **Simulate + log** | No external bulk send during judging |
+| Reasoning LLM | **Groq** | Confirm model and account quotas in the team's console |
+| Vector storage | **None for MVP** | SQL retrieval; Chroma remains optional |
 
 ---
 
@@ -38,7 +40,7 @@ for aviation weather. It requires no API key.
 Crucially, a METAR report carries [wind, visibility, runway visual range, present weather, sky
 condition, temperature, dew point and altimeter setting](https://aviationweather.gov/help/data/).
 
-Compare that against the Prediction Agent's input in [`02-disruption-flow.md`](02-disruption-flow.md):
+Compare that against the Delay Risk service's input in [`02-disruption-flow.md`](02-disruption-flow.md):
 
 ```json
 { "airport": "BLR", "wind": 45, "visibility": 800 }
@@ -95,7 +97,8 @@ Three things worth knowing:
 
 Do not put a live flight API on the critical path of the demo. Instead:
 
-1. Load **real schedules** from AIKosh (below) so flight numbers, routes and timings are authentic.
+1. Prefer an inspected AIKosh schedule file if the team can download it and document its schema/licence.
+   Otherwise use transparently synthetic published-style schedules.
 2. Drive status changes from a **local simulator** you control.
 
 This is not a compromise — it is strictly better for a demo. You can trigger a Bengaluru storm on
@@ -122,16 +125,11 @@ a genuinely credible delay-risk rule needs runway headings, not just wind speed.
 
 ### AIKosh — Indian flight schedules
 
-India's national AI datasets portal publishes a
-[flight schedule dataset](https://aikosh.indiaai.gov.in/home/datasets/details/flight_schedule.html)
-covering domestic and international flights from Indian airports: flight numbers, airlines, origin and
-destination, scheduled times, and days of operation.
-
-This is the best available match for the project's setting, since the scenario is Indian airports and
-₹ costs. There is also an
-[aviation grievance dataset](https://aikosh.indiaai.gov.in/home/datasets/details/aviation_grievance_as_on_date.html),
-which is a useful proxy for what passengers actually complain about — worth mining when designing
-notification content.
+The AIKosh catalogue page describes a flight-schedule dataset with airline, route, scheduled-time and
+days-of-operation fields. **The repository does not yet contain or validate the downloadable file,
+schema or licence.** Treat it as a planned source, not real data, until the team downloads the artifact,
+records its terms and a loader contract test passes. Acquisition steps are in
+[`24-input-acquisition.md`](24-input-acquisition.md).
 
 ### BTS On-Time Performance — delay model training
 
@@ -158,20 +156,15 @@ model claims BLR delays at a rate wildly different from DGCA's published figure,
 
 ---
 
-## Hotels — no free source exists
+## Hotels — synthetic for this prototype
 
-This was the most consequential finding.
+No suitable no-cost hotel-availability source with Indian-airport coverage, acceptable terms and a
+stable demo contract has been validated. Commercial GDS/provider inventory is outside the current
+budget and access.
 
-Amadeus is the obvious candidate, but its test environment carries
-[24 hotels: 10 in London and 14 in New York](https://github.com/amadeus4dev/data-collection).
-
-Zero coverage of Indian airports. There is no free hotel availability API that can answer "3 hotels
-near BLR under ₹6000" — that data sits behind commercial GDS agreements.
-
-**Therefore the hotel dataset must be synthetic**, and the Hotel Agent's "booking" is a simulated
-write against your own database. Note that [`06-ai-vs-deterministic.md`](06-ai-vs-deterministic.md)
-already marks "Book hotel (simulated)" as code — so this was always the intent. It is now confirmed as
-the only option rather than a shortcut.
+**Therefore this prototype uses synthetic hotel inventory** and simulated reservations behind a
+provider interface. This is a time-bounded design decision, not a universal claim that no free source
+can exist. Reassess for a production roadmap.
 
 See [`12-synthetic-data-plan.md`](12-synthetic-data-plan.md).
 
@@ -179,40 +172,27 @@ See [`12-synthetic-data-plan.md`](12-synthetic-data-plan.md).
 
 ## Notifications
 
-| Provider | Free allowance | Verdict |
-| --- | --- | --- |
-| [Brevo](https://www.brevo.com/features/email-api/) | 300 emails/day, no card, no expiry | ✓ Use for email |
-| [Twilio trial](https://www.twilio.com/docs/usage/trials) | ~100 SMS, ~3,000 emails, ~75 voice min; expires ~30 days | 🟡 One live demo only |
-| SendGrid | Free tier discontinued | ✗ |
+The canonical choice remains a provider interface with `console`, `mailtrap` and `gmail` modes. Use
+console/Mailtrap during development. During the demo, send only to 2–3 allowlisted team-controlled
+inboxes and create simulated delivery records for the rest. Provider credentials and recipients stay in
+local secret configuration.
 
-Brevo's free plan is [permanent and needs no credit card](https://help.brevo.com/hc/en-us/articles/208589409-About-Brevo-s-pricing-plans),
-which is the property that matters. Note that SendGrid's free tier is
-[reported as discontinued](https://dreamlit.ai/blog/best-sendgrid-alternatives) — a common stale
-recommendation to avoid.
-
-**Recommendation:** implement a `NotificationChannel` interface with a `ConsoleChannel` that logs, plus
-a real Brevo email channel. Send genuine email to two or three of your own addresses during the demo,
-and log the other 178. Nobody needs 180 real SMS to believe the system works, and the dashboard
-showing 180 dispatched records is more legible to a judge than a phone buzzing.
+Other vendors may be evaluated later, but no notification provider is required on the deterministic
+critical path.
 
 ---
 
 ## Groq — LLM limits
 
-Groq's free tier requires no credit card. Third-party trackers report `llama-3.3-70b-versatile` at
-roughly [30 requests/min, 1,000 requests/day, 12K tokens/min and 100K tokens/day](http://14678177.hamonim.com/),
-with the free tier broadly described as [usable for prototyping at 30 RPM](https://www.eesel.ai/blog/groq-pricing).
-Always confirm against the [official rate limit docs](https://console.groq.com/docs/rate-limits).
-
-**The binding constraint is ~100K tokens/day, not the request count.** A planner call carrying
-retrieved context might run 2–4K tokens. That is roughly 25–50 planning calls per day — plenty for a
-demo, and *very* easy to burn through in an afternoon of debugging.
+Groq exposes rate limits per account/model in its official console and documents supported models.
+Do not encode a third-party quota estimate as a requirement. The team must record the current limits
+shown for its account, configure a lower local budget, and keep fixture/off modes mandatory regardless.
 
 Practical implications:
 
-- Cache aggressively during development. Re-running the same scenario should not re-plan.
-- Keep a recorded-response fixture mode so you can develop the UI without touching Groq.
-- Retrieval is a token-budget necessity, not just an accuracy one.
+- Cache repeated scenario planning during development.
+- Develop the UI and workflow against recorded, schema-valid responses.
+- Treat live inference as a swappable provider and a demo enhancement—not the only recovery path.
 
 ---
 
@@ -238,9 +218,9 @@ this scale, and the decision has been made to defer both.
 The research does not change the design in [`01-architecture.md`](01-architecture.md), but it does fix
 three things that were open:
 
-1. **Weather is real; flights are simulated.** The disruption *trigger* can be genuine live data, which
-   is the part that impresses. The flight state machine is yours.
-2. **Hotels and passengers are entirely synthetic.** Not a shortcut — the only option.
-3. **The token budget is the real cost ceiling.** ~100K tokens/day shapes how much context the planner
-   can be given, which makes the retrieval layer load-bearing from day one rather than a later
-   optimisation.
+1. **Weather may be live; flights are simulated.** A live public weather observation is a credibility
+   anchor when available; the committed fixture guarantees repeatability.
+2. **Hotels and passengers are entirely synthetic for this prototype.** This is the safest viable path
+   under current access, PII and coverage constraints.
+3. **Provider quotas are variable.** Account-specific Groq limits make fixture/offline development and
+   bounded context requirements regardless of today's exact allowance.

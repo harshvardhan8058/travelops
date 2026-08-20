@@ -1,67 +1,70 @@
 # 23. Open-Source Stack Alignment
 
-Mapping our stack onto the Coforge suggested open-source AI stack list.
+The spreadsheet supplied by the team is a **list of free/open options, not a mandatory checklist**. Tool
+selection follows requirements and delivery risk. Do not claim that matching every row is an evaluation
+requirement unless the organisers say so explicitly.
 
-## Status of that list
+## Our composition
 
-The organisers publish it as **suggested and free**, not mandatory. The stated reason is cost: teams fund
-their own environment, so those tools are options that carry no licence spend. The evaluation criteria
-mention "use of internal tools and open-source stack," so alignment matters for scoring — but adopting a
-tool we do not need would be worse engineering, and judges notice bolted-on dependencies.
+TravelOps AI combines:
 
-Our position: **our stack is already open-source almost end to end.** We adopt from the list where it
-earns its place and decline the rest with a reason.
+- open-source application components: React, TypeScript, Vite, Tailwind, shadcn/ui, FastAPI, Pydantic,
+  SQLAlchemy, Alembic, PostgreSQL, Redis, pytest and structlog
+- an open-weight model: Llama 3.3 70B
+- a hosted inference provider: Groq
+- public data providers and deterministic fixtures
 
-## Where we already align
+“Open-source almost end to end” is too broad because Groq and some data/provider services are hosted
+services. The wording above is accurate.
 
-| Layer | Their list | Ours | Note |
-| --- | --- | --- | --- |
-| Open model | Llama 3.3 70B | **`llama-3.3-70b-versatile`** | Exactly the listed model. Groq is only the inference host, free tier |
-| Vector DB | Chroma, FAISS, Qdrant | **Chroma** (optional) | Already our choice, gated behind Phase 5 |
-| Relational | SQLite | **PostgreSQL** | Also open-source; we need concurrent writes and recursive CTEs |
-| Structured LLM output | Pydantic AI | **Pydantic** + typed contracts | Same guarantee, already core to FastAPI |
+## Alignment with the supplied options
 
-Everything else in the build is open-source by default: React, TypeScript, Vite, Tailwind, shadcn/ui,
-FastAPI, SQLAlchemy, Alembic, Redis, Docker, pytest, structlog.
+| Supplied layer/options | TravelOps choice | Decision |
+| --- | --- | --- |
+| Open model: Llama 3.3 70B | `llama-3.3-70b-versatile` via Groq | **Use** |
+| Document extraction: Docling / MarkItDown | Docling candidate for policy-source extraction | **Selected, pending integration** |
+| Vector DB: Chroma / FAISS / Qdrant | SQL retrieval first; Chroma optional later | **Deferred** |
+| Relational DB: SQLite | PostgreSQL | **Different open-source choice** |
+| Orchestration: LangGraph / CrewAI / AutoGen / Pydantic AI etc. | Custom typed Python orchestrator + Pydantic schemas | **Declined frameworks** |
+| Graph DB: Neo4j / Memgraph / KuzuDB | Recursive PostgreSQL queries for pairings | **Declined** |
+| Local serving: Ollama | Possible offline enhancement only if hardware supports the chosen local model | **Optional** |
+| NVIDIA NIM | No need for second hosted provider | **Declined** |
+| Continue.dev / Aider | Individual developer tooling, not delivered product | **Team choice** |
 
-Phrasing that matters when presenting: say **"open-weight Llama 3.3 70B"**, not "Groq". The model is the
-open-source component; Groq is a swappable inference endpoint.
+## Why the custom orchestrator stays
 
-## Adopted from the list
+The mentor's corrected framing is strongest when the system has one explicit control plane:
 
-**Docling** (or MarkItDown) — legal PDF to structured, citable text.
+- typed state transitions
+- deterministic assurance
+- retries/idempotency/limits
+- complete audit record
+- three reasoning agents that cannot directly execute
 
-Adopted because we need it regardless of any list. Turning a published CAR document into clause-level
-chunks with structure intact is what makes the policy pack and its citations reproducible instead of
-hand-typed, and re-runnable when a regulation is amended. See
-[`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md).
+Replacing it with an agent framework solely to match a spreadsheet would add abstraction without
+improving the proof. A framework may be reconsidered only if a concrete requirement appears that the
+current orchestrator cannot meet safely.
 
-## Optional, only with spare time
+## Why no graph database
 
-**Ollama** — local model serving as a fallback provider behind the existing LLM interface.
+Crew-pairing impact is a graph-shaped domain, but the fixed demo scale is small and PostgreSQL recursive
+CTEs can traverse ordered pairing legs. A second database would increase setup, schema and failure
+surface without a demonstrated need. The UI may still render a graph.
 
-Cheap because the interface already exists, and it makes the demo survive a dead venue network. Skip
-without hesitation if Phase 3 is behind.
+## Why Docling earns a place
 
-## Declined, with reasons
-
-| Declined | Why |
-| --- | --- |
-| **LangGraph / CrewAI / AutoGen** | Our custom orchestrator is the architectural thesis: deterministic control, inspectable state, no framework magic. Mentor review endorsed this framing. Swapping in a graph framework to match a list would weaken the strongest part of the design |
-| **Neo4j / Memgraph / KuzuDB** | The crew cascade is a recursive CTE over `pairing_leg`. A second database for a query Postgres already does well is complexity for its own sake — see [`22-crew-pairing-model.md`](22-crew-pairing-model.md) |
-| **SQLite** | Postgres is settled. Recursive CTEs, JSONB, and concurrent writers across four developers |
-| **Qdrant / FAISS** | Chroma covers optional Phase 5 retrieval. One vector store is enough |
-| **NVIDIA NIM** | Groq's free tier already serves the listed open model. No second inference provider |
-| **LlamaIndex PropertyGraph** | Retrieval scope is deliberately narrow: fetch and cite one clause. A property graph over legal text is a research project, not a seven-day feature |
-| **Continue.dev / Aider** | Developer tooling, individual choice, not part of the delivered system |
+Policy onboarding needs a repeatable path from official PDF to clause-structured text. Docling can
+support extraction, while the original PDF/hash remains authoritative and humans review every rule.
+This solves a real requirement and is independent of the suggested-list score.
 
 ## Internal Coforge tools
 
-**Unresolved and deliberately unclaimed.** We will not invent or assume an internal tool or accelerator.
-Once the team confirms what we are permitted to name, it gets added here and to the relevant docs.
-Accuracy over filling the box. Tracked in [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md).
+Unknown and deliberately unclaimed. We need an official eligible name, documentation, team access and a
+real use. Acquisition path: [`24-input-acquisition.md`](24-input-acquisition.md). No placeholder,
+invented accelerator or logo-only integration.
 
-## Net effect
+## Presentation wording
 
-One addition (Docling), one optional (Ollama), no rewrites. The stack in
-[`DECISIONS.md`](DECISIONS.md) stands.
+> “The platform uses open-source application components and the open-weight Llama 3.3 70B model, served
+> through a swappable Groq provider. We selected tools from the optional list only where they solve a
+> real requirement—Docling for policy-source extraction—and kept the orchestration explicit.”

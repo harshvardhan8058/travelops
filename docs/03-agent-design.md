@@ -14,7 +14,7 @@ things and nothing more:
 
 An agent is a bounded worker, not a personality.
 
-## Worked example — Hotel Agent
+## Worked example — Hotel service
 
 **Goal**
 Find nearby accommodation.
@@ -39,49 +39,40 @@ LLM  →  Hotel
 ...because every part of it is inspectable. You can unit-test the budget constraint. You cannot
 unit-test a vibe.
 
-## The response contract
+## Structured response contracts
 
-Every agent returns structured output. Never prose.
-
-**Never:**
-
-```
-I think...
-Maybe...
-```
-
-**Always:**
+All three reasoning agents return validated JSON, but they do **not** share one action-shaped payload.
+They share envelope fields and each has purpose-specific response fields. The Planner wire shape is:
 
 ```json
 {
   "status": "success",
-  "action": "reserve_hotel",
-  "reason": "Passenger has overnight delay",
-  "evidence_refs": ["flight:6E2134", "metar:VOBL:2026-08-07T09:20Z"]
+  "reason": "Plan generated from current incident and one matched precedent",
+  "evidence_refs": ["incident:INC-...", "precedent:INC-..."],
+  "payload_type": "planner.v1",
+  "tasks": [
+    {"action": "check_connections", "target_refs": ["flight:AI203"], "depends_on": []}
+  ]
 }
 ```
 
-This is what makes orchestration reliable. The orchestrator branches on `status`, logs `reason` for
-explainability, passes `evidence_refs` to the assurance gate, and never has to parse English.
-
-## Suggested field semantics
-
-| Field | Type | Notes |
+| Contract | Validated payload | Enters Assurance Gate? |
 | --- | --- | --- |
-| `status` | `success` \| `failure` \| `skipped` \| `needs_human` | Drives orchestrator branching |
-| `action` | enum, snake_case | Must match a known action; reject unknown values |
-| `reason` | short string | Human-facing justification, surfaced in audit logs |
-| `evidence_refs` | string[] | Inputs the decision rests on. Consumed by the assurance gate |
+| `PlannerResponse` | ordered `PlanTask[]`: known action enum, targets, inputs, dependencies | **Each task does** |
+| `ExplanationResponse` | explanation text plus citation/evidence references | No—read-only artifact |
+| `ReportResponse` | sections, metric references and summary | No—read-only artifact |
 
-> **`confidence` was removed from the contract.** It was previously an integer 0–100 that the
-> orchestrator thresholded on. For LLM-backed agents that number is self-reported and poorly calibrated,
-> and thresholding on it means the system trusts itself most when it is fluently wrong. Execution is now
-> gated by the deterministic **Decision Assurance Gate** —
-> [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md). If a model emits a confidence value
-> we log it as `model_self_report` and ignore it for control flow.
+Shared envelope fields are `status`, `reason`, `evidence_refs`, `payload_type` and model-call audit
+metadata. Only Planner tasks contain executable action enums. The exact discriminated-union contract is
+in [`16-folder-structure.md`](16-folder-structure.md); the orchestrator never parses prose or overloads
+an `action` field to carry reports/explanations.
 
-`needs_human` is worth having from day one. It is the honest escape hatch for a low-confidence or
-policy-blocked decision, and it demos far better than a confidently wrong action.
+> **`confidence` is absent.** If a model emits one, store it separately as `model_self_report` for
+> diagnostic comparison and never branch on it. Every Planner task passes schema/entity validation and
+> the deterministic [`Decision Assurance Gate`](18-decision-assurance-gate.md) before execution.
+
+An agent may return `needs_human` to request review, but that does not authorise or reject an action;
+the gate and immutable operator decision control execution.
 
 ## The roster — correct terminology
 
@@ -139,14 +130,6 @@ Two bounding notes:
 - **Crew Impact coordinates; it does not validate legality.** Duty-time legality is a hard regulated
   domain and is explicitly out of scope. See [`22-crew-pairing-model.md`](22-crew-pairing-model.md).
 
-Two bounding notes:
-
-- **Finance Agent must never use the LLM.** Compensation is regulatory and cited — see
-  [`13-compensation-and-policy.md`](13-compensation-and-policy.md). A model computing statutory
-  entitlements is a liability, not a feature.
-- **Crew Agent coordinates; it does not validate legality.** Duty-time legality is a hard regulated
-  domain and is explicitly out of scope. See the crew note in [`DECISIONS.md`](DECISIONS.md).
-
 ## Constraints are not suggestions
 
 Constraints must be enforced **outside** the model, in code, after the plan is produced. A validation
@@ -158,5 +141,5 @@ Planner output  →  schema validation  →  policy validation  →  execute
                      reject                 reject
 ```
 
-If the planner proposes a ₹9000 hotel, the Hotel Agent's constraint check rejects it. The model is
+If the planner proposes a ₹9000 hotel, the Hotel service's constraint check rejects it. The model is
 never the last line of defence.

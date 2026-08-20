@@ -36,39 +36,61 @@ Proposed action
 │  6  Action risk tier                        │
 └─────────────────────────────────────────────┘
       │
-      ├── all pass, low risk    →  execute
-      ├── any soft failure      →  execute, flagged for review
-      └── hard failure          →  needs_human  (blocked)
+      ├── all pass, low/medium risk          →  execute
+      ├── warning + explicit low-risk policy →  execute_flagged
+      └── any fail, high risk, missing config →  needs_human (blocked)
 ```
 
 ### The six checks
 
-| # | Check | Question | Failure |
+| # | Check | Question | Default on failure |
 | --- | --- | --- | --- |
-| 1 | **Evidence completeness** | Is every input the rule requires actually present? | Hard |
-| 2 | **Source freshness** | Is each input inside its max age? METAR 60m, TAF 6h, flight status 5m | Soft, hard if double |
-| 3 | **Entity validation** | Do the referenced flight, passenger, hotel, crew IDs exist and match state? | Hard |
-| 4 | **Policy compliance** | Does the action pass every deterministic constraint — budget, duty of care, jurisdiction? | Hard |
-| 5 | **Conflict detection** | Does this contradict another pending or executed action? Double-booked room, twice-rebooked passenger | Hard |
-| 6 | **Action risk tier** | `low` (notify, hold) · `medium` (rebook, reserve) · `high` (cash, cancellation, bulk >100) | High always needs human |
+| 1 | **Evidence completeness** | Is every input the selected rule requires actually present? | `FAIL` |
+| 2 | **Source freshness** | Is each input inside its configured max age? | `FAIL`; a specific low-risk action may downgrade this to `WARN` in versioned config |
+| 3 | **Entity validation** | Do referenced flight, passenger, hotel and crew IDs exist and match current state? | `FAIL` |
+| 4 | **Policy compliance** | Does the action pass every deterministic business and selected policy-pack constraint? | `FAIL` |
+| 5 | **Conflict detection** | Does this contradict another pending/executed action or consume unavailable capacity? | `FAIL` |
+| 6 | **Action risk tier** | `low` (notify) · `medium` (hold/reserve simulated inventory) · `high` (cash, cancellation, bulk external action) | High always blocks for human approval |
 
-Each returns a boolean plus a reason string. The gate result is a record, not a scalar:
+Each check returns `PASS`, `WARN` or `FAIL` plus a machine-readable reason. Aggregation is fail-closed
+and ordered:
+
+1. Missing gate configuration, unknown action type or unknown rule operator is `FAIL`.
+2. Any `FAIL` produces `needs_human`; no action is executed.
+3. `high` risk produces `needs_human` even when every other check passes.
+4. A `WARN` may produce `execute_flagged` **only** when the versioned config explicitly allows that
+   warning for that low-risk, reversible action type. There is no global "soft failure" bypass.
+5. Otherwise all checks must pass. Multiple warnings never become safer by aggregation.
+
+The full config version and hash are recorded with every evaluation, so a replay uses the same semantics
+that applied when the decision was made.
 
 ```json
 {
   "decision": "needs_human",
   "checks": {
-    "evidence_complete": { "pass": true },
-    "sources_fresh":     { "pass": false, "reason": "METAR VOBL 74m old, max 60m" },
-    "entities_valid":    { "pass": true },
-    "policy_compliant":  { "pass": true },
-    "no_conflicts":      { "pass": true },
-    "risk_tier":         { "value": "high", "reason": "cash compensation ₹5000 × 180 pax" }
+    "evidence_complete": {"status": "PASS"},
+    "sources_fresh": {
+      "status": "FAIL",
+      "reason_code": "SOURCE_STALE",
+      "reason": "METAR VOBL 74m old, max 60m"
+    },
+    "entities_valid": {"status": "PASS"},
+    "policy_compliant": {"status": "PASS"},
+    "no_conflicts": {"status": "PASS"},
+    "action_risk": {
+      "status": "PASS",
+      "tier": "high",
+      "reason_code": "HUMAN_APPROVAL_REQUIRED"
+    }
   },
-  "blocking": ["risk_tier"],
-  "evidence_refs": ["metar:VOBL:2026-08-07T09:20Z", "dgca_car_3_m_iv:§3.1"]
+  "blocking": ["sources_fresh", "action_risk"],
+  "evidence_refs": ["metar:VOBL:2026-08-07T09:20Z", "policy-rule:verified-pack:rule-id"]
 }
 ```
+
+The check representation preserves `WARN` rather than collapsing it into a boolean. Action risk can
+pass as a classification check while its `high` tier still blocks under the aggregation rule.
 
 Auditable, reproducible, and explainable without a model. Rerunning the same inputs yields the same
 gate result — which a confidence score never guaranteed.
@@ -79,25 +101,25 @@ The Planner may express a preference between valid options, and the Explainer ma
 was chosen. Neither authorises execution. The gate does. Model output is an input to the gate, never a
 substitute for it.
 
-If the LLM emits a `confidence` field, we log it as `model_self_report` for comparison and ignore it for
-control flow. Over the sprint that gives us a small calibration dataset — which is exactly the
-"alternative signals" the review asked for, and worth a sentence in the demo.
+If the LLM emits a `confidence` field, we log it as `model_self_report` for diagnostic comparison and
+ignore it for control flow. It is not calibration data: gate outcomes are policy decisions, not ground
+truth. Genuine calibration requires reviewed human labels or observed operational outcomes.
 
 ## The empirical signals
 
-Mentor review asked for human approval rates and historical error rates. Honest position: with a
-seven-day build and synthetic data we cannot claim real calibration. What we can do:
+Mentor review asked for human approval rates and historical error rates. Honest position: with synthetic
+data we cannot claim real calibration. We can specify and later measure diagnostic signals:
 
-| Signal | Status | How |
+| Signal | Status before implementation | How it will be measured |
 | --- | --- | --- |
-| Gate pass/block rate by action type | **Built** | Aggregated from `decision_log` |
-| Human approve/reject rate on `needs_human` | **Built** | Recorded per approval; visible in analytics |
-| Rule-level failure counts | **Built** | Which check blocks most often |
-| Model self-report vs gate outcome | **Built** | Logged side by side; shows the miscalibration directly |
-| Historical error rate on real outcomes | **Not claimed** | Needs production data we do not have |
+| Gate pass/block rate by action type | **Specified** | Aggregated from `decision_log` |
+| Human approve/reject rate on `needs_human` | **Specified** | Recorded per approval; visible in analytics |
+| Rule-level failure counts | **Specified** | Which check blocks most often |
+| Model self-report vs gate decision | **Specified diagnostic** | Logged side by side; not described as accuracy or calibration |
+| Historical error rate on real outcomes | **Unavailable** | Requires production outcomes or reviewed labels |
 
-Showing the fourth row — a chart where model confidence has little relationship to gate outcome — is a
-stronger answer to the review than any number we could invent.
+Do not claim that model confidence is disproved by our gate. The useful demo point is narrower: the
+model's number does not authorise execution; verifiable checks do.
 
 ## Delay risk, not delay probability
 
@@ -110,6 +132,8 @@ defend beats a decimal we cannot.
 
 - Lives in `backend/app/assurance/`, pure functions, no I/O, fully unit-testable.
 - Runs between planner output and execution, after schema validation.
-- Freshness limits and risk tiers come from config. No magic numbers.
-- Every gate evaluation writes to `decision_log` with its full check record.
+- Freshness limits, risk tiers and warning exceptions come from versioned config. Missing config fails
+  closed.
+- Every gate evaluation records check states, reasons, evidence references, risk tier, config version,
+  config hash and evaluation timestamp in its own immutable record, referenced by `action`.
 - UI surface: the Assurance Gate panel in [`21-design-system.md`](21-design-system.md).

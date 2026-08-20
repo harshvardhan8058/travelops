@@ -1,208 +1,171 @@
-# 13. Compensation and Policy Rules (DGCA)
+# 13. Compensation and Policy — Source Status and Encoded Rules
 
-Resolves open question **D3**. These are the real regulatory rules, researched rather than invented.
-
-> **Legal basis:** DGCA Civil Aviation Requirements, **Section 3, Series M, Part IV** — *Facilities to
-> be provided to passengers by airlines due to denied boarding, cancellation of flights and delays in
-> flights*. Issued under the Aircraft Act, 1934.
+> **Status: official guidance encoded; primary CAR still outstanding.**
 >
-> Confirmed as [legally binding and enforceable against airlines](https://www.ibanet.org/passenger-rights-indigo-flight-disruptions)
-> by the International Bar Association, and referenced by name in a
-> [2026 government statement to Parliament](https://www.ndtv.com/india-news/no-plan-for-automatic-flight-delay-compensation-20-lakh-hit-in-2025-centre-11859629).
+> The team supplied the **Ministry of Civil Aviation Passenger Charter, February 2019**. That is a real
+> Government of India publication, so its figures are citable — a genuine upgrade over the legal
+> commentary this document previously relied on. It is **not** the primary Civil Aviation Requirement,
+> and the charter itself says it is general guidance and points to CAR Series M, Section 3 on the DGCA
+> portal.
 >
-> ⚠️ **Verify against the CAR PDF before the demo.** Figures below come from legal commentary and press
-> reporting, not from the primary document — I could not fetch the DGCA PDF directly. The *structure*
-> is well corroborated; exact rupee values should be checked against the current CAR revision.
->
-> *Content from external sources was rephrased for compliance with licensing restrictions.*
+> Encoded as [`policy_packs/in-moca-charter-2019/2019.02/`](../policy_packs/in-moca-charter-2019/2019.02/)
+> with status `official_guidance_dated`. It can produce cited, labelled results in `POLICY_MODE=charter`.
+> It can never satisfy `POLICY_MODE=verified`.
 
----
+This is technical design, not legal advice. The implementation source of truth is the versioned pack,
+not prose in this file.
 
-## The finding that changes the demo
+## What the charter changed in our understanding
 
-**Weather delays do not attract cash compensation. They still attract duty of care.**
+Three corrections. The first two matter for the demo narrative.
 
-Force majeure — genuinely unforeseeable circumstances outside the airline's control — exempts an
-airline from *monetary compensation*. It does **not** exempt the airline from its
-[basic duty of care](https://www.timesnownews.com/travel/flight-delayed-or-cancelled-due-to-heavy-rain-heres-the-compensation-airlines-dont-want-you-to-know-about-article-155014308):
-meals, refreshments, hotel accommodation and transfers.
+### 1. Delay attracts no cash compensation at all
 
-This matters directly, because your worked scenario is a **storm**.
+Our earlier framing treated a weather delay as force-majeure-exempt and concluded ₹0 cash. That reached the
+right number by the wrong route. In the charter, the delay provisions contain **no monetary compensation
+entitlement at all**. Delay produces:
 
-The original transcript's example computed a cash compensation figure for a weather delay. Under the
-real rules that is **wrong** — cash owed for a genuine weather event is **₹0**, while hotel and meal
-costs are still mandatory. Getting this right is a meaningful credibility win: it is exactly the kind
-of domain nuance that separates a system built by someone who read the regulation from one that
-invented a plausible number.
+- meals and refreshments, at a threshold that depends on block time
+- beyond six hours on a domestic flight, a passenger choice of alternate flight within six hours or full
+  refund
+- free hotel accommodation in a specific night-departure window
 
-### Force majeure is not a blanket excuse
+Cash appears only under **cancellation** and **denied boarding**. So for a weather delay, ₹0 cash follows
+primarily from the absence of a delay-compensation provision, and the force majeure and
+beyond-carrier-control exemptions are a *second*, independent reason. That is a stronger answer, because
+it holds even if a reviewer disputes the exemption.
 
-The IBA analysis is emphatic that airlines must prove circumstances were *truly* unforeseeable, and
-that **internal planning failures do not qualify**. In the December 2025 IndiGo disruption, regulators
-held that crew rostering failures were within the airline's control, so the force majeure defence did
-not apply.
+### 2. The hotel trigger is narrower than we wrote
 
-This is a genuine design requirement, not trivia. `trigger_type` determines whether cash is owed:
+We previously documented "hotel after 6 hours, or when the delay crosses nighttime". The charter ties it
+to the airline having communicated the delay **more than 24 hours in advance**, plus either a delay over
+24 hours, or a delay over six hours for flights **scheduled to depart between 20:00 and 03:00**.
 
-| Trigger | Force majeure? | Cash compensation | Duty of care |
-| --- | --- | --- | --- |
-| Weather | Yes | Not owed | Owed |
-| ATC / airspace | Usually | Not owed | Owed |
-| Security | Usually | Not owed | Owed |
-| Technical / maintenance | No | Owed | Owed |
-| Crew rostering | **No** — settled by regulator | Owed | Owed |
-| Vendor failure | Generally no | Owed | Owed |
+That is materially different, and it produces an uncomfortable edge case: a passenger delayed overnight
+at short notice appears to fall outside it. That case is flagged for SME review
+(`weather_delay_short_notice_no_hotel`) and must not be demonstrated until reviewed.
 
-Given that [A4](DECISIONS.md) lists crew and maintenance as future triggers, this table is what makes
-those extensions meaningful rather than cosmetic — the same delay costs the airline very different
-amounts depending on cause.
+### 3. Meals thresholds are tiered by block time
 
----
+Not a flat two hours. Two hours for block time up to 2½ hours; three hours for block time over 2½ and up
+to 5 hours; four hours otherwise.
 
-## Delay: duty of care
+## Encoded figures
 
-Thresholds per the CAR:
+All from the charter. Every one is `status: draft` pending SME sign-off.
 
-| Delay | Entitlement |
+| Situation | Entitlement |
 | --- | --- |
-| More than 2 hours | Free meals and refreshments |
-| More than 6 hours, **or** crossing into nighttime | Hotel accommodation and transfers |
+| Delay, block time ≤ 2½ h | Meals from 2 h |
+| Delay, block time > 2½ h and ≤ 5 h | Meals from 3 h |
+| Delay, block time > 5 h | Meals from 4 h |
+| Domestic delay > 6 h | Alternate flight within 6 h **or** full refund, passenger's choice |
+| Delay > 24 h, or > 6 h for a 20:00–03:00 departure, communicated > 24 h ahead | Free hotel |
+| Cancellation, notice obligation met | Alternate flight or refund; no cash |
+| Cancellation, notice obligation not met, block ≤ 1 h | Lesser of ₹5,000 and basic fare + fuel charge, **plus** full refund |
+| Cancellation, block > 1 h and ≤ 2 h | Lesser of ₹7,500 and basic fare + fuel charge, plus refund |
+| Cancellation, block > 2 h | Lesser of ₹10,000 and basic fare + fuel charge, plus refund |
+| Denied boarding, alternate within 1 h | No compensation |
+| Denied boarding, alternate within 24 h | 200% of basic fare + fuel charge, cap ₹10,000 |
+| Denied boarding, alternate beyond 24 h | 400%, cap ₹20,000 |
+| Denied boarding, passenger declines alternate | Full ticket refund + 400%, cap ₹20,000 |
+| Baggage, domestic | ₹20,000 per passenger |
+| Cargo, domestic | ₹350 per kg |
+| Baggage, international | 1,131 SDR per passenger |
+| Cargo, international | 19 SDR per kg |
+| Refund timing | Immediate (cash), 7 days (credit card), via agent (agent booking) |
 
-Two implementation notes:
+Also encoded: statutory taxes/UDF/ADF/PSF refundable even on non-refundable fares; credit shell is the
+passenger's option and not a default; no processing charge on refunds; free name correction within 24 h
+of booking.
 
-- **"Crossing into nighttime" is a separate trigger from the 6-hour rule.** A 3-hour delay that pushes
-  departure past night hours triggers hotel entitlement even though it is under 6 hours. A naive
-  `delay_hours > 6` check misses this, and it is precisely the sort of case a judge might probe.
-- The relevant hours must be configurable, not hardcoded — consistent with
-  [A5](DECISIONS.md).
+Out of MVP scope, recorded only: death/bodily-injury limits (₹20,00,000 domestic, 113,100 SDR
+international), disability provisions, medical-emergency facilities.
 
-## Cancellation
+## Suspected supersession — excluded from evaluation
 
-Where cancellation occurs within two weeks of departure, the passenger is entitled to a full refund
-**plus** monetary compensation of **₹5,000 – ₹10,000**, varying by route length / block time.
-
-Commonly reported banding (**verify against the CAR**):
-
-| Block time | Compensation cap |
+| Item | Concern |
 | --- | --- |
-| Up to 1 hour | ₹5,000 |
-| 1 – 2 hours | ₹7,500 |
-| Over 2 hours | ₹10,000 |
+| No-charge cancellation window (24 h in the charter) | Secondary reporting describes a **February 2026 amendment to CAR Series M Part II** moving this to **48 hours**. Rule is `superseded_suspected` and `excluded_from_evaluation: true` |
+| All Part IV entitlement figures | Secondary sources describe a later Part IV revision (reported August 2024). The charter is February 2019 |
 
-The payable amount is the **lesser** of the cap and the booked one-way basic fare plus airline fuel
-charge. That "whichever is less" construction is important: it means compensation is a function of
-both the cap *and* the fare, so the calculator needs fare data, not just the delay duration.
+This is exactly why the pack cannot be `verified`. We have real figures from a real government document
+and an unresolved question about whether they are current.
 
-## Denied boarding (overbooking)
+## Cause assessment stays evidence-led
 
-| Alternate flight arranged | Compensation |
+The charter's force majeure clause requires that the circumstance was beyond the airline's control **and**
+could not have been avoided even if all reasonable measures had been taken. A separate clause covers
+delay clearly attributable to ATC, meteorological conditions or security risks.
+
+Neither is a lookup on `trigger_type`. Both rules declare required evidence facts, and a missing fact
+produces `needs_human` rather than an automatic exemption. The test case
+`cancellation_weather_without_reasonable_measures_evidence` exists to prove this.
+
+```json
+{
+  "operational_cause": "meteorological",
+  "clearly_attributable": true,
+  "external_to_carrier": true,
+  "unavoidable_despite_reasonable_measures": null,
+  "decision": "needs_human",
+  "missing_facts": ["cause_evidence.unavoidable_despite_reasonable_measures"]
+}
+```
+
+## Facts the calculator must receive
+
+| Family | Fields |
 | --- | --- |
-| Departs within 1 hour of original | None |
-| Within 24 hours | 200% of basic fare + fuel charge, capped ~₹10,000 |
-| Beyond 24 hours | 400% of basic fare + fuel charge, capped ~₹20,000 |
+| Event | type, delay/expected delay minutes, notice minutes, wait minutes |
+| Flight | block time, scheduled local departure time, domestic flag |
+| Fare | one-way basic fare, airline fuel charge, currency, payment method |
+| Passenger | checked in on time, contact info at booking, reported for original flight, opted for alternate |
+| Alternate | offered, minutes after original scheduled, airport/terminal changed |
+| Carrier | operating carrier, foreign-carrier flag, country |
+| Cause evidence | operational cause, clearly attributable, external to carrier, unavoidable despite reasonable measures, evidence refs |
 
-Corroborated by [Economic Times reporting on the DGCA conditions](https://economictimes.indiatimes.com/industry/transportation/airlines-/-aviation/dgca-outlines-conditions-for-compensation-to-passenger-denied-boarding/printarticle/92203436.cms)
-and [DGCA enforcement action against an airline for withholding it](https://timesofindia.indiatimes.com/business/india-business/dgca-fines-akasa-air-for-denying-compensation-to-offloaded-passengers/articleshow/116633115.cms).
+Block time and the two fare components are the ones most likely to be missing, and both block cash
+computation by design.
 
-Denied boarding is **out of MVP scope** — the disruption trigger is weather, not overbooking. Recorded
-for completeness and because the rules table should be structurally capable of holding it.
+## Policy modes
 
-## International flights
+| Mode | Behaviour |
+| --- | --- |
+| `demo` | Fictional fixture. Proves the engine. No real figure, no citation |
+| `charter` | Loads this pack. Real figures, real citation, UI badge reads *MoCA Passenger Charter · Feb 2019 · pending CAR verification*. Excluded rules stay excluded |
+| `verified` | Requires the current primary CAR, archived hash, resolved supersession and SME sign-off. **Not reachable today** |
 
-India is a signatory to the **Montreal Convention, 1999**, permitting compensation up to roughly
-**USD 6,400** for proven damages, with a two-year claim window. Applies where origin or destination is
-outside India.
+Stage 2 and Stage 3 can run in `charter` mode. That is a real improvement on the previous position, where
+we could only show a fixture.
 
-Out of scope — the airport set in [D1](DECISIONS.md) is domestic.
+## Demo wording for charter mode
 
-## CAR amounts are floors, not ceilings
+> "Compensation here is computed by a deterministic rules engine from the Ministry of Civil Aviation
+> Passenger Charter, and every figure cites its source. Cash is zero for this weather delay for two
+> independent reasons: the instrument provides no monetary compensation for delay at all, and the
+> beyond-carrier-control exemption applies on the evidence. Duty of care still applies, so meals and
+> hotel are owed. We are labelling this as the February 2019 charter rather than the current CAR,
+> because we have not yet verified it against the latest revision — the engine blocks verified mode until
+> we do."
 
-Indian consumer forums have held that CAR entitlements are **minimums, not limits**. Passengers may
-additionally claim under the Consumer Protection Act, 2019 for deficiency of service.
+Never claim these figures are the current CAR position. Never show the 24-hour cancellation rule.
 
-Implication for the model: compensation output should be labelled as the **statutory minimum**, not as
-a final settlement figure. Anything else overstates what the system knows.
+## Remaining verification matrix
 
----
+| Question | Status |
+| --- | --- |
+| Current CAR Part IV revision and effective date | Outstanding |
+| Whether any encoded figure changed in the reported Aug 2024 revision | Outstanding |
+| 24 h vs 48 h no-charge cancellation window | Outstanding |
+| Definitions of "one-way basic fare" and "airline fuel charge" | Outstanding |
+| Hotel trigger reading, including the short-notice overnight case | Outstanding — RQ-3 |
+| Evidence standard for "all reasonable measures" | Outstanding — RQ-6 |
+| Overlap/precedence with Montreal or foreign-carrier rules | Outstanding — RQ-8 |
+| PDF redistribution permission | Outstanding |
 
-## Seed data for `compensation_rule`
+Open questions are tracked per-rule in
+[`review.yaml`](../policy_packs/in-moca-charter-2019/2019.02/review.yaml). Acquisition steps for the
+primary CAR are in [`24-input-acquisition.md`](24-input-acquisition.md).
 
-Populating the table from [`11-data-model.md`](11-data-model.md). Values marked ⚠️ need verification
-against the current CAR revision.
-
-```sql
--- Duty of care: applies regardless of cause, including force majeure
-INSERT INTO compensation_rule
-  (min_delay_minutes, max_delay_minutes, amount_inr, includes_meal, includes_hotel,
-   applies_under_force_majeure, regulation_ref, effective_from) VALUES
-  (120,  360,  0, TRUE,  FALSE, TRUE, 'CAR S3 Sr.M Pt.IV - meals >2h',            '2019-01-01'),
-  (360, NULL,  0, TRUE,  TRUE,  TRUE, 'CAR S3 Sr.M Pt.IV - hotel+transfer >6h',   '2019-01-01');
-
--- Cash compensation: cancellation within two weeks. NOT payable under force majeure.
--- amount_inr is a CAP. Payable equals LEAST(cap, basic_fare + fuel_charge)
-INSERT INTO compensation_rule
-  (event_type, block_time_max_minutes, amount_inr, is_cap,
-   applies_under_force_majeure, regulation_ref, effective_from) VALUES
-  ('cancellation',   60,  5000, TRUE, FALSE, 'CAR S3 Sr.M Pt.IV - cancellation',   '2019-01-01'), -- ⚠️
-  ('cancellation',  120,  7500, TRUE, FALSE, 'CAR S3 Sr.M Pt.IV - cancellation',   '2019-01-01'), -- ⚠️
-  ('cancellation', NULL, 10000, TRUE, FALSE, 'CAR S3 Sr.M Pt.IV - cancellation',   '2019-01-01'); -- ⚠️
-```
-
-This requires three columns beyond the original schema:
-
-```sql
-ALTER TABLE compensation_rule
-    ADD COLUMN event_type                  TEXT NOT NULL DEFAULT 'delay',
-    ADD COLUMN block_time_max_minutes      INTEGER,
-    ADD COLUMN applies_under_force_majeure BOOLEAN NOT NULL DEFAULT TRUE,
-    ADD COLUMN is_cap                      BOOLEAN NOT NULL DEFAULT FALSE;
-```
-
-`applies_under_force_majeure` is the column that encodes the central finding. Without it the
-calculator cannot distinguish a storm from a crew failure, and will over-pay on every weather event.
-
-## Calculator logic
-
-Deterministic code. Never the LLM — see [`06-ai-vs-deterministic.md`](06-ai-vs-deterministic.md).
-
-```
-entitlements(delay_minutes, trigger_type, departure_time, fare) →
-
-  is_force_majeure = trigger_type IN ('weather', 'atc', 'security')
-
-  duty_of_care:
-      delay > meal_threshold                        → meals
-      delay > hotel_threshold OR crosses_night_hours → hotel + transfer
-
-  cash:
-      if is_force_majeure                           → ₹0, reason = 'force majeure exemption'
-      elif event = cancellation AND notice < 14 days → LEAST(cap_for_block_time, fare + fuel)
-      elif event = denied_boarding                   → 200% / 400% banding, capped
-      else                                          → ₹0
-
-  returns { meals, hotel, transfer, cash_inr, statutory_minimum: true, regulation_refs[] }
-```
-
-Always return the `regulation_refs` alongside the amount. That is what turns "₹0 compensation" from
-something that looks like a bug into a defensible, cited decision — and it is the difference between
-the Finance Agent being trusted and being questioned.
-
-## Why this is a demo asset
-
-When a judge asks why the system paid no compensation for a 6-hour storm delay, the answer is:
-
-> Weather is force majeure under CAR Section 3 Series M Part IV, so no cash compensation is owed. Duty
-> of care still applies, so we reserved hotels for 180 passengers and issued meal vouchers — ₹X total.
-> Had the same delay been caused by crew rostering, cash compensation *would* be owed, because
-> regulators have held that rostering failures are within airline control.
-
-That answer demonstrates real domain grounding, hits **Relevance** and **Feasibility** in the judging
-criteria, and is impossible to fake.
-
-## Open items
-
-- ⚠️ Download the actual CAR PDF from dgca.gov.in and verify every rupee figure and threshold.
-- ⚠️ Confirm the definition of "nighttime" hours used by the CAR.
-- ⚠️ Confirm whether the cancellation banding is by block time or by route distance — sources differ.
-- Decide whether the demo mentions Consumer Protection Act exposure. Accurate, but arguably beyond
-  scope for a 7-minute pitch.
+*Source content is paraphrased rather than reproduced, for licensing compliance.*

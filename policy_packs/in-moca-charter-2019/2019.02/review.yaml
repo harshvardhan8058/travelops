@@ -1,0 +1,89 @@
+pack: in-moca-charter-2019
+version: "2019.02"
+
+review_status: pending
+reviewer_name: null
+reviewer_role: null
+reviewer_organisation: null
+reviewed_at: null
+approval: null
+
+# An authorised aviation/legal/compliance SME must complete this file before the pack can
+# influence any claim presented as current law. Engineering work does not wait for it.
+
+reviewer_instructions: >-
+  For each rule in rules.yaml, confirm or correct: the paraphrased interpretation, the
+  required input facts, the computed output, and the edge cases in test_cases.yaml. Mark
+  each rule approved, corrected or rejected. Where the charter is superseded by a later CAR
+  revision, record the correct current position and the source.
+
+# Questions the reviewer must answer. These are the points where our encoding is a
+# judgement call rather than a direct reading.
+open_review_questions:
+
+  - id: RQ-1
+    question: >-
+      Is this 2019 charter superseded for any of the encoded entitlements by the later CAR
+      Section 3 Series M Part IV revision (reported as August 2024)?
+    why_it_matters: Determines whether any figure here may be described as current.
+    status: unanswered
+
+  - id: RQ-2
+    question: >-
+      Has the no-charge cancellation/amendment window moved from 24 hours to 48 hours per
+      the reported February 2026 amendment to Series M Part II?
+    why_it_matters: The rule is currently excluded from evaluation pending this answer.
+    status: unanswered
+
+  - id: RQ-3
+    question: >-
+      Confirm the hotel-accommodation trigger. We read it as requiring communication more
+      than 24 hours in advance, plus either a delay over 24 hours or a delay over six hours
+      for departures scheduled between 20:00 and 03:00. Is a passenger delayed overnight at
+      short notice genuinely outside this provision?
+    why_it_matters: >-
+      Our earlier documentation wrongly stated "over six hours or crossing nighttime". The
+      corrected reading is narrower and could under-serve passengers if wrong.
+    status: unanswered
+    test_case: weather_delay_short_notice_no_hotel
+
+  - id: RQ-4
+    question: >-
+      Confirm that delay attracts no monetary compensation under this instrument, so a
+      weather-delay payout of zero rests primarily on the absence of a delay-compensation
+      provision rather than on the force majeure exemption.
+    why_it_matters: This is the exact claim made in the demo narrative.
+    status: unanswered
+
+  - id: RQ-5
+    question: >-
+      Confirm the definitions of "booked one-way basic fare" and "airline fuel charge" used
+      in the lesser-of formula, and whether any other fare component is included.
+    why_it_matters: Determines every cancellation and denied-boarding figure.
+    status: unanswered
+
+  - id: RQ-6
+    question: >-
+      What evidence is sufficient to establish that a circumstance was beyond the carrier's
+      control and unavoidable despite all reasonable measures?
+    why_it_matters: >-
+      Drives the exemption checks. We deliberately refuse to treat a weather trigger as an
+      automatic exemption.
+    status: unanswered
+
+  - id: RQ-7
+    question: >-
+      Are the "checked in on time" and "adequate contact information at booking" conditions
+      applied as we have encoded them, including their suppressing effects?
+    status: unanswered
+
+  - id: RQ-8
+    question: >-
+      For overlap with the Montreal Convention or a foreign carrier's country-of-origin
+      rules, what precedence applies? No global most-favourable-to-passenger rule has been
+      assumed.
+    why_it_matters: conflict_rules_defined is currently false, so overlaps yield needs_human.
+    status: unanswered
+
+# Per-rule sign-off table. Reviewer fills status and notes.
+rule_signoff: []

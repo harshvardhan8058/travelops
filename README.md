@@ -2,99 +2,111 @@
 
 **An autonomous operating layer for airline disruption recovery.**
 
-When a storm disrupts an airport, TravelOps AI detects it, predicts the impact, plans a recovery,
-executes the deterministic parts autonomously, and records why every decision was made — with a hard
-boundary between what the AI decides and what code decides.
+TravelOps AI detects disruption risk, coordinates a bounded recovery workflow, executes permitted
+deterministic actions and records the evidence behind every decision. It is built by **Team SkyForge
+AI** (Registration ID 201) for the Coforge TechCon 2026 Hackathon.
 
-| | |
+| Field | Value |
 | --- | --- |
-| **Team** | SkyForge AI (Registration ID 201) |
-| **Project / Use Case** | TravelOps AI |
-| **Industry** | Travel Transport Hospitality (TTH) → Airlines Operations |
-| **Event** | TechCon 2026 Hackathon (Coforge) |
-| **Theme** | Engineering the Autonomous Enterprise |
+| Project / use case | TravelOps AI |
+| Team | SkyForge AI |
+| Industry | Travel Transport Hospitality (TTH) → Airlines Operations |
+| Theme | Engineering the Autonomous Enterprise |
+| Current repository status | Design, implementation contracts and one encoded policy pack; application code not started |
+| Submitted deck | Frozen; see [`docs/17-presentation-prompt.md`](docs/17-presentation-prompt.md) |
+| Next build target | Stage 2 working deterministic vertical slice |
 
-> **Status: design documentation only.** No application code yet. The design is complete enough to
-> build from — see the [sprint plan](docs/14-hackathon-plan.md).
+## Architecture in one view
 
-## The idea in one diagram
-
-```
-                 TravelOps Orchestrator
-                          │
-        ┌─────────────────┼──────────────────┐
-        │                 │                  │
-   Prediction         Planning         Communication
-     Agent             Agent               Agent
-        │                 │                  │
-        ├──────────── Execution Layer ───────┤
-        │        │            │              │
-   Flight API  Weather     Hotel DB     Notification
-        │        │            │              │
-        └──────────────── Memory ────────────┘
-```
-
-The LLM (Groq) is one component inside this, not the centre of it. **Only 3 of 13 agents use it.**
-
-## What it does
-
-A single weather event cascades:
-
-```
-Storm at BLR → 8 flights → 600 passengers → 22 connections → 11 hotels → 9 crew rotations → report
+```text
+Signals + fixtures
+       │
+       ▼
+┌──────────────────── TravelOps Orchestrator ────────────────────┐
+│ workflow state · sequencing · limits · idempotency · audit     │
+└──────────────┬──────────────────────────────┬───────────────────┘
+               │                              │
+      3 reasoning agents              10 deterministic services
+  Planner · Explainer · Reporter      risk · recovery · hotel · transport
+               │                      communication · compensation · crew
+               │                      connections · resources · analytics
+               └───────────┬──────────────────┘
+                           ▼
+                Decision Assurance Gate
+          evidence · freshness · entities · policy
+                    conflicts · risk tier
+                           ▼
+              execute / flagged / human approval
 ```
 
-...and the system handles the recovery, then explains itself.
+The LLM plans and explains. It never authorises or directly executes an action. The same core recovery
+must complete with `LLM_MODE=off`.
 
-## Documentation
+## Fixed demonstration scenario
 
-Start at **[`docs/`](docs/)**. If you read three things: [DECISIONS](docs/DECISIONS.md),
-the [sprint plan](docs/14-hackathon-plan.md), and the [demo script](docs/15-demo-script.md).
+```text
+Bengaluru storm fixture
+  → 8 traceable flights
+  → ~600 synthetic passengers
+  → 22 at-risk connections
+  → 11 synthetic hotels
+  → 9 traceable crew pairings
+  → recovery actions + decision timeline
+```
 
-| | |
+These are fixed-seed fixture targets, not production statistics. Weather can be live; flight status,
+passengers, hotels, crew, transport and bulk notifications are simulated or synthetic and visibly
+labelled.
+
+## Start here
+
+1. [`docs/DECISIONS.md`](docs/DECISIONS.md) — canonical decisions and event dates
+2. [`docs/09-requirements.md`](docs/09-requirements.md) — scoped functional/non-functional requirements
+3. [`docs/14-hackathon-plan.md`](docs/14-hackathon-plan.md) — stage-aligned delivery gates
+4. [`docs/24-input-acquisition.md`](docs/24-input-acquisition.md) — what only the team must provide and where to get it
+5. [`docs/25-evaluation-readiness.md`](docs/25-evaluation-readiness.md) — checkpoint pass/fail checklist
+6. [`docs/21-design-system.md`](docs/21-design-system.md) — premium Operations Room UI; no purple
+7. [`docs/26-implementation-contracts.md`](docs/26-implementation-contracts.md) — API, state, security and observability baseline
+
+## Core design documents
+
+| Document | Purpose |
 | --- | --- |
-| [DECISIONS](docs/DECISIONS.md) | Every settled decision, with reasoning |
-| [01 — Architecture](docs/01-architecture.md) | System shape and layers |
-| [02 — Disruption Flow](docs/02-disruption-flow.md) | End-to-end worked example |
-| [03 — Agent Design](docs/03-agent-design.md) | Agent contract and roster |
-| [04 — LLM Strategy](docs/04-llm-strategy-groq.md) | Where Groq belongs, and where it doesn't |
-| [05 — Memory](docs/05-memory-and-rag.md) | Incident memory and retrieval |
-| [06 — AI vs Deterministic](docs/06-ai-vs-deterministic.md) | The central boundary |
-| [07 — Risks](docs/07-risks-and-mitigations.md) | Twelve failure modes |
-| [08 — Backlog](docs/08-blueprint-backlog.md) | What's deferred, and why |
-| [09 — Requirements](docs/09-requirements.md) | FR/NFR and scope |
-| [10 — Data Sources](docs/10-data-sources.md) | Free APIs and datasets, evaluated |
-| [11 — Data Model](docs/11-data-model.md) | Postgres schema and DDL |
-| [12 — Synthetic Data](docs/12-synthetic-data-plan.md) | What must be generated |
-| [13 — DGCA Policy](docs/13-compensation-and-policy.md) | Real compensation rules |
-| [14 — Sprint Plan](docs/14-hackathon-plan.md) | Seven days, four people |
-| [15 — Demo Script](docs/15-demo-script.md) | The 7-minute narrative |
-| [16 — Folder Structure](docs/16-folder-structure.md) | Layout and standards |
-| [17 — Presentation Prompt](docs/17-presentation-prompt.md) | Gamma prompt for the 3-slide submission |
-| [Open Questions](docs/OPEN-QUESTIONS.md) | Still unresolved |
+| [01 Architecture](docs/01-architecture.md) | Control plane and deterministic/LLM boundary |
+| [03 Agent design](docs/03-agent-design.md) | 3 reasoning agents + 10 deterministic services |
+| [11 Data model](docs/11-data-model.md) | PostgreSQL schema including assurance and policy packs |
+| [13 Policy status](docs/13-compensation-and-policy.md) | Encoded MoCA charter rules; verified mode still blocked |
+| [18 Assurance Gate](docs/18-decision-assurance-gate.md) | Deterministic execution gate replacing self-confidence |
+| [19 Policy packs](docs/19-jurisdiction-and-policy-packs.md) | Jurisdiction-neutral rules + cited explanation |
+| [20 Phased delivery](docs/20-phased-delivery.md) | Five demonstrable product phases |
+| [22 Crew pairings](docs/22-crew-pairing-model.md) | Why 8 flights can affect 9 rotations |
+| [23 Stack alignment](docs/23-stack-alignment.md) | Optional Coforge open-source list mapped honestly |
 
-## Stack
+## Settled stack
 
 | Concern | Choice |
 | --- | --- |
-| Backend | FastAPI |
-| Frontend | React, TypeScript, Tailwind, shadcn/ui |
-| Database | Postgres |
-| Events | Redis Streams |
-| Reasoning LLM | Groq (`llama-3.3-70b-versatile`) |
-| Prediction | Rules engine — deliberately not an LLM |
-| Retrieval | SQL precedent matching; vectors deferred |
-| Weather | aviationweather.gov METAR/TAF (real, live) |
-| Flight status | Simulated — no usable free feed exists |
-| Deployment | Docker, local |
-| Budget | ₹0 – ₹500 |
+| Frontend | React, TypeScript, Vite, Tailwind, themed shadcn/ui, React Query |
+| Backend | Python 3.12, FastAPI, Pydantic, SQLAlchemy, Alembic |
+| Orchestration | Custom typed Python workflow orchestrator |
+| Data/events | PostgreSQL, Redis Streams + Redis |
+| Reasoning | Open-weight Llama 3.3 70B via Groq; fixture/off modes mandatory |
+| Retrieval | Explainable structured SQL for MVP; Chroma/BGE optional |
+| Deployment | Local Docker Compose |
+| Tests/observability | pytest, httpx, structlog, immutable decision records |
 
-Deliberately rejected as overkill: Kubernetes, Kafka, RabbitMQ.
+The Coforge AI-tool spreadsheet is a list of free suggestions, not a mandatory checklist. We use tools
+only when they solve a real requirement. MCP, LangGraph, CrewAI, Kafka, Kubernetes and a graph database
+are not required for this MVP.
 
-## The five rules
+## Non-negotiable rules
 
-1. The orchestrator is the brain, not the LLM.
-2. Structured output, never prose.
-3. If there is one provably correct answer, write code.
-4. Build a workflow engine, not a chatbot.
-5. The system must survive its own AI failing.
+1. One orchestrator, three reasoning agents, ten deterministic services.
+2. Structured model output; no parsing English for control flow.
+3. Deterministic code for rules, calculations, validation and execution.
+4. Decision Assurance Gate—not LLM self-reported confidence.
+5. Pack status governs legal claims: `demo` fixture, `charter` (real cited figures, dated source),
+   `verified` (current primary CAR + SME sign-off). Only `verified` is current law.
+6. Every external provider has a fixture/offline implementation.
+7. Every data surface states provenance.
+8. Operations-console UI: graphite, instrument cyan, semantic status colours; no purple gradients or AI-template styling.

@@ -42,9 +42,13 @@ Project: Arcolab · Department: CIMS
 | --- | --- |
 | **Event** | TechCon 2026 Hackathon (Coforge) |
 | **Theme** | Engineering the Autonomous Enterprise using AI, internal tools, and open-source technologies |
-| **Idea submission** | 7 August 2026 |
-| **Final submission** | ~14 August 2026 |
-| **Working time** | Treat as a 7-day engineering sprint |
+| **Idea submission** | 10 August 2026 — complete; submitted deck frozen |
+| **Stage 1 evaluations** | 14–16 August 2026 |
+| **Stage 2 evaluations** | 20–24 August 2026 |
+| **Stage 3 evaluations** | 1–2 September 2026 |
+| **Semi-finals** | 9–10 September 2026 |
+| **Finals** | 16 September 2026 |
+| **Working model** | Iterative delivery through checkpoints; every stage ends with a working vertical slice |
 
 ### Team
 
@@ -55,7 +59,7 @@ Project: Arcolab · Department: CIMS
 | Member 3 | APIs, database, integrations |
 | Member 4 | Testing, PPT, demo, documentation |
 
-See [`14-hackathon-plan.md`](14-hackathon-plan.md) for the day-by-day plan.
+See [`14-hackathon-plan.md`](14-hackathon-plan.md) for the stage-aligned plan.
 
 ### Judging criteria (official)
 
@@ -107,7 +111,7 @@ The repository remains `travelops` — renaming it buys nothing.
 
 | ID | Question | Decision |
 | --- | --- | --- |
-| B1 | Hackathon and timeline | TechCon 2026 (Coforge); ~14 Aug; 7-day sprint; 4 members |
+| B1 | Hackathon and timeline | TechCon 2026 (Coforge); iterative checkpoints through 16 Sep; 4 members |
 | B2 | Judging criteria | As above; effort weighted toward innovation and architecture |
 | B3 | Ops-facing or passenger-facing | **Operations-first.** Passenger portal is a secondary interface |
 | B4 | Groq access | Confirmed. Free tier |
@@ -252,19 +256,26 @@ retrieve better precedent than cosine similarity, and it is explainable in a way
 
 Chroma and BGE Small stay in the stack as a stretch goal, not a dependency.
 
-### D3 — DGCA rules: researched, not invented
+### D3 — regulatory policy: architecture settled; source verification outstanding
 
-✅ Complete — [`13-compensation-and-policy.md`](13-compensation-and-policy.md).
+The deterministic policy-pack architecture is complete in
+[`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md). The legal content is **not**
+complete: the current DGCA primary CAR, revision metadata and SME review are not yet archived.
 
-Headline finding: **weather is force majeure, so no cash compensation is owed — but duty of care still
-applies.** The original transcript's example computed cash for a storm delay, which is wrong under the
-real regulation.
+The team supplied the **MoCA Passenger Charter (February 2019)**, now encoded as
+`policy_packs/in-moca-charter-2019/2019.02/` with status `official_guidance_dated`. That unlocks real cited
+figures in `POLICY_MODE=charter`. It does **not** unlock `verified`, because the charter is secondary
+guidance and later CAR revisions are reported.
+
+Do not infer force majeure from a generic weather trigger. The acquisition path for the primary CAR is
+[`24-input-acquisition.md`](24-input-acquisition.md); encoded rules and open review questions are in
+[`13-compensation-and-policy.md`](13-compensation-and-policy.md).
 
 ### D4 — email
 
-Mailtrap during development; real Gmail only for the demo. Replaces the earlier Brevo recommendation
-for the dev path — Mailtrap is the better choice because it captures mail without delivering it, so
-600 synthetic passengers cannot generate real sends by accident.
+Mailtrap/console during development; allowlisted Gmail/SMTP only for the demo if organisational policy
+allows it. Credentials and recipients remain outside Git. All non-allowlisted bulk notifications are
+simulated records.
 
 ### D5 — deployment
 
@@ -276,13 +287,13 @@ Local Docker. Stable, offline-capable, no cold starts mid-demo.
 
 | Item | Notes |
 | --- | --- |
-| Multi-agent system | Core |
+| Bounded workflow system | Core: 1 orchestrator + 3 reasoning agents + 10 deterministic services |
 | Dashboard | Ops controller surface |
 | Timeline replay | Now cheap — `decision_log` already holds the chronology |
 | Incident report | Executive summary output |
 | RAG | Via SQL retrieval, per D2 |
 | Memory | Incident outcomes feeding retrieval |
-| Weather integration | Real, live |
+| Weather integration | Public live provider + committed fixture |
 | Flight simulation | Local state machine |
 | Notification system | Mailtrap → Gmail |
 
@@ -291,8 +302,9 @@ Local Docker. Stable, offline-capable, no cold starts mid-demo.
 **Post-hackathon:** predictive ML, vendor negotiation, autonomous booking, real flight APIs, real-time
 airport integration.
 
-⚠️ This must-build list is ambitious for 7 days with 4 people, especially alongside cascading. A
-prioritised cut list is in [`14-hackathon-plan.md`](14-hackathon-plan.md).
+Scope is staged through the official checkpoints rather than compressed into one seven-day build. The
+cut order and readiness gates are in [`14-hackathon-plan.md`](14-hackathon-plan.md) and
+[`25-evaluation-readiness.md`](25-evaluation-readiness.md).
 
 ---
 
@@ -301,7 +313,7 @@ prioritised cut list is in [`14-hackathon-plan.md`](14-hackathon-plan.md).
 ### 1. No chatbot UI
 
 ```
-Event  →  Planner  →  Workflow  →  Agents  →  Execution
+Signal → Event → Orchestrator → reasoning proposal/fallback → Assurance Gate → Service → Audit
 ```
 
 There is no conversational surface. Already the position in
@@ -355,15 +367,15 @@ Five review comments on the submitted deck. The deck is fixed; these are resolve
 | 1 | Ambitious, phase it, use simulators | Five phases, each ending at a demonstrable system; simulators behind provider interfaces by design | [`20-phased-delivery.md`](20-phased-delivery.md) |
 | 2 | Why 9 rotations for 8 flights? | Crew are assigned to pairings, not flights — many-to-many, plus onward duties and positioning. Made traceable in the cascade view | [`22-crew-pairing-model.md`](22-crew-pairing-model.md) |
 | 3 | "13 agents" is really 3 agents + tools | Retaxonomised: 1 orchestrator + 3 reasoning agents + 10 deterministic services | [`03-agent-design.md`](03-agent-design.md) |
-| 4 | LLM self-reported confidence is unreliable | Removed from the contract; replaced by the deterministic assurance gate, with model self-report logged for calibration comparison | [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md) |
+| 4 | LLM self-reported confidence is unreliable | Removed from the contract; replaced by deterministic assurance. Model self-report may be logged as diagnostic metadata, not treated as calibration or ground truth | [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md) |
 | 5 | DGCA is India-specific — how does it scale? | Jurisdiction resolver → versioned policy packs → deterministic rules engine → cited explanation. RAG cites, never calculates | [`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md) |
 
 ## Open-source stack list
 
-Coforge published a suggested open-source AI stack. It is **suggested and free, not mandatory**. We align
-where it earns a place: Llama 3.3 70B is already our model, Chroma already our optional vector store, and
-we adopt **Docling** for regulatory PDF extraction. We decline LangGraph, CrewAI, graph databases and
-SQLite with stated reasons — see [`23-stack-alignment.md`](23-stack-alignment.md).
+The tool spreadsheet supplied to the team is **optional reference material, not a mandatory checklist**.
+We align where a tool earns its place: Llama 3.3 70B is our open-weight model, Chroma remains optional,
+and Docling is selected for regulatory-source extraction. LangGraph, CrewAI, graph databases and SQLite
+are declined with explicit engineering reasons—see [`23-stack-alignment.md`](23-stack-alignment.md).
 
 ## UI direction
 

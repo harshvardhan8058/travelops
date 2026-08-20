@@ -2,9 +2,9 @@
 
 Resolves backlog item #11.
 
-Synthetic data is **not** a shortcut here. [`10-data-sources.md`](10-data-sources.md) established that
-no free source provides hotel inventory near Indian airports, and no source will ever provide real
-passenger records. Generation is the only route.
+Synthetic data is a deliberate prototype boundary. Under the current budget, coverage and access
+constraints, no suitable live hotel inventory or passenger/PNR source has been validated. Real PII is
+neither needed nor permitted. Provider interfaces make these sources replaceable later.
 
 ## What is real vs generated
 
@@ -12,16 +12,16 @@ passenger records. Generation is the only route.
 | --- | --- | --- |
 | Airports, runways | Real — OurAirports | Public domain, and runway headings must be accurate for crosswind |
 | Weather observations | Real — aviationweather.gov / Open-Meteo | The live trigger is the credible part of the demo |
-| Flight schedules | Real — AIKosh | Authentic flight numbers, routes and timings |
-| Flight *status* changes | Generated — simulator | No usable free live feed; also needed for reproducibility |
-| Passengers, bookings | Generated | Real PII neither available nor desirable (NFR-8) |
-| Hotels, inventory | Generated | No free source covers Indian airports |
-| Historical incidents | Generated | Needed to seed retrieval, or the planner has no memory on day one |
-| Compensation rules | Hand-authored from DGCA | Must be real to be defensible |
+| Flight schedules | Planned real source — AIKosh; **synthetic fallback** | Do not label real until file/schema/licence are archived and loader test passes |
+| Flight *status* changes | Simulated | Deterministic and reproducible; live feed unavailable to the team |
+| Passengers, bookings | Synthetic | Real PII is intentionally excluded |
+| Hotels, inventory | Synthetic | No suitable source validated under constraints |
+| Historical incidents | Synthetic fixture | Seeds retrieval; not evidence of real-world performance |
+| Policy rules | Demo fixture until primary source review; then reviewed pack | Never convert secondary commentary directly into executable law |
 
-The mix matters for the demo narrative: everything a judge can independently verify — airports,
-weather, flight numbers — is real. Everything synthetic is data that could not be real for legal or
-commercial reasons, which is a defensible line to hold when asked.
+The mix matters for the demo narrative: airports/runways and live weather may be independently
+verifiable; schedules are real only after source validation; every simulated, synthetic and fixture
+record is labelled. This is a stronger position than calling all non-passenger data real.
 
 ## Determinism
 
@@ -38,12 +38,15 @@ Commit the generated dataset as a SQL dump or CSV set. Do not regenerate it on t
 
 ## Volumes
 
-Sized for the worked scenario — 180 passengers on the disrupted flight, 47 at-risk connections, 3
-nearby hotels — with enough surrounding traffic that the dashboard looks like an operation rather than
-a single row.
+The single-flight and cascade figures are parent/child fixtures:
 
-Sized for the **cascade** scenario confirmed in [`DECISIONS.md`](DECISIONS.md) — 8 flights, 600
-passengers, 22 at-risk connections, 11 hotels — across the ten airports in D1.
+- **Phase 1 child flight:** one disrupted flight with a deliberately small passenger subset for fast
+  end-to-end testing.
+- **Phase 2 incident group:** 8 flights, ~600 passengers, 22 at-risk connections, 11 candidate hotels
+  and exactly 9 traceable crew pairings.
+
+Do not reuse older 180-passenger/47-connection/3-hotel numbers as if they describe the same scenario.
+They remain historical reference only. The canonical fixture targets are below.
 
 | Entity | Count | Notes |
 | --- | --- | --- |
@@ -100,14 +103,13 @@ Connections are the point. Generate them deliberately rather than at random:
 2. For each, set the second segment to depart **45–180 minutes** after the first is scheduled to arrive.
 3. That connection window is what determines whether a delay breaks the itinerary.
 
-For the seeded demo flight, tune the distribution so that a two-hour delay puts roughly 47 connections
-at risk — matching the scenario in [`02-disruption-flow.md`](02-disruption-flow.md). Work backwards
-from the target number; do not hope randomness produces it.
+For each Phase 1 fixture booking, generate a second segment 45–180 minutes after the scheduled arrival.
+Select a small, explicit subset as at risk and assert that count in fixture validation. Phase 2's group-
+level target is 22 at-risk connections. Generate backwards from the target; never rely on random chance.
 
 ### Hotels
 
-Per major airport, generate 3–6 hotels varying along the axes the Hotel Agent's constraints actually
-read:
+Per major airport, generate 3–6 hotels varying along the axes the Hotel service's constraints read:
 
 | Attribute | Distribution | Purpose |
 | --- | --- | --- |
@@ -116,10 +118,9 @@ read:
 | `distance_km` | 1 – 25 | Gives the agent a real trade-off against price |
 | `total_rooms` | 20 – 200 | Capacity must be able to run out |
 
-Deliberately make total capacity near the disrupted airport **insufficient** for all 180 passengers.
-A recovery where everything succeeds trivially demonstrates nothing. Partial success forces
-prioritisation, which is where the system looks intelligent — and it exercises the `needs_human`
-path from [`03-agent-design.md`](03-agent-design.md).
+Deliberately make capacity insufficient for at least one requested allocation. A trivial all-success
+recovery demonstrates nothing; a controlled shortfall exercises prioritisation and the
+`needs_human`/partial-resolution path without pretending a legal entitlement was computed.
 
 ### Historical incidents
 
@@ -160,10 +161,14 @@ injected_conditions:
   visibility_m: 800
   precipitation: rain
 expected:
-  delay_probability: ">= 0.85"
-  passengers: 180
-  at_risk_connections: 47
-  hotels_available_nearby: 3
+  risk_index_min: 75
+  risk_level: high
+  incident_group:
+    flights_affected: 8
+    passengers_affected_approx: 600
+    at_risk_connections: 22
+    candidate_hotels: 11
+    crew_pairings_affected: 9
   hotel_capacity_shortfall: true
 ```
 
@@ -189,8 +194,8 @@ confusion between the two is an easy and embarrassing bug; store knots in
 Loaders (real data) are separated from generators (synthetic) on purpose: real sources can be refreshed
 independently, and the boundary between real and fabricated stays legible in the repo.
 
-⚠️ **Language and stack for these scripts is not decided.** Written as `.py` above only for
-concreteness — see [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md).
+Python is settled for loaders and generators because the backend stack is Python/FastAPI. Keep these
+scripts deterministic, typed, and separate from migrations.
 
 ## Rules
 
