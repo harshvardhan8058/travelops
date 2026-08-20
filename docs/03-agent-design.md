@@ -55,50 +55,89 @@ Maybe...
 ```json
 {
   "status": "success",
-  "confidence": 92,
   "action": "reserve_hotel",
-  "reason": "Passenger has overnight delay"
+  "reason": "Passenger has overnight delay",
+  "evidence_refs": ["flight:6E2134", "metar:VOBL:2026-08-07T09:20Z"]
 }
 ```
 
-This is what makes orchestration reliable. The orchestrator branches on `status`, thresholds on
-`confidence`, logs `reason` for explainability, and never has to parse English.
+This is what makes orchestration reliable. The orchestrator branches on `status`, logs `reason` for
+explainability, passes `evidence_refs` to the assurance gate, and never has to parse English.
 
 ## Suggested field semantics
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `status` | `success` \| `failure` \| `skipped` \| `needs_human` | Drives orchestrator branching |
-| `confidence` | integer 0–100 | Below a threshold, escalate rather than execute |
 | `action` | enum, snake_case | Must match a known action; reject unknown values |
 | `reason` | short string | Human-facing justification, surfaced in audit logs |
+| `evidence_refs` | string[] | Inputs the decision rests on. Consumed by the assurance gate |
+
+> **`confidence` was removed from the contract.** It was previously an integer 0–100 that the
+> orchestrator thresholded on. For LLM-backed agents that number is self-reported and poorly calibrated,
+> and thresholding on it means the system trusts itself most when it is fluently wrong. Execution is now
+> gated by the deterministic **Decision Assurance Gate** —
+> [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md). If a model emits a confidence value
+> we log it as `model_self_report` and ignore it for control flow.
 
 `needs_human` is worth having from day one. It is the honest escape hatch for a low-confidence or
 policy-blocked decision, and it demos far better than a confidently wrong action.
 
-## Agent roster
+## The roster — correct terminology
 
-Confirmed roster, reconciled with the Master Blueprint
-([`reference/master-blueprint.md`](reference/master-blueprint.md)):
+Earlier drafts called all thirteen components "agents", with ten of them labelled "deterministic
+agents". Mentor review flagged this as agent inflation, correctly. A stateless service that computes
+compensation from a rules table is a **tool**, not an agent. Calling it one invites the suspicion that
+the whole system is inflated.
 
-| Agent | Goal | LLM? |
+The accurate taxonomy is **1 orchestrator + 3 reasoning agents + 10 deterministic services**:
+
+### 1 orchestrator
+
+Owns workflow state, sequencing, retries and the assurance gate. Deterministic. Not an agent — it is the
+control plane.
+
+### 3 reasoning agents (LLM-backed)
+
+| Agent | Goal | Why a model earns its place |
 | --- | --- | --- |
-| Prediction Agent | Estimate delay probability from conditions | No — rules engine |
-| Planner Agent | Produce an ordered recovery task list | **Yes** |
-| Flight Recovery Agent | Rebook and reroute affected passengers | No |
-| Hotel Agent | Find and reserve accommodation within budget | No |
-| Transport Agent | Arrange ground transfers | No |
-| Communication Agent | Dispatch email, SMS, push | Optional (wording only) |
-| Finance Agent | Compute compensation and duty of care | No — regulatory rules |
-| Crew Agent | Coordinate and display crew reassignment | No |
-| Connection Agent | Identify at-risk onward connections | No |
-| Gate / Resource Agent | Reassign gates and stands | No |
-| Analytics Agent | Aggregate incident metrics | No |
-| Learning Agent | Record outcomes; surface precedent | No |
-| Explainer / Report Agent | Justify plans; generate executive summaries | **Yes** |
+| **Planner** | Produce an ordered recovery task list | Open-ended sequencing under competing constraints |
+| **Explainer** | Justify a plan in human language | Natural-language synthesis over structured evidence |
+| **Report Generator** | Executive incident summaries | Narrative aggregation |
 
-**Only three of thirteen use the LLM.** That ratio is the architecture working as intended — and it is
-the single most useful fact to have ready when a judge asks whether this is "just a ChatGPT wrapper".
+All three return validated JSON against a typed contract. None of them executes anything.
+
+### 10 deterministic services (tools / microservices)
+
+| Service | Goal |
+| --- | --- |
+| Delay Risk | Score disruption risk from weather and operational conditions — rules engine |
+| Flight Recovery | Rebook and reroute affected passengers |
+| Hotel | Find and reserve accommodation within budget |
+| Transport | Arrange ground transfers |
+| Communication | Dispatch email, SMS, push |
+| Compensation | Compute entitlements from cited regulation |
+| Crew Impact | Identify affected pairings; coordinate and display |
+| Connection | Identify at-risk onward connections |
+| Gate / Resource | Reassign gates and stands |
+| Analytics / Learning | Aggregate metrics; record outcomes; surface precedent |
+
+**Only 3 of 14 components touch a model, and none of them can execute an action.** That is the useful
+fact when a judge asks whether this is "just a ChatGPT wrapper" — and it is stronger stated precisely
+than inflated.
+
+> The submitted deck reads "13 total agents, only 3 use LLM" and cannot be changed. Verbally and in all
+> future material, use the taxonomy above. Framing: *"we counted tools as agents in the deck — there are
+> 3 real agents, 10 deterministic services, and 1 orchestrator."* Volunteering the correction reads as
+> rigour.
+
+Two bounding notes:
+
+- **Compensation must never use the LLM.** Entitlements are regulatory and cited — see
+  [`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md). A model computing
+  statutory amounts is a liability, not a feature.
+- **Crew Impact coordinates; it does not validate legality.** Duty-time legality is a hard regulated
+  domain and is explicitly out of scope. See [`22-crew-pairing-model.md`](22-crew-pairing-model.md).
 
 Two bounding notes:
 

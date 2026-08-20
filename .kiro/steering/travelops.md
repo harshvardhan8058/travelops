@@ -22,10 +22,13 @@ Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
 
 ## Non-negotiable design rules
 
-1. **The orchestrator is the brain, not the LLM.** Only 3 of 13 agents use a model: Planner, Explainer,
-   Report generator.
+1. **The orchestrator is the brain, not the LLM.** The correct taxonomy is **1 orchestrator + 3 reasoning
+   agents (Planner, Explainer, Report Generator) + 10 deterministic services**. Never say "13 agents" —
+   that was corrected in mentor review as agent inflation. A stateless rules-based service is a tool, not
+   an agent.
 2. **Structured output, never prose.** Every agent returns validated JSON matching `AgentResponse`
-   (`status`, `confidence`, `action`, `reason`). The orchestrator never parses English.
+   (`status`, `action`, `reason`, `evidence_refs`). The orchestrator never parses English.
+   **`confidence` is not in the contract** — see rule 7.
 3. **If there is one provably correct answer, write code.** Compensation, filtering, sorting and
    business rules never touch a model.
 4. **Build a workflow engine, not a chatbot.** There is no conversational UI. Flow is
@@ -33,6 +36,32 @@ Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
 5. **The system must survive its own AI failing.** `LLM_MODE=off` must still complete a recovery via the
    deterministic fallback playbook. This is a demo asset, not just resilience.
 6. **No magic numbers.** Thresholds, budgets and limits come from config. Never hardcode ₹6000.
+7. **Never gate execution on LLM self-reported confidence.** Use the deterministic **Decision Assurance
+   Gate** — six verifiable checks (evidence completeness, source freshness, entity validation, policy
+   compliance, conflict detection, action risk tier). See `docs/18-decision-assurance-gate.md`. Model
+   self-report may be logged as `model_self_report` for calibration comparison, never for control flow.
+   Show percentages only where calibrated; otherwise a risk level with contributing factors.
+8. **Regulation is data, not code.** `Trip Context → Jurisdiction Resolver → versioned Policy Pack →
+   deterministic Rules Engine → cited explanation`. RAG retrieves and cites legal text; it never
+   calculates or authorises an entitlement. Adding a jurisdiction must not require application code
+   changes. See `docs/19-jurisdiction-and-policy-packs.md`.
+9. **Build in phases that each end at a demonstrable system.** Deterministic first, LLM in Phase 3. See
+   `docs/20-phased-delivery.md` and cut from the bottom of its cut list.
+
+## UI rules — read `docs/21-design-system.md` before writing any component
+
+- **No purple, violet or indigo. Anywhere.** No gradients, glows, aurora blobs, glassmorphism on cards,
+  gradient text, or ✨/🤖 emoji icons. That is the default AI-demo aesthetic and it reads as a template.
+- This is an **airline operations console**: near-monochrome graphite base (`#0B0F14` / `#111821`), a
+  single non-status accent (instrument cyan `#3FC9DE`), and green/amber/red reserved **exclusively** for
+  operational state.
+- **All operational data is monospaced with tabular numerals** — flight numbers, gates, timestamps,
+  delays, amounts, PNRs. JetBrains Mono. This is the signature detail.
+- Inter for UI text, 14px body (dense, not 16), 34px table rows, 4px spacing scale, `rounded-md`, 1px
+  borders instead of shadows.
+- Tokens only — no colour literals in components. Lucide icons only. One shared `<StateBadge>`.
+- Never rely on colour alone: every state carries an icon and a label. WCAG AA, visible focus rings.
+- Target 1920×1080 — it will be projected.
 
 ## Stack (settled — do not re-litigate)
 
@@ -44,6 +73,14 @@ Rejected as overkill: **Kubernetes, Kafka, RabbitMQ**.
 Vector store and embeddings (Chroma + BGE Small) are a **stretch goal only** — MVP retrieval is
 structured SQL on airport, trigger, severity, weather and flight type. SQL-retrieved precedent injected
 into a prompt is still RAG.
+
+**Docling** (or MarkItDown) is adopted for regulatory PDF → structured clause text, feeding the policy
+packs. Optional if time allows: **Ollama** as a local fallback LLM provider behind the existing interface.
+
+Coforge's suggested open-source AI stack list is **free and suggested, not mandatory**. Do not adopt
+LangGraph, CrewAI, AutoGen, a graph database or SQLite to tick boxes — the custom orchestrator and
+Postgres are deliberate. Rationale per tool: `docs/23-stack-alignment.md`. When presenting, say
+**"open-weight Llama 3.3 70B"** — Groq is only the inference host.
 
 ## Data rules
 

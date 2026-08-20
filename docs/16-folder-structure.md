@@ -151,7 +151,8 @@ parse English. See [`03-agent-design.md`](03-agent-design.md).
 | Types | Generated from the OpenAPI schema — never hand-written |
 | Components | Function components; hooks for state |
 | Server state | React Query; no manual fetch/`useEffect` chains |
-| Styling | Tailwind + shadcn. No bespoke CSS files |
+| Styling | Tailwind + shadcn, **theme overridden** per [`21-design-system.md`](21-design-system.md). Tokens only — no colour literals in components. No bespoke CSS files |
+| Icons | Lucide only. 16px dense, 20px rail, `1.5` stroke |
 
 ### Naming
 
