@@ -104,7 +104,9 @@ Trip Context → Jurisdiction Resolver → approved versioned Policy Pack
 ```
 
 Retrieval displays the source clause and grounds explanations. It never selects the law or calculates an
-amount. Draft/unverified packs can prove engine mechanics only and are labelled `DEMO_POLICY_FIXTURE`.
+amount. Pack status controls what may be claimed: `demo` is a fictional fixture, `charter` produces real
+cited figures behind a dated-source badge, and `verified` requires the current primary regulation plus SME
+sign-off. See [`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md).
 
 ## Deployment baseline
 

@@ -1,0 +1,320 @@
+pack: in-moca-charter-2019
+version: "2019.02"
+
+# These are the executable expectations for the rules engine. They must pass before the
+# pack is used in any demo, and they double as the SME review worksheet: a reviewer can
+# read each case and confirm or correct the expected outcome.
+
+cases:
+
+  # ------------------------------------------------- the Bengaluru storm demo scenario
+  - id: bengaluru_storm_weather_delay_7h_evening
+    description: >-
+      Evening domestic departure delayed seven hours by adverse weather, with evidence that
+      the cause was external and unavoidable. This is the primary demo case.
+    facts:
+      event: { type: delay, delay_minutes: 420, expected_delay_minutes: 420, notice_minutes: 1500 }
+      itinerary: { is_domestic: true, origin_country: IN }
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "21:10" }
+      passenger: { checked_in_on_time: true, contact_info_provided_at_booking: true }
+      cause_evidence:
+        operational_cause: meteorological
+        clearly_attributable: true
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: true
+        evidence_refs: ["metar:VOBL:...", "ops_event:..."]
+    expect:
+      cash_inr: 0
+      # Two independent reasons converge on zero cash, and the first one is the stronger
+      # argument: the charter has no delay-compensation provision at all.
+      cash_reason_codes: [NO_DELAY_COMPENSATION_PROVISION, BEYOND_CARRIER_CONTROL]
+      entitlements:
+        - meals_refreshments      # block time 165 min > 150, delay 420 >= 180
+        - hotel_accommodation     # >6h delay, 21:10 departure inside 20:00-03:00 window
+        - passenger_choice        # domestic, expected delay > 6h
+      rules_fired:
+        - delay.care.meals.block_150_to_300
+        - delay.care.hotel.night_window
+        - delay.domestic.over_6h.alternate_or_refund
+        - delay.no_cash_compensation
+        - exemption.atc_weather_security_delay
+
+  - id: weather_delay_7h_daytime_departure
+    description: >-
+      Same delay, daytime departure. Confirms the hotel entitlement is tied to the
+      20:00-03:00 scheduled-departure window, not to delay length alone.
+    facts:
+      event: { type: delay, delay_minutes: 420, expected_delay_minutes: 420, notice_minutes: 1500 }
+      itinerary: { is_domestic: true }
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "11:05" }
+      passenger: { checked_in_on_time: true }
+    expect:
+      cash_inr: 0
+      entitlements: [meals_refreshments, passenger_choice]
+      must_not_include: [hotel_accommodation]
+
+  - id: weather_delay_short_notice_no_hotel
+    description: >-
+      Night-window delay over six hours, but the airline did not communicate more than 24
+      hours in advance. The hotel rule's notice condition must not be silently ignored.
+    facts:
+      event: { type: delay, delay_minutes: 400, notice_minutes: 90 }
+      itinerary: { is_domestic: true }
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "22:00" }
+      passenger: { checked_in_on_time: true }
+    expect:
+      must_not_include: [hotel_accommodation]
+      note: >-
+        Flag for SME review. It is not obvious that the charter intends a passenger delayed
+        overnight at short notice to lose hotel accommodation; the drafting ties it to
+        advance communication. Do not present this outcome in a demo until reviewed.
+      review_required: true
+
+  - id: delay_meals_threshold_boundary_block_150
+    description: Block time exactly 150 minutes uses the two-hour meals threshold.
+    facts:
+      event: { type: delay, delay_minutes: 120 }
+      flight: { block_time_minutes: 150 }
+      passenger: { checked_in_on_time: true }
+    expect:
+      entitlements: [meals_refreshments]
+      rules_fired: [delay.care.meals.block_upto_150]
+
+  - id: delay_meals_not_owed_below_threshold
+    description: 100-minute delay on a short flight is below the meals threshold.
+    facts:
+      event: { type: delay, delay_minutes: 100 }
+      flight: { block_time_minutes: 120 }
+      passenger: { checked_in_on_time: true }
+    expect:
+      entitlements: []
+      cash_inr: 0
+
+  - id: delay_not_checked_in_on_time
+    description: >-
+      The care provisions are conditioned on the passenger having checked in on time.
+    facts:
+      event: { type: delay, delay_minutes: 200 }
+      flight: { block_time_minutes: 120 }
+      passenger: { checked_in_on_time: false }
+    expect:
+      must_not_include: [meals_refreshments]
+      review_required: true
+
+  # ---------------------------------------------------------------- cancellation cash
+  - id: cancellation_crew_cause_block_95min_low_fare
+    description: >-
+      Cancellation at short notice caused by an internal rostering failure, so no exemption
+      applies. Block time 95 minutes puts the cap at INR 7,500, but the fare is lower, so
+      the lesser value governs.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 95 }
+      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true, reported_for_original_flight: true }
+      cause_evidence:
+        operational_cause: crew_rostering
+        external_to_carrier: false
+        unavoidable_despite_reasonable_measures: false
+    expect:
+      cash_inr: 5000               # least of 7500 cap and (4200 + 800)
+      formula_used: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+      entitlements: [cash, meals_refreshments]
+      rules_fired: [cancellation.compensation.block_60_to_120, cancellation.care.meals_while_waiting]
+
+  - id: cancellation_cap_binds_when_fare_high
+    description: Cap governs when basic fare plus fuel charge exceeds it.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 200 }
+      fare: { one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      cash_inr: 10000
+      rules_fired: [cancellation.compensation.block_over_120]
+
+  - id: cancellation_weather_exemption_suppresses_cash
+    description: >-
+      Same short-notice cancellation, but weather-caused with full evidence. Cash is
+      suppressed; care obligations survive.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 95 }
+      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true, reported_for_original_flight: true }
+      cause_evidence:
+        operational_cause: meteorological
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: true
+        evidence_refs: ["metar:VOBL:..."]
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [FORCE_MAJEURE]
+      entitlements: [meals_refreshments]
+      rules_fired: [exemption.force_majeure]
+
+  - id: cancellation_weather_without_reasonable_measures_evidence
+    description: >-
+      Weather cause asserted but no evidence that it was unavoidable despite all reasonable
+      measures. Must NOT auto-exempt. This is the case that proves we are not doing a
+      trigger_type lookup.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 95 }
+      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true }
+      cause_evidence:
+        operational_cause: meteorological
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: null
+    expect:
+      decision: needs_human
+      blocking_reasons: [MISSING_REQUIRED_FACT]
+      missing_facts: ["cause_evidence.unavoidable_despite_reasonable_measures"]
+      cash_inr: null
+
+  - id: cancellation_no_contact_info_suppresses_cash
+    description: Passenger did not supply contact details at booking.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 200 }
+      fare: { one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      passenger: { contact_info_provided_at_booking: false }
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [NO_CONTACT_INFO_AT_BOOKING]
+      rules_fired: [cancellation.exemption.no_contact_info]
+
+  - id: cancellation_informed_three_weeks_ahead
+    description: Two-week notice obligation met; no cash compensation.
+    facts:
+      event: { type: cancellation, notice_minutes: 30240 }
+      cancellation: { notice_obligation_met: true }
+      flight: { block_time_minutes: 200 }
+    expect:
+      cash_inr: 0
+      entitlements: [passenger_choice]
+      rules_fired: [cancellation.notice.two_weeks_or_more]
+
+  - id: missed_connection_same_ticket
+    description: >-
+      Missed connecting flight booked under the same ticket number is treated like the
+      not-informed case and attracts compensation.
+    facts:
+      event: { type: cancellation, notice_minutes: 0 }
+      cancellation: { notice_obligation_met: false, missed_connection_same_ticket: true }
+      flight: { block_time_minutes: 55 }
+      fare: { one_way_basic_fare_inr: 9000, airline_fuel_charge_inr: 900 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      cash_inr: 5000               # cap for block time <= 60 min
+      rules_fired: [cancellation.compensation.block_upto_60]
+
+  # ------------------------------------------------------------- denied boarding
+  - id: denied_boarding_alternate_in_40min
+    facts:
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 40 }
+    expect:
+      cash_inr: 0
+      rules_fired: [denied_boarding.alternate_within_1h.no_compensation]
+
+  - id: denied_boarding_alternate_next_morning
+    description: 200 percent of fare plus fuel, capped at INR 10,000.
+    facts:
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 780 }
+      fare: { one_way_basic_fare_inr: 3000, airline_fuel_charge_inr: 500 }
+      passenger: { opted_for_alternate: true }
+    expect:
+      cash_inr: 7000               # 200% of 3500
+      rules_fired: [denied_boarding.alternate_within_24h]
+
+  - id: denied_boarding_200pct_cap_binds
+    facts:
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 600 }
+      fare: { one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
+      passenger: { opted_for_alternate: true }
+    expect:
+      cash_inr: 10000              # 200% of 9000 = 18000, capped
+      rules_fired: [denied_boarding.alternate_within_24h]
+
+  - id: denied_boarding_beyond_24h_cap_binds
+    facts:
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 1800 }
+      fare: { one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
+      passenger: { opted_for_alternate: true }
+    expect:
+      cash_inr: 20000              # 400% of 9000 = 36000, capped
+      rules_fired: [denied_boarding.alternate_beyond_24h]
+
+  - id: denied_boarding_declines_alternate
+    facts:
+      event: { type: denied_boarding }
+      passenger: { opted_for_alternate: false }
+      fare: { one_way_basic_fare_inr: 2000, airline_fuel_charge_inr: 500 }
+    expect:
+      cash_inr: 10000              # 400% of 2500
+      plus: full_ticket_value_refund
+      rules_fired: [denied_boarding.no_alternate_taken]
+
+  # ------------------------------------------------------------- fail-closed behaviour
+  - id: missing_block_time_blocks_cancellation_cash
+    description: >-
+      Cancellation compensation bands depend on block time. Without it the engine must not
+      guess a band.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      missing_facts: ["flight.block_time_minutes"]
+
+  - id: missing_fare_components_blocks_cash
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 95 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      missing_facts: ["fare.one_way_basic_fare_inr", "fare.airline_fuel_charge_inr"]
+
+  - id: superseded_rule_is_never_evaluated
+    description: >-
+      The 24-hour free cancellation rule is suspected superseded and must be excluded.
+    facts:
+      request: { type: cancellation, minutes_after_booking: 600 }
+      booking: { days_before_first_leg: 20 }
+    expect:
+      rules_fired: []
+      excluded_rules: [booking.free_cancel_or_amend_within_24h]
+      surfaced_notice: SUPERSESSION_SUSPECTED
+
+  - id: verified_mode_rejects_this_pack
+    description: >-
+      Loading this pack under POLICY_MODE=verified must fail, because it is dated official
+      guidance rather than the current primary CAR.
+    mode: verified
+    expect:
+      load_result: rejected
+      reason_code: PACK_NOT_VERIFIED_ELIGIBLE
+
+  - id: international_baggage_requires_sdr_conversion
+    facts:
+      event: { type: baggage_loss_delay_damage }
+      itinerary: { is_domestic: false }
+    expect:
+      cap_sdr: 1131
+      requires_currency_conversion: true
+      note: SDR conversion rate and date must be recorded with any converted figure.

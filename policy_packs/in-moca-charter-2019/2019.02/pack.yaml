@@ -1,0 +1,46 @@
+id: in-moca-charter-2019
+version: "2019.02"
+jurisdiction: IN
+authority: Ministry of Civil Aviation, Government of India
+document: Passenger Charter — "Know your rights when you fly"
+document_date: 2019-02-01
+currency: INR
+
+# STATUS IS DELIBERATELY NOT "approved".
+#
+# This is an official Government of India publication, so its figures are real and
+# citable — a genuine upgrade over legal commentary or press reporting. It is NOT the
+# primary Civil Aviation Requirement, and the charter itself states it is for general
+# guidance and directs readers to CAR Series M, Section 3 on the DGCA portal.
+#
+# Additionally, secondary sources indicate CAR Section 3 Series M Part IV was revised
+# after this charter, and that a February 2026 amendment to Series M Part II changed the
+# free cancellation window from 24 to 48 hours. Individual rules affected are marked
+# `status: superseded_suspected` in rules.yaml.
+status: official_guidance_dated
+
+# Gate behaviour: this pack may be loaded in POLICY_MODE=charter to produce cited,
+# clearly-labelled results. It must NEVER satisfy POLICY_MODE=verified.
+verified_mode_eligible: false
+ui_label: "MoCA Passenger Charter · Feb 2019 · pending CAR verification"
+
+blocks_verified_mode_until:
+  - current CAR Section 3, Series M, Part IV archived with revision/effective metadata
+  - amendment history confirmed (including the reported Aug 2024 Part IV revision)
+  - free-cancellation window reconciled against the reported Feb 2026 Part II amendment
+  - authorised aviation/legal SME sign-off recorded in review.yaml
+  - source PDF archived with SHA-256 recorded in source-metadata.yaml
+
+precedence:
+  # No global "most favourable to passenger" rule is assumed. Overlap handling for this
+  # pack is undetermined until an authorised reviewer defines it.
+  conflict_rules_defined: false
+  on_conflict: needs_human
+
+required_context:
+  - itinerary
+  - operating_carrier
+  - event
+  - notice
+  - cause_evidence
+  - fare_components

@@ -13,8 +13,9 @@ approved Coforge location unless sharing is authorised.
 
 | Priority | Input | Primary owner | What the team may need to do | Fallback |
 | --- | --- | --- | --- | --- |
-| **P0** | Current DGCA CAR + amendments + revision metadata | Development first | Escalate only if portal/device policy blocks access; approve storage route | Labelled demo policy fixture, no legal amount |
-| **P0** | Aviation/legal SME review of India rule sheet | **Team** | Nominate/arrange authorised reviewer | Remain in `POLICY_MODE=demo` |
+| ✅ **Received** | MoCA Passenger Charter, Feb 2019 | Team — **done 2026-08-20** | Optionally confirm PDF redistribution so we can archive the file and hash it | Encoded as `in-moca-charter-2019` |
+| **P0** | Current DGCA CAR Part IV + amendments + revision metadata | Development first | Escalate only if portal/device policy blocks access; approve storage route | `charter` mode with dated-source badge |
+| **P0** | Aviation/legal SME sign-off on the encoded charter rules | **Team** | Nominate authorised reviewer; they complete `review.yaml` | Remain in `POLICY_MODE=charter`, never `verified` |
 | **P0** | Demo-machine capability/network check | **Team** | Test exact presentation device/network | Offline mode handles network only |
 | **P1** | Groq account + observed limits | **Team** | Create key locally; share limits, never key | Fixture/off modes |
 | **P1** | Controlled SMTP/Mailtrap setup | **Team** | Configure local secret + allowlisted inboxes | Console/simulated notifications |
@@ -74,8 +75,15 @@ rule remains draft.
 
 ### Deadline/fallback
 
-Needed before **Stage 3 (1–2 September)** to show verified regulatory intelligence. If unavailable, the
-system stays in `POLICY_MODE=demo`, shows no authoritative rupee amount and says so explicitly.
+Needed before **Stage 3 (1–2 September)** to reach verified regulatory intelligence. If unavailable, the
+system runs `POLICY_MODE=charter` against the encoded February 2019 charter pack — real cited figures, with
+a visible badge stating the source is dated and pending CAR verification.
+
+**Two specific questions the primary source must settle:**
+
+1. Did the reported **August 2024 revision of Part IV** change any encoded figure or threshold?
+2. Did the reported **February 2026 amendment to Part II** move the no-charge cancellation window from 24
+   to 48 hours? That rule is currently excluded from evaluation.
 
 ## P0-2 — India policy-pack SME review
 

@@ -80,7 +80,8 @@ travelops/
 │           ├── policy-citation/
 │           └── reports/
 ├── policy_packs/
-│   └── demo-policy-fixture/          # non-authoritative until verified source is supplied
+│   ├── demo-policy-fixture/          # fictional; proves the engine
+│   └── in-moca-charter-2019/2019.02/ # official guidance, dated; labelled in UI
 ├── data/
 │   ├── loaders/                      # public real data
 │   ├── generators/                   # synthetic data
@@ -215,7 +216,7 @@ SMTP_USERNAME=
 SMTP_PASSWORD=
 DEMO_RECIPIENT_ALLOWLIST=
 
-POLICY_MODE=demo                       # demo | verified
+POLICY_MODE=charter                    # demo | charter | verified
 POLICY_PACK_DIR=/app/policy_packs
 ASSURANCE_CONFIG_PATH=/app/config/assurance.v1.yaml
 

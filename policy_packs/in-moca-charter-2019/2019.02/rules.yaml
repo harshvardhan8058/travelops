@@ -1,0 +1,710 @@
+pack: in-moca-charter-2019
+version: "2019.02"
+
+# Every rule is derived from the MoCA Passenger Charter (Feb 2019) supplied by the team.
+# `interpretation` is our paraphrase; the archived PDF is the authority for exact wording.
+# `status` values:
+#   draft                 - encoded, awaiting authorised SME review
+#   superseded_suspected  - secondary reporting indicates the figure/window has changed
+#   informational         - recorded for completeness, not used to compute entitlements
+#
+# THE MOST IMPORTANT STRUCTURAL FACT IN THIS PACK:
+# the charter provides NO cash compensation for delay. Delay attracts duty of care
+# (meals/refreshments, and hotel in the defined night window) plus, beyond six hours on a
+# domestic flight, a choice of alternate flight or full refund. Cash compensation appears
+# only for cancellation and denied boarding. Do not describe a delay payout.
+
+rules:
+
+  # ---------------------------------------------------------------- delay: duty of care
+  - id: delay.care.meals.block_upto_150
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p2:flight-delays:scenario-1-A"]
+    interpretation: >-
+      Where the passenger has checked in on time and the airline expects a delay of two
+      hours or more on a flight whose block time is up to two and a half hours, free
+      meals and refreshments are owed in relation to waiting time.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: passenger.checked_in_on_time, op: eq, value: true }
+        - { fact: flight.block_time_minutes, op: lte, value: 150 }
+        - { fact: event.delay_minutes, op: gte, value: 120 }
+    entitlement:
+      type: meals_refreshments
+      cash: false
+      scales_with: waiting_time
+
+  - id: delay.care.meals.block_150_to_300
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p2:flight-delays:scenario-1-B"]
+    interpretation: >-
+      Three hours or more, for flights with block time over two and a half hours and up to
+      five hours.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: passenger.checked_in_on_time, op: eq, value: true }
+        - { fact: flight.block_time_minutes, op: gt, value: 150 }
+        - { fact: flight.block_time_minutes, op: lte, value: 300 }
+        - { fact: event.delay_minutes, op: gte, value: 180 }
+    entitlement:
+      type: meals_refreshments
+      cash: false
+      scales_with: waiting_time
+
+  - id: delay.care.meals.block_over_300
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p2:flight-delays:scenario-1-C"]
+    interpretation: >-
+      Four hours or more, for flights not falling within the two categories above.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: passenger.checked_in_on_time, op: eq, value: true }
+        - { fact: flight.block_time_minutes, op: gt, value: 300 }
+        - { fact: event.delay_minutes, op: gte, value: 240 }
+    entitlement:
+      type: meals_refreshments
+      cash: false
+      scales_with: waiting_time
+
+  - id: delay.domestic.over_6h.alternate_or_refund
+    status: draft
+    scope: domestic
+    source_clause_refs: ["charter:p2:flight-delays:scenario-2-A", "charter:p2:flight-delays:scenario-2-B"]
+    interpretation: >-
+      Where a domestic flight is expected to be delayed by more than six hours, the
+      rescheduled time must be communicated more than 24 hours before the original
+      scheduled departure, and the airline must offer the passenger a choice of either an
+      alternate flight within six hours or a full ticket refund.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: itinerary.is_domestic, op: eq, value: true }
+        - { fact: event.expected_delay_minutes, op: gt, value: 360 }
+    entitlement:
+      type: passenger_choice
+      options: [alternate_flight_within_6h, full_refund]
+      cash: false
+      airline_obligations:
+        - communicate_rescheduled_time_more_than_24h_prior
+
+  - id: delay.care.hotel.night_window
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p2:flight-delays:scenario-3"]
+    interpretation: >-
+      Where the airline communicated the delay more than 24 hours before the original
+      scheduled time, free hotel accommodation is owed if the delay exceeds 24 hours, or
+      exceeds six hours for flights scheduled to depart between 20:00 and 03:00.
+    # NOTE: this corrected an earlier error in our own documentation, which had described
+    # hotel entitlement as "delay over 6 hours OR crossing nighttime". The charter ties the
+    # six-hour case to a specific 20:00-03:00 scheduled-departure window and to advance
+    # communication. Do not restate the older, looser version.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: event.notice_minutes, op: gt, value: 1440 }
+        - any_of:
+            - { fact: event.delay_minutes, op: gt, value: 1440 }
+            - all:
+                - { fact: event.delay_minutes, op: gt, value: 360 }
+                - fact: flight.scheduled_departure_local_time
+                  op: within_local_window
+                  value: { from: "20:00", to: "03:00" }
+    entitlement:
+      type: hotel_accommodation
+      cash: false
+
+  - id: delay.no_cash_compensation
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p2:flight-delays"]
+    interpretation: >-
+      The charter's delay provisions contain no monetary compensation entitlement. Delay
+      gives rise to duty of care and, beyond six hours domestically, a choice of alternate
+      flight or refund.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+    entitlement:
+      type: cash
+      amount_inr: 0
+      basis: no_delay_compensation_provision_in_source
+      cash: true
+
+  # -------------------------------------------------------------------- cancellation
+  - id: cancellation.notice.two_weeks_or_more
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:intro"]
+    interpretation: >-
+      Airlines must inform passengers of cancellation at least two weeks before scheduled
+      departure and arrange an acceptable alternate flight or refund.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: event.notice_minutes, op: gte, value: 20160 }
+    entitlement:
+      type: passenger_choice
+      options: [alternate_flight, refund]
+      cash: false
+
+  - id: cancellation.notice.under_two_weeks_to_24h
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:scenario-1"]
+    interpretation: >-
+      Where informed less than two weeks before but up to 24 hours of scheduled departure,
+      the airline must offer an alternate flight allowing departure, or refund the ticket,
+      as acceptable to the passenger.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: event.notice_minutes, op: lt, value: 20160 }
+        - { fact: event.notice_minutes, op: gte, value: 1440 }
+    entitlement:
+      type: passenger_choice
+      options: [alternate_flight, refund]
+      cash: false
+
+  - id: cancellation.compensation.block_upto_60
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:scenario-2-A"]
+    interpretation: >-
+      Where the passenger was not informed as required, or missed a connecting flight
+      booked on the same ticket number, compensation is payable in addition to full
+      refund. For block time up to and including one hour, the lesser of INR 5,000 and the
+      booked one-way basic fare plus airline fuel charge.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: cancellation.notice_obligation_met, op: eq, value: false }
+        - { fact: flight.block_time_minutes, op: lte, value: 60 }
+        - { fact: passenger.contact_info_provided_at_booking, op: eq, value: true }
+    entitlement:
+      type: cash
+      cash: true
+      cap_inr: 5000
+      formula: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+
+  - id: cancellation.compensation.block_60_to_120
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:scenario-2-B"]
+    interpretation: >-
+      Block time more than one hour and up to and including two hours: lesser of
+      INR 7,500 and booked one-way basic fare plus airline fuel charge.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: cancellation.notice_obligation_met, op: eq, value: false }
+        - { fact: flight.block_time_minutes, op: gt, value: 60 }
+        - { fact: flight.block_time_minutes, op: lte, value: 120 }
+        - { fact: passenger.contact_info_provided_at_booking, op: eq, value: true }
+    entitlement:
+      type: cash
+      cash: true
+      cap_inr: 7500
+      formula: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+
+  - id: cancellation.compensation.block_over_120
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:scenario-2-C"]
+    interpretation: >-
+      Block time more than two hours: lesser of INR 10,000 and booked one-way basic fare
+      plus airline fuel charge.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: cancellation.notice_obligation_met, op: eq, value: false }
+        - { fact: flight.block_time_minutes, op: gt, value: 120 }
+        - { fact: passenger.contact_info_provided_at_booking, op: eq, value: true }
+    entitlement:
+      type: cash
+      cash: true
+      cap_inr: 10000
+      formula: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+
+  - id: cancellation.care.meals_while_waiting
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:additionally-A"]
+    interpretation: >-
+      Where the passenger has already reported for the original flight and is waiting for
+      the alternate flight, free meals and refreshments are owed in relation to waiting
+      time.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: passenger.reported_for_original_flight, op: eq, value: true }
+        - { fact: alternate_flight.offered, op: eq, value: true }
+    entitlement:
+      type: meals_refreshments
+      cash: false
+      scales_with: waiting_time
+
+  - id: cancellation.exemption.no_contact_info
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:additionally-B"]
+    interpretation: >-
+      The passenger must provide adequate contact information at the time of booking;
+      otherwise no financial compensation is payable.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: passenger.contact_info_provided_at_booking, op: eq, value: false }
+    effect:
+      suppresses_entitlement_types: [cash]
+      reason_code: NO_CONTACT_INFO_AT_BOOKING
+
+  - id: cancellation.alternate_airport_transfer_cost
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p3:flight-cancellation:additionally-C"]
+    interpretation: >-
+      Where the airline offers a flight to or from an airport or terminal other than the
+      one booked, the airline bears the cost of transferring the passenger. If the
+      passenger was informed of the change at least six hours in advance, the passenger is
+      responsible for making their own arrangements.
+    when:
+      all:
+        - { fact: alternate_flight.airport_or_terminal_changed, op: eq, value: true }
+        - { fact: event.notice_minutes, op: lt, value: 360 }
+    entitlement:
+      type: ground_transfer_cost
+      cash: false
+      borne_by: airline
+
+  # ----------------------------------------------------------------- denied boarding
+  - id: denied_boarding.volunteers_first
+    status: informational
+    scope: all
+    source_clause_refs: ["charter:p4:boarding-denied:intro"]
+    interpretation: >-
+      Where confirmed passengers who reported within the specified time exceed available
+      seats, the airline must first seek volunteers to give up seats in exchange for
+      benefits at the airline's discretion, where airport facilities make this practical.
+    procedural_obligation: seek_volunteers_before_involuntary_denial
+
+  - id: denied_boarding.alternate_within_1h.no_compensation
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:boarding-denied:scenario-1"]
+    interpretation: >-
+      Where an alternate flight is arranged to depart within one hour of the original
+      scheduled departure, no compensation is payable for the missed original flight.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: denied_boarding }
+        - { fact: alternate_flight.minutes_after_original_scheduled, op: lte, value: 60 }
+    entitlement:
+      type: cash
+      cash: true
+      amount_inr: 0
+      basis: alternate_within_one_hour
+
+  - id: denied_boarding.alternate_within_24h
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:boarding-denied:scenario-2-A"]
+    interpretation: >-
+      Where the airline fails to arrange an alternate flight departing within one hour and
+      the alternate departs within 24 hours of the booked scheduled departure,
+      compensation equals 200 percent of booked one-way basic fare plus airline fuel
+      charge, capped at INR 10,000.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: denied_boarding }
+        - { fact: alternate_flight.minutes_after_original_scheduled, op: gt, value: 60 }
+        - { fact: alternate_flight.minutes_after_original_scheduled, op: lte, value: 1440 }
+    entitlement:
+      type: cash
+      cash: true
+      percentage_of: basic_fare_plus_fuel_charge
+      percentage: 200
+      cap_inr: 10000
+
+  - id: denied_boarding.alternate_beyond_24h
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:boarding-denied:scenario-2-B"]
+    interpretation: >-
+      Where the alternate flight departs more than 24 hours after the booked scheduled
+      departure, compensation equals 400 percent of booked one-way basic fare plus airline
+      fuel charge, capped at INR 20,000.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: denied_boarding }
+        - { fact: alternate_flight.minutes_after_original_scheduled, op: gt, value: 1440 }
+    entitlement:
+      type: cash
+      cash: true
+      percentage_of: basic_fare_plus_fuel_charge
+      percentage: 400
+      cap_inr: 20000
+
+  - id: denied_boarding.no_alternate_taken
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:boarding-denied:scenario-2-C"]
+    interpretation: >-
+      Where the passenger does not opt for an alternate flight, they receive a refund of
+      the full value of the ticket plus compensation equal to 400 percent of booked
+      one-way basic fare plus airline fuel charge, capped at INR 20,000.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: denied_boarding }
+        - { fact: passenger.opted_for_alternate, op: eq, value: false }
+    entitlement:
+      type: cash
+      cash: true
+      percentage_of: basic_fare_plus_fuel_charge
+      percentage: 400
+      cap_inr: 20000
+      plus: full_ticket_value_refund
+
+  # ------------------------------------------------------------------------ diversion
+  - id: diversion.wait_over_2h
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p5:flight-diversion:A"]
+    interpretation: >-
+      Where waiting time exceeds two hours, the airline should immediately arrange
+      disembarkation at the nearest airport, with facilitation and refreshment provided
+      during the waiting time.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: diversion }
+        - { fact: event.wait_minutes, op: gt, value: 120 }
+    entitlement:
+      type: facilitation_and_refreshment
+      cash: false
+      airline_obligations: [arrange_disembarkation_nearest_airport]
+
+  - id: diversion.wait_under_2h
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p5:flight-diversion:B"]
+    interpretation: >-
+      Where waiting time is less than two hours at an alternative airport, an appropriate
+      boarding announcement must be made and refreshment, water, tea or coffee provided.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: diversion }
+        - { fact: event.wait_minutes, op: lte, value: 120 }
+    entitlement:
+      type: refreshment
+      cash: false
+
+  # --------------------------------------------------------------- refunds and charges
+  - id: refund.timing.cash_immediate
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:refund-timing:A"]
+    interpretation: Refund is immediate where payment was made by cash.
+    when:
+      all:
+        - { fact: payment.method, op: eq, value: cash }
+    entitlement:
+      type: refund_timing
+      cash: false
+      deadline: immediate
+
+  - id: refund.timing.credit_card_7_days
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:refund-timing:B"]
+    interpretation: Refund within seven days where payment was made by credit card.
+    when:
+      all:
+        - { fact: payment.method, op: eq, value: credit_card }
+    entitlement:
+      type: refund_timing
+      cash: false
+      deadline_days: 7
+
+  - id: refund.timing.travel_agent
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p4:refund-timing:C"]
+    interpretation: >-
+      Where payment was made through a travel agent, the refund comes from the travel
+      agent.
+    when:
+      all:
+        - { fact: payment.method, op: eq, value: travel_agent }
+    entitlement:
+      type: refund_timing
+      cash: false
+      payer: travel_agent
+
+  - id: refund.statutory_charges_always_refundable
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p5:cancellation-charges:A"]
+    interpretation: >-
+      On cancellation the airline must refund all statutory taxes and user development
+      fee, airport development fee and passenger service fee, applicable to all fare types
+      including promotional and special fares, and where the basic fare is non-refundable.
+    when:
+      all:
+        - { fact: event.type, op: in, value: [cancellation, passenger_cancellation] }
+    entitlement:
+      type: refund_component
+      cash: true
+      components: [statutory_taxes, udf, adf, psf]
+      applies_even_if_basic_fare_non_refundable: true
+
+  - id: refund.credit_shell_is_passenger_option
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p5:cancellation-charges:B"]
+    interpretation: >-
+      Holding the refund amount in a credit shell is the passenger's prerogative and must
+      not be a default practice.
+    effect:
+      forbids_default: credit_shell
+    when:
+      all:
+        - { fact: event.type, op: in, value: [cancellation, passenger_cancellation] }
+
+  - id: refund.no_processing_charge
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p5:cancellation-charges:C"]
+    interpretation: >-
+      The passenger is not liable to pay any additional charge to process the refund.
+    when:
+      all:
+        - { fact: event.type, op: in, value: [cancellation, passenger_cancellation] }
+    entitlement:
+      type: fee_prohibition
+      cash: false
+
+  - id: refund.foreign_carrier_country_of_origin
+    status: draft
+    scope: international
+    source_clause_refs: ["charter:p5:cancellation-charges:D"]
+    interpretation: >-
+      Where the airline is a foreign carrier operating to or from India, ticket refund
+      follows the regulations of the airline's country of origin.
+    when:
+      all:
+        - { fact: operating_carrier.is_foreign, op: eq, value: true }
+    effect:
+      defers_to_jurisdiction: operating_carrier.country
+      note: triggers jurisdiction resolution rather than computing here
+
+  - id: booking.name_correction_free_within_24h
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p5:cancellation-charges:F"]
+    interpretation: >-
+      Where the passenger points out a legitimate correction of their name within 24 hours
+      of booking, the airline must not levy an additional charge to incorporate it.
+    when:
+      all:
+        - { fact: request.type, op: eq, value: name_correction }
+        - { fact: request.minutes_after_booking, op: lte, value: 1440 }
+    entitlement:
+      type: fee_prohibition
+      cash: false
+
+  - id: booking.free_cancel_or_amend_within_24h
+    status: superseded_suspected
+    scope: all
+    source_clause_refs: ["charter:p6:no-charge-cancellation-24h"]
+    interpretation: >-
+      Per this 2019 charter, a ticket may be cancelled or amended without additional
+      charge within 24 hours of booking, where booking is at least seven days before the
+      specified first-leg departure.
+    supersession_note: >-
+      Secondary reporting indicates a February 2026 amendment to CAR Section 3, Series M,
+      Part II extended this window to 48 hours. EXCLUDED from demo claims and from
+      entitlement computation until the primary source is archived and confirmed.
+    excluded_from_evaluation: true
+    when:
+      all:
+        - { fact: request.type, op: in, value: [cancellation, amendment] }
+        - { fact: request.minutes_after_booking, op: lte, value: 1440 }
+        - { fact: booking.days_before_first_leg, op: gte, value: 7 }
+    entitlement:
+      type: fee_prohibition
+      cash: false
+
+  # ------------------------------------------------------------- liability limits
+  - id: liability.baggage.domestic
+    status: draft
+    scope: domestic
+    source_clause_refs: ["charter:p8:baggage:domestic-A"]
+    interpretation: >-
+      For loss, delay or damage to baggage on domestic carriage, carrier liability is
+      limited to INR 20,000 per passenger.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: baggage_loss_delay_damage }
+        - { fact: itinerary.is_domestic, op: eq, value: true }
+    entitlement:
+      type: cash
+      cash: true
+      cap_inr: 20000
+      per: passenger
+
+  - id: liability.cargo.domestic
+    status: draft
+    scope: domestic
+    source_clause_refs: ["charter:p8:baggage:domestic-B"]
+    interpretation: >-
+      For loss, delay or damage to cargo on domestic carriage, carrier liability is
+      limited to INR 350 per kilogram.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cargo_loss_delay_damage }
+        - { fact: itinerary.is_domestic, op: eq, value: true }
+    entitlement:
+      type: cash
+      cash: true
+      rate_inr_per_kg: 350
+
+  - id: liability.baggage.international
+    status: draft
+    scope: international
+    source_clause_refs: ["charter:p8:baggage:international-A"]
+    interpretation: >-
+      For international carriage, baggage liability is limited to 1,131 SDR per passenger.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: baggage_loss_delay_damage }
+        - { fact: itinerary.is_domestic, op: eq, value: false }
+    entitlement:
+      type: cash
+      cash: true
+      cap_sdr: 1131
+      per: passenger
+      requires_currency_conversion: true
+
+  - id: liability.cargo.international
+    status: draft
+    scope: international
+    source_clause_refs: ["charter:p8:baggage:international-B"]
+    interpretation: >-
+      For international carriage, cargo liability is limited to 19 SDR per kilogram.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cargo_loss_delay_damage }
+        - { fact: itinerary.is_domestic, op: eq, value: false }
+    entitlement:
+      type: cash
+      cash: true
+      rate_sdr_per_kg: 19
+      requires_currency_conversion: true
+
+  - id: liability.death_or_injury.domestic
+    status: informational
+    scope: domestic
+    source_clause_refs: ["charter:p7:unfortunate-eventuality:domestic-A", "charter:p7:unfortunate-eventuality:domestic-B"]
+    interpretation: >-
+      For domestic travel, the airline is liable to pay up to INR 20,00,000 per passenger
+      in case of death or bodily injury on board. Where death occurs inside the aircraft
+      due to natural causes, the airline is not liable to pay compensation.
+    out_of_mvp_scope: true
+
+  - id: liability.death_or_injury.international
+    status: informational
+    scope: international
+    source_clause_refs: ["charter:p7:unfortunate-eventuality:international-A", "charter:p7:unfortunate-eventuality:international-B"]
+    interpretation: >-
+      For international travel, the airline is liable for damages up to 113,100 SDR per
+      passenger in case of death or bodily injury on board. Where death occurs inside the
+      aircraft due to natural causes, the airline is not liable.
+    out_of_mvp_scope: true
+
+  # ------------------------------------------------------------------- exemptions
+  - id: exemption.force_majeure
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p9:force-majeure:A"]
+    interpretation: >-
+      The airline has no obligation to pay compensation where delays and cancellations are
+      caused by force majeure, meaning extraordinary circumstances beyond the airline's
+      control whose impact caused the delay and which could not have been avoided even if
+      all reasonable measures had been taken. The charter lists examples including
+      political instability, natural disaster, civil war, insurrection or riot, flood,
+      explosion, government regulation or order affecting the aircraft, and strikes or
+      labour disputes interrupting work.
+    # This is why `trigger_type = weather` is NOT a legal verdict. The exemption requires
+    # evidence that the circumstance was external AND unavoidable despite all reasonable
+    # measures. Missing evidence yields needs_human, not an automatic exemption.
+    requires_facts:
+      - cause_evidence.external_to_carrier
+      - cause_evidence.unavoidable_despite_reasonable_measures
+      - cause_evidence.evidence_refs
+    when:
+      all:
+        - { fact: event.type, op: in, value: [delay, cancellation] }
+        - { fact: cause_evidence.external_to_carrier, op: eq, value: true }
+        - { fact: cause_evidence.unavoidable_despite_reasonable_measures, op: eq, value: true }
+    effect:
+      suppresses_entitlement_types: [cash]
+      preserves_entitlement_types: [meals_refreshments, hotel_accommodation, refreshment, ground_transfer_cost]
+      reason_code: FORCE_MAJEURE
+    on_missing_required_fact: needs_human
+
+  - id: exemption.atc_weather_security_delay
+    status: draft
+    scope: all
+    source_clause_refs: ["charter:p9:force-majeure:B"]
+    interpretation: >-
+      The airline is additionally not liable to pay compensation for delay clearly
+      attributable to air traffic control, meteorological conditions, security risks, or
+      other causes beyond the airline's control that affect its ability to operate on
+      schedule. Extraordinary circumstances are deemed to exist where an air traffic
+      management decision for a particular aircraft causes long delay, overnight delay or
+      cancellation that could not be avoided despite all reasonable measures.
+    requires_facts:
+      - cause_evidence.operational_cause
+      - cause_evidence.clearly_attributable
+      - cause_evidence.evidence_refs
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: cause_evidence.operational_cause, op: in, value: [atc, meteorological, security_risk, other_beyond_control] }
+        - { fact: cause_evidence.clearly_attributable, op: eq, value: true }
+    effect:
+      suppresses_entitlement_types: [cash]
+      preserves_entitlement_types: [meals_refreshments, hotel_accommodation]
+      reason_code: BEYOND_CARRIER_CONTROL
+    on_missing_required_fact: needs_human
+
+  # ------------------------------------------------------- procedural obligations
+  - id: information.written_notice_on_denial_or_cancellation
+    status: informational
+    scope: all
+    source_clause_refs: ["charter:p9:right-to-information:A", "charter:p9:right-to-information:B"]
+    interpretation: >-
+      A clearly legible notice of passenger rights must be displayed at check-in, and on
+      denied boarding or cancellation the operating carrier must provide written notice of
+      the compensation and assistance rules plus escalation contact details. Alternative
+      means must be used for visually impaired passengers.
+    procedural_obligation: provide_written_rights_notice
+
+  - id: escalation.airsewa
+    status: informational
+    scope: all
+    source_clause_refs: ["charter:p9:right-to-escalation"]
+    interpretation: >-
+      Passengers may claim at help desks at arrival and departure stations or
+      electronically, escalate unresolved grievances through the AirSewa app or portal, and
+      thereafter to a statutory body or court under applicable law.
+    procedural_obligation: expose_escalation_path

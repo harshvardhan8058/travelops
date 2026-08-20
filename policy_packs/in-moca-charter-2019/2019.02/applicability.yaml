@@ -1,0 +1,51 @@
+pack: in-moca-charter-2019
+version: "2019.02"
+
+# Facts the resolver must have before this pack's applicability can be decided.
+# A missing required fact yields `undetermined` — never `not_applicable`.
+required_facts:
+  - itinerary.origin_country
+  - itinerary.destination_country
+  - itinerary.scheduled_departure_local
+  - operating_carrier.id
+  - event.type
+  - event.travel_date
+
+# Facts required only by specific rule families.
+conditionally_required_facts:
+  cancellation_compensation:
+    - event.notice_minutes
+    - flight.block_time_minutes
+    - fare.one_way_basic_fare_inr
+    - fare.airline_fuel_charge_inr
+    - passenger.contact_info_provided_at_booking
+  denied_boarding_compensation:
+    - alternate_flight.scheduled_departure_local
+    - fare.one_way_basic_fare_inr
+    - fare.airline_fuel_charge_inr
+  delay_care:
+    - flight.block_time_minutes
+    - event.delay_minutes
+  delay_hotel:
+    - event.delay_minutes
+    - event.notice_minutes
+    - flight.scheduled_departure_local
+  exemption_assessment:
+    - cause_evidence.operational_cause
+    - cause_evidence.external_to_carrier
+    - cause_evidence.reasonable_measures_evidenced
+
+applies_when:
+  any_of:
+    - itinerary.origin_country: IN
+    - operating_carrier.country: IN
+
+# The charter addresses both domestic and international carriage but states different
+# limits for each. Rules carry their own `scope` field.
+scope_notes:
+  - Domestic and international scopes have different liability limits; do not mix them.
+  - Foreign carriers operating to/from India have refund rules tied to their country of
+    origin regulations per the charter's cancellation-charges section.
+
+on_missing_required_fact: undetermined
+on_undetermined: needs_human

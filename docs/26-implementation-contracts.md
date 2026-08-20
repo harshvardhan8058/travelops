@@ -188,7 +188,10 @@ Startup prints a non-secret mode summary and validates:
 
 - unknown mode/enum: refuse startup
 - missing assurance config or hash: refuse workflow execution
-- `POLICY_MODE=verified` with unapproved/mismatched pack: refuse verified mode
+- `POLICY_MODE=verified` with a pack whose status is not `approved` or whose
+  `verified_mode_eligible` is false: refuse verified mode
+- `POLICY_MODE=charter` with a pack lacking `ui_label` or source metadata: refuse startup
+- any rule marked `excluded_from_evaluation`: never evaluated, and surfaced as a supersession notice
 - live LLM with no key: degrade to fixture only when explicitly allowed
 - Gmail/Mailtrap mode with no credentials: degrade to console only when explicitly allowed
 - empty recipient allowlist: no real external email

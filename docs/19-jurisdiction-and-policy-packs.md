@@ -67,18 +67,19 @@ exists, the result is `needs_human`.
 
 ```text
 policy_packs/
-└── in-dgca-car-3m4/
-    └── <version>/
-        ├── pack.yaml              # identity, scope, effective dates, review state
+└── in-moca-charter-2019/          # real, encoded example
+    └── 2019.02/
+        ├── pack.yaml              # identity, scope, status, verified eligibility
         ├── applicability.yaml     # required facts + applicability rules
-        ├── conflict_rules.yaml    # only reviewed overlap/precedence rules
-        ├── rules.yaml             # deterministic entitlements
-        ├── test_cases.yaml        # examples and edge cases from review
-        ├── review.yaml            # reviewer, date, approval, comments
-        ├── source.pdf             # archived primary document, if redistribution permits
-        ├── source.sha256
-        └── extracted.md           # clause-structured extraction
+        ├── rules.yaml             # deterministic entitlements, each with source refs
+        ├── test_cases.yaml        # expectations and fail-closed cases
+        ├── review.yaml            # reviewer, open questions, per-rule sign-off
+        ├── source-metadata.yaml   # URL, date, hash, supersession notes
+        └── source.pdf             # archived original, once redistribution is confirmed
 ```
+
+`conflict_rules.yaml` is added only when an authorised reviewer defines overlap handling. Until then
+`pack.yaml` sets `conflict_rules_defined: false` and overlaps resolve to `needs_human`.
 
 Illustrative metadata—**not a verified DGCA pack**:
 
@@ -168,11 +169,44 @@ official source document
 merit for structured PDF conversion. The extracted text is not the legal source; the archived primary
 document and its hash are.
 
+## Pack status ladder
+
+A pack's status—not its existence—determines what the system may claim.
+
+| Status | Source quality | May compute? | May be called current law? |
+| --- | --- | --- | --- |
+| `draft` | Anything, including commentary | No | No |
+| `official_guidance_dated` | Official publication, but secondary or superseded-suspect | Yes, labelled | **No** |
+| `approved` | Current primary regulation + SME sign-off | Yes | Yes |
+| `retired` | Superseded | Replay only | No |
+
+`POLICY_MODE` maps directly onto it: `demo` loads a fictional fixture, `charter` loads
+`official_guidance_dated`, `verified` loads only `approved`. The loader rejects any pack whose
+`verified_mode_eligible` is false when running in verified mode.
+
+## India: current state
+
+Two packs exist in the design, at different rungs of that ladder.
+
+**`in-moca-charter-2019` — encoded, `official_guidance_dated`.** Built from the Ministry of Civil Aviation
+Passenger Charter (February 2019) supplied by the team. Real, citable figures for delay care, cancellation
+compensation bands, denied-boarding percentages and caps, baggage and cargo liability, and refund timing.
+It carries a visible UI label and cannot reach verified mode, because the charter self-describes as general
+guidance and secondary sources indicate later CAR revisions. See
+[`13-compensation-and-policy.md`](13-compensation-and-policy.md).
+
+**`in-dgca-car-3m4` — not yet created.** Requires the current primary CAR, its revision and effective
+metadata, amendment history and an authorised SME review.
+
+The important property: moving from charter to verified changes **pack data and status only**. The
+resolver, engine, citation card and UI do not change. That is the scalability claim, demonstrated on the
+jurisdiction we actually have.
+
 ## Hackathon scope
 
 1. Ship the generic loader, resolver contract, rules engine and citation card.
-2. Develop against a conspicuous `DEMO_POLICY_FIXTURE` while source review is pending.
-3. Replace it with one verified India pack when the primary CAR and rule-review sheet are available.
+2. Run Stage 2 and Stage 3 in `charter` mode against the encoded 2019 pack, clearly labelled.
+3. Promote to `verified` when the primary CAR, resolved supersession questions and SME sign-off exist.
 4. A second jurisdiction is optional structural proof only after the India flow works end to end. Do not
    claim compliance completeness for EU/UK/US/Montreal regimes.
 
@@ -181,6 +215,8 @@ document and its hash are.
 | Condition | Result |
 | --- | --- |
 | Pack missing, draft, expired or hash mismatch | `needs_human`; no authoritative result |
+| Pack is `official_guidance_dated` in verified mode | Load rejected; `PACK_NOT_VERIFIED_ELIGIBLE` |
+| Rule marked `excluded_from_evaluation` | Skipped; supersession notice surfaced |
 | Required trip fact missing | pack applicability `undetermined` |
 | Multiple packs conflict without reviewed conflict rule | `needs_human` |
 | Rule lacks source clause | loader rejects pack |

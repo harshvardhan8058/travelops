@@ -78,9 +78,10 @@ do not start Phase 3.
 3. The assurance gate—not model self-confidence—authorises or blocks each action.
 4. A model-proposed unknown action, stale source, missing entity and high-risk action are visibly blocked.
 5. SQL retrieval surfaces a planted precedent and records why it matched.
-6. Minimum India policy-pack flow works end to end **only if primary-source verification is complete**:
-   source document → extracted clause → reviewed rule → deterministic evaluation → citation card.
-   Otherwise use a conspicuous `DEMO_POLICY_FIXTURE` with no legal-authority claim.
+6. India policy-pack flow works end to end in `charter` mode against
+   `in-moca-charter-2019/2019.02`: source metadata → rule → deterministic evaluation → citation card with
+   the dated-source badge. Promotion to `verified` requires the primary CAR and SME sign-off; excluded
+   rules must remain excluded.
 
 **Gate:** kill the model in front of the reviewer; the recovery still completes and the UI explains the
 degraded path.

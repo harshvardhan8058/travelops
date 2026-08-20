@@ -108,8 +108,14 @@ is provisional research, not executable law.
 
 - Regulation flow: Trip Context → resolver → **approved, source-hashed policy pack** → deterministic
   engine → Assurance Gate → cited result.
-- `POLICY_MODE=demo` must say `DEMO POLICY FIXTURE`, show no legally authoritative amount, and create no
-  authoritative external side effect.
+- Three policy modes. `demo` = fictional fixture, no citation. `charter` = the encoded MoCA Passenger
+  Charter (Feb 2019) pack, real cited figures behind the badge *pending CAR verification*. `verified` =
+  current primary CAR + SME sign-off, **not reachable yet**. Only `verified` may be described as current law.
+- The charter pack lives at `policy_packs/in-moca-charter-2019/2019.02/`. Delay attracts **no cash
+  compensation** in that instrument; cash exists only for cancellation and denied boarding. Never describe
+  a delay payout.
+- The 24-hour no-charge cancellation rule is `superseded_suspected` (reported Feb 2026 amendment moved it
+  to 48 hours). It must never evaluate and never appear in a demo.
 - Never infer force majeure from a generic `trigger_type`; cause assessment requires pack-defined facts
   and evidence.
 - Missing source, clause, required fact, pack approval or conflict rule produces `needs_human`.

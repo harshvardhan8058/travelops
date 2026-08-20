@@ -262,9 +262,14 @@ The deterministic policy-pack architecture is complete in
 [`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md). The legal content is **not**
 complete: the current DGCA primary CAR, revision metadata and SME review are not yet archived.
 
-Until they are, use `POLICY_MODE=demo`, omit authoritative rupee amounts and do not infer force majeure
-from a generic weather trigger. The exact acquisition path is
-[`24-input-acquisition.md`](24-input-acquisition.md).
+The team supplied the **MoCA Passenger Charter (February 2019)**, now encoded as
+`policy_packs/in-moca-charter-2019/2019.02/` with status `official_guidance_dated`. That unlocks real cited
+figures in `POLICY_MODE=charter`. It does **not** unlock `verified`, because the charter is secondary
+guidance and later CAR revisions are reported.
+
+Do not infer force majeure from a generic weather trigger. The acquisition path for the primary CAR is
+[`24-input-acquisition.md`](24-input-acquisition.md); encoded rules and open review questions are in
+[`13-compensation-and-policy.md`](13-compensation-and-policy.md).
 
 ### D4 — email
 

@@ -92,8 +92,12 @@ record. Do not add LLM features until fixed.
 
 ### Policy
 
-- [ ] Generic pack loader/resolver/rules engine works with `DEMO_POLICY_FIXTURE`.
-- [ ] UI never labels demo fixture `VERIFIED`.
+- [ ] Generic pack loader/resolver/rules engine works in `demo` and `charter` modes.
+- [ ] `charter` mode passes every case in the pack's `test_cases.yaml`, including the fail-closed and
+      superseded-rule cases.
+- [ ] Verified mode rejects `in-moca-charter-2019` with `PACK_NOT_VERIFIED_ELIGIBLE`.
+- [ ] The 24-hour cancellation rule never evaluates and never appears in the UI.
+- [ ] UI never labels a dated or fixture pack `VERIFIED`.
 - [ ] If DGCA primary source + review are complete: approved India pack hash validates, rule tests pass,
       and one result links exact source clauses.
 - [ ] If incomplete: authoritative amounts/citations are absent and the demo script takes the unverified

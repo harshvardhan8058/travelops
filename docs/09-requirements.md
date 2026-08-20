@@ -175,8 +175,9 @@ The demo succeeds if a judge can watch this happen and follow every step:
 5. An allowlisted real email arrives if credentials are configured; bulk notifications remain simulated.
 6. A judge can open any action and see evidence, assurance checks, actor and timeline.
 7. `LLM_MODE=off` completes the same core recovery.
-8. If the verified India pack is present, an entitlement links to pack version, rule and source clause;
-   otherwise the UI clearly labels `DEMO_POLICY_FIXTURE` and shows no authoritative amount.
+8. Every entitlement links to pack ID, version, rule ID and source reference, and the UI shows the pack's
+   status badge. Only an `approved` pack may be presented as current law; `charter` mode shows real cited
+   figures labelled as dated guidance; `demo` mode shows no authoritative amount.
 
 Step 7 is the one that separates this from a demo that merely calls an LLM. Deliberately showing the
 system survive its own AI failing is a stronger argument than any successful plan.

@@ -26,9 +26,9 @@ Postgres schema, seeded synthetic data, real-weather provider with an offline fi
 identify connections → assure proposed actions → simulate recovery actions → notify. Ops Board plus
 Decision Timeline in the UI. No model anywhere.
 
-A minimum policy-pack loader is included from Phase 1 so the data model never hardcodes DGCA. Until the
-current primary document is verified, this phase uses a conspicuous `DEMO_POLICY_FIXTURE` and makes no
-legally authoritative entitlement claim.
+A policy-pack loader is included from Phase 1 so the data model never hardcodes DGCA. Phase 1 may run
+either the fictional `demo` fixture or the encoded `in-moca-charter-2019` pack in `charter` mode, which
+produces real cited figures behind a dated-source badge. Neither is presented as current law.
 
 *Gate:* a disruption injected by API produces a complete recovery and a readable `decision_log`.
 

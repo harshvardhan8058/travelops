@@ -16,8 +16,13 @@ Still needed:
 - revision/effective metadata and amendments
 - reviewed rule sheet from an authorised aviation/legal/domain SME
 
-Until supplied, use `POLICY_MODE=demo`, display `DEMO POLICY FIXTURE`, and show no legally authoritative
-rupee amount. This does **not** block Stage 2 engineering.
+**Partially resolved.** The team supplied the MoCA Passenger Charter (Feb 2019), now encoded as
+`policy_packs/in-moca-charter-2019/2019.02/`. We can run `POLICY_MODE=charter` with real cited figures
+behind a dated-source badge.
+
+Still required for `verified` mode: the current primary CAR with revision/effective metadata, resolution of
+the reported Aug 2024 Part IV revision and Feb 2026 Part II amendment, and SME sign-off in the pack's
+`review.yaml`. This does **not** block Stage 2 engineering.
 
 ## 2. Coforge internal tools — blocks only the internal-tool scoring claim
 

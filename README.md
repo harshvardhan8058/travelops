@@ -12,7 +12,7 @@ AI** (Registration ID 201) for the Coforge TechCon 2026 Hackathon.
 | Team | SkyForge AI |
 | Industry | Travel Transport Hospitality (TTH) → Airlines Operations |
 | Theme | Engineering the Autonomous Enterprise |
-| Current repository status | Design and implementation contracts; application code not started |
+| Current repository status | Design, implementation contracts and one encoded policy pack; application code not started |
 | Submitted deck | Frozen; see [`docs/17-presentation-prompt.md`](docs/17-presentation-prompt.md) |
 | Next build target | Stage 2 working deterministic vertical slice |
 
@@ -75,7 +75,7 @@ labelled.
 | [01 Architecture](docs/01-architecture.md) | Control plane and deterministic/LLM boundary |
 | [03 Agent design](docs/03-agent-design.md) | 3 reasoning agents + 10 deterministic services |
 | [11 Data model](docs/11-data-model.md) | PostgreSQL schema including assurance and policy packs |
-| [13 Policy note](docs/13-compensation-and-policy.md) | Provisional regulatory research; not authoritative until reviewed |
+| [13 Policy status](docs/13-compensation-and-policy.md) | Encoded MoCA charter rules; verified mode still blocked |
 | [18 Assurance Gate](docs/18-decision-assurance-gate.md) | Deterministic execution gate replacing self-confidence |
 | [19 Policy packs](docs/19-jurisdiction-and-policy-packs.md) | Jurisdiction-neutral rules + cited explanation |
 | [20 Phased delivery](docs/20-phased-delivery.md) | Five demonstrable product phases |
@@ -105,7 +105,8 @@ are not required for this MVP.
 2. Structured model output; no parsing English for control flow.
 3. Deterministic code for rules, calculations, validation and execution.
 4. Decision Assurance Gate—not LLM self-reported confidence.
-5. No authoritative legal amount without a reviewed primary-source policy pack.
+5. Pack status governs legal claims: `demo` fixture, `charter` (real cited figures, dated source),
+   `verified` (current primary CAR + SME sign-off). Only `verified` is current law.
 6. Every external provider has a fixture/offline implementation.
 7. Every data surface states provenance.
 8. Operations-console UI: graphite, instrument cyan, semantic status colours; no purple gradients or AI-template styling.

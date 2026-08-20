@@ -40,7 +40,7 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | [10 — Data Sources](10-data-sources.md) | Candidate sources, validation status and fallbacks |
 | [11 — Data Model](11-data-model.md) | PostgreSQL model, assurance and policy records |
 | [12 — Synthetic Data](12-synthetic-data-plan.md) | Fixed-seed scenario and provenance |
-| [13 — Policy Research](13-compensation-and-policy.md) | Provisional DGCA note; not authoritative until source/review |
+| [13 — Policy Status](13-compensation-and-policy.md) | Encoded MoCA charter figures, corrections, and what still blocks verified mode |
 
 ## Delivery and presentation
 
