@@ -324,19 +324,54 @@ Judges reward this because it demonstrates observability, explainability and aut
 simultaneously. It is also nearly free — `decision_log` in [`11-data-model.md`](11-data-model.md)
 already captures exactly this.
 
-### 3. Confidence scores on every decision
+### 3. Decision Assurance Gate, not confidence scores
+
+**Superseded:** the original design surfaced an LLM-reported `confidence` percentage and gated execution
+on it. Mentor review flagged that self-reported confidence is poorly calibrated; we agree and removed it
+from the execution path.
 
 ```
-Prediction  94%
-Reason      Heavy rainfall
-Confidence  High
-Evidence    METAR, historical, wind speed
+Risk level      HIGH  (elevated · high · severe)
+Basis           METAR VOBL, wind 32kt, historical BLR monsoon delay rate
+Gate            needs_human
+Blocking check  action_risk = high (cash compensation, 180 pax)
 ```
 
-The `confidence` field already exists in the agent response contract
-([`03-agent-design.md`](03-agent-design.md)) and in the `action` and `prediction` tables. What is new
-is the requirement to **surface evidence in the UI**, not merely store a number — a bare percentage
-invites the question "based on what?"
+Execution is gated by six deterministic checks — evidence completeness, source freshness, entity
+validation, policy compliance, conflict detection, action risk tier — computed in code from verifiable
+facts. Full spec: [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md).
+
+The UI requirement stands and strengthens: **surface evidence, not a number.** Percentages appear only
+where calibrated; elsewhere we show a risk level with its contributing factors.
+
+---
+
+## Mentor review — resolutions
+
+Five review comments on the submitted deck. The deck is fixed; these are resolved in the build and docs.
+
+| # | Comment | Resolution | Doc |
+| --- | --- | --- | --- |
+| 1 | Ambitious, phase it, use simulators | Five phases, each ending at a demonstrable system; simulators behind provider interfaces by design | [`20-phased-delivery.md`](20-phased-delivery.md) |
+| 2 | Why 9 rotations for 8 flights? | Crew are assigned to pairings, not flights — many-to-many, plus onward duties and positioning. Made traceable in the cascade view | [`22-crew-pairing-model.md`](22-crew-pairing-model.md) |
+| 3 | "13 agents" is really 3 agents + tools | Retaxonomised: 1 orchestrator + 3 reasoning agents + 10 deterministic services | [`03-agent-design.md`](03-agent-design.md) |
+| 4 | LLM self-reported confidence is unreliable | Removed from the contract; replaced by the deterministic assurance gate, with model self-report logged for calibration comparison | [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md) |
+| 5 | DGCA is India-specific — how does it scale? | Jurisdiction resolver → versioned policy packs → deterministic rules engine → cited explanation. RAG cites, never calculates | [`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md) |
+
+## Open-source stack list
+
+Coforge published a suggested open-source AI stack. It is **suggested and free, not mandatory**. We align
+where it earns a place: Llama 3.3 70B is already our model, Chroma already our optional vector store, and
+we adopt **Docling** for regulatory PDF extraction. We decline LangGraph, CrewAI, graph databases and
+SQLite with stated reasons — see [`23-stack-alignment.md`](23-stack-alignment.md).
+
+## UI direction
+
+The application UI is an **operations console**, not an AI landing page. Near-monochrome graphite, one
+instrument-cyan accent, colour reserved for operational state, monospaced tabular numerals for all
+operational data. **No purple, violet or indigo. No gradients, glows or glassmorphism** — that palette is
+the default AI-demo look and reads as a template. Full token set and rules:
+[`21-design-system.md`](21-design-system.md).
 
 ---
 

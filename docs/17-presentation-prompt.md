@@ -2,6 +2,23 @@
 
 The canonical Gamma AI prompt for the TechCon 2026 idea submission. **3 slides, hard limit.**
 
+> ## ⚠️ FROZEN — this deck has been submitted
+>
+> Kept as a record of what the judges received. **Do not regenerate or edit it.** It contains two claims
+> that later review superseded:
+>
+> | In the deck | Current position |
+> | --- | --- |
+> | "13 total agents, only 3 use LLM" | 1 orchestrator + 3 reasoning agents + 10 deterministic services — [`03-agent-design.md`](03-agent-design.md) |
+> | Confidence Boundary with a 92% score | Deterministic Decision Assurance Gate — [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md) |
+>
+> Handle both verbally: volunteering the correction reads as rigour. All *future* material uses the
+> current position.
+>
+> Note also that the glassmorphism and gradient direction below is a **presentation** aesthetic. The
+> application UI follows [`21-design-system.md`](21-design-system.md), which forbids it. Different
+> medium, different rules.
+
 Paste the block below into Gamma verbatim.
 
 ## Design intent
