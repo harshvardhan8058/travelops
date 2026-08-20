@@ -1,227 +1,235 @@
 # 16. Folder Structure and Coding Standards
 
-Resolves backlog item #7. Follows the Master Blueprint layout, adapted to the confirmed stack in
-[`DECISIONS.md`](DECISIONS.md).
+Canonical implementation layout for **1 orchestrator + 3 reasoning agents + 10 deterministic services**.
+It replaces the older layout that incorrectly put rules engines and integrations under `agents/`.
 
 ## Layout
 
-```
+```text
 travelops/
 ├── docker-compose.yml
 ├── .env.example
-├── Makefile                       # make up / seed / test / demo
-│
+├── Makefile                         # up / seed / test / demo / reset
 ├── backend/
 │   ├── pyproject.toml
 │   ├── app/
-│   │   ├── main.py                # FastAPI entrypoint
-│   │   ├── config.py              # settings; NO hardcoded thresholds (A5)
+│   │   ├── main.py                  # FastAPI entrypoint
+│   │   ├── config.py                # typed settings; no magic numbers
+│   │   ├── api/                     # routers + generated OpenAPI
+│   │   ├── models/                  # SQLAlchemy and Pydantic schemas
+│   │   ├── migrations/              # Alembic
 │   │   │
-│   │   ├── agents/
-│   │   │   ├── base.py            # Agent ABC + response contract
-│   │   │   ├── prediction.py      # rules engine, no LLM
-│   │   │   ├── planner.py         # Groq
+│   │   ├── agents/                  # ONLY the three reasoning components
+│   │   │   ├── contract.py
+│   │   │   ├── planner.py
+│   │   │   ├── explainer.py
+│   │   │   └── report_generator.py
+│   │   │
+│   │   ├── services/                # deterministic capabilities; never import LLM client
+│   │   │   ├── delay_risk.py
 │   │   │   ├── flight_recovery.py
 │   │   │   ├── hotel.py
 │   │   │   ├── transport.py
 │   │   │   ├── communication.py
-│   │   │   ├── finance.py         # DGCA compensation, no LLM
-│   │   │   ├── crew.py            # coordination only, not legality
-│   │   │   ├── analytics.py
-│   │   │   └── learning.py
+│   │   │   ├── compensation.py
+│   │   │   ├── crew_impact.py
+│   │   │   ├── connection.py
+│   │   │   ├── resource.py
+│   │   │   └── analytics_learning.py
 │   │   │
 │   │   ├── orchestrator/
-│   │   │   ├── engine.py          # workflow execution, parallelism
-│   │   │   ├── limits.py          # recursion / iteration / timeout caps
-│   │   │   └── state.py           # incident state transitions
-│   │   │
-│   │   ├── events/
-│   │   │   ├── bus.py             # Redis Streams
-│   │   │   └── types.py           # typed event definitions
-│   │   │
-│   │   ├── services/              # deterministic; agents call these
-│   │   │   ├── weather.py         # aviationweather.gov + Open-Meteo
-│   │   │   ├── flight_sim.py      # local flight state machine
-│   │   │   ├── hotel_search.py    # SQL
-│   │   │   ├── compensation.py    # DGCA rules table
-│   │   │   ├── notification.py    # channel interface
-│   │   │   └── validation.py      # schema + policy gate
-│   │   │
-│   │   ├── memory/
-│   │   │   ├── retrieval.py       # SQL precedent (D2)
-│   │   │   └── outcomes.py        # incident outcome recording
-│   │   │
-│   │   ├── llm/
-│   │   │   ├── client.py          # Groq wrapper: retry, cache, fixtures
-│   │   │   ├── prompts/           # versioned .md files, one per agent
-│   │   │   │   ├── planner.v1.md
-│   │   │   │   ├── explainer.v1.md
-│   │   │   │   └── report.v1.md
-│   │   │   └── fixtures/          # recorded responses for offline dev
-│   │   │
-│   │   ├── models/                # SQLAlchemy + Pydantic schemas
-│   │   ├── api/                   # routers
-│   │   └── migrations/
+│   │   │   ├── engine.py            # sequencing, retries, idempotency, parallel tasks
+│   │   │   ├── state.py             # incident state machine
+│   │   │   └── limits.py            # iteration and timeout caps
+│   │   ├── assurance/
+│   │   │   ├── gate.py              # pure deterministic aggregation
+│   │   │   ├── checks.py            # six checks
+│   │   │   └── config.py            # version + hash, fail closed
+│   │   ├── policy/
+│   │   │   ├── resolver.py          # trip context → applicable packs
+│   │   │   ├── engine.py            # generic rule DSL
+│   │   │   ├── loader.py
+│   │   │   └── schemas.py
+│   │   ├── providers/               # external boundaries, each with fixture implementation
+│   │   │   ├── weather/
+│   │   │   ├── flight_status/
+│   │   │   ├── schedules/
+│   │   │   ├── notifications/
+│   │   │   └── llm/
+│   │   ├── events/                  # Redis Streams + typed events
+│   │   ├── memory/                  # SQL precedent + outcomes
+│   │   ├── observability/           # structlog + decision/event records
+│   │   └── llm/
+│   │       ├── prompts/              # planner/explainer/report, versioned files
+│   │       └── fixtures/             # recorded structured responses
 │   └── tests/
-│
+│       ├── unit/                     # services, gate, policy DSL
+│       ├── contract/                 # providers and API schemas
+│       └── e2e/                      # bengaluru_storm
 ├── frontend/
 │   ├── package.json
 │   └── src/
-│       ├── api/                   # generated/typed client
-│       ├── components/ui/         # shadcn
-│       ├── features/
-│       │   ├── dashboard/
-│       │   ├── incident/
-│       │   ├── timeline/          # replay
-│       │   ├── analytics/
-│       │   └── reports/
-│       └── types/
-│
+│       ├── api/                      # generated typed client
+│       ├── components/ui/            # themed shadcn primitives
+│       ├── design/                   # tokens from docs/21
+│       └── features/
+│           ├── ops-board/
+│           ├── cascade/
+│           ├── timeline/
+│           ├── assurance/
+│           ├── policy-citation/
+│           └── reports/
+├── policy_packs/
+│   └── demo-policy-fixture/          # non-authoritative until verified source is supplied
 ├── data/
-│   ├── loaders/                   # REAL data
-│   │   ├── load_airports.py
-│   │   ├── load_schedules.py
-│   │   └── backfill_weather.py
-│   ├── generators/                # SYNTHETIC data
-│   │   ├── generate_passengers.py
-│   │   ├── generate_hotels.py
-│   │   ├── generate_crew.py
-│   │   └── generate_history.py
-│   ├── fixtures/
-│   │   └── bengaluru_storm.yaml
-│   └── dumps/
-│       └── demo_dataset.sql       # frozen, committed (Day 6)
-│
-└── docs/                          # this directory
+│   ├── loaders/                      # public real data
+│   ├── generators/                   # synthetic data
+│   ├── fixtures/bengaluru_storm.yaml
+│   └── dumps/demo_dataset.sql
+└── docs/
 ```
 
-## Why it is shaped this way
+## Dependency rules
 
-**`agents/` versus `services/` is the load-bearing split.** Agents decide; services do. An agent has a
-goal, tools and constraints. A service is a deterministic function. If a file in `services/` imports
-the Groq client, something has gone wrong.
+1. `agents/` may call typed tools through the orchestrator; agents never execute side effects directly.
+2. `services/` and `assurance/` must never import an LLM client.
+3. `providers/` own network I/O. Every provider has a fixture/offline implementation.
+4. `policy/engine.py` is jurisdiction-neutral. DGCA-specific data lives only in a policy pack.
+5. `frontend/` consumes generated OpenAPI types; never hand-maintain a parallel API model.
+6. Real, simulated, synthetic and fixture data stay distinguishable in storage and API responses.
 
-**`llm/prompts/` holds versioned files, not inline strings.** This is the mitigation for prompt drift
-(risk #9). One prompt per agent, changes reviewed like code.
-
-**`llm/fixtures/` is not optional.** With ~100K Groq tokens/day, offline development is a hard
-requirement. Recorded responses let the UI and orchestration be built without spending budget.
-
-**`data/loaders/` versus `data/generators/` keeps real and synthetic separable.** This matters for
-honesty — you must be able to answer "which data is real?" precisely.
-
-**`orchestrator/limits.py` is its own module** so loop caps are impossible to overlook. Risk #2 is easy
-to forget until an agent loop burns the token budget in ten minutes.
-
-## Coding standards
-
-### Python
-
-| Rule | Detail |
-| --- | --- |
-| Formatter / linter | `ruff` — format and lint, one tool |
-| Type hints | Required on all public functions |
-| Async | `async def` for I/O; never block the event loop |
-| Config | Pydantic settings from env. **No magic numbers in code** |
-| Errors | Typed exceptions; never bare `except:` |
-| Logging | Structured (`structlog`); every agent action logs to `decision_log` |
-
-### The agent contract
-
-Every agent implements the same interface and returns the same shape:
+## Reasoning-agent contract
 
 ```python
-class AgentResponse(BaseModel):
+from typing import Annotated, Literal
+from pydantic import BaseModel, Field
+
+class AgentEnvelope(BaseModel):
     status: Literal["success", "failure", "skipped", "needs_human"]
-    confidence: int          # 0-100
-    action: str              # known enum value
-    reason: str              # human-facing, surfaced in UI
-    payload: dict = {}
-    cost_inr: int | None = None
+    reason: str
+    evidence_refs: list[str] = Field(default_factory=list)
+    payload_type: str
+
+class PlanTask(BaseModel):
+    action: str                      # validated against the known action enum
+    target_refs: list[str]
+    inputs: dict[str, object] = Field(default_factory=dict)
+    depends_on: list[str] = Field(default_factory=list)
+
+class PlannerResponse(AgentEnvelope):
+    payload_type: Literal["planner.v1"]
+    tasks: list[PlanTask]
+
+class ExplanationResponse(AgentEnvelope):
+    payload_type: Literal["explanation.v1"]
+    explanation: str
+    citation_refs: list[str]
+
+class ReportResponse(AgentEnvelope):
+    payload_type: Literal["report.v1"]
+    summary: str
+    sections: list[dict[str, object]]
+    metric_refs: list[str]
+
+ReasoningResponse = Annotated[
+    PlannerResponse | ExplanationResponse | ReportResponse,
+    Field(discriminator="payload_type"),
+]
 ```
 
-Never return prose. The orchestrator branches on `status` and thresholds on `confidence`; it must never
-parse English. See [`03-agent-design.md`](03-agent-design.md).
+`confidence` is deliberately absent. If a model emits one, store it separately as
+`model_self_report` in model-call audit metadata and never branch on it. Only
+`PlannerResponse.tasks[]` enters action-enum/entity validation and then the Decision Assurance Gate;
+Explanation and Report responses are read-only artifacts.
 
-### TypeScript
+## Python standards
 
-| Rule | Detail |
+| Rule | Standard |
 | --- | --- |
-| `strict` mode | On. No `any` |
-| Types | Generated from the OpenAPI schema — never hand-written |
-| Components | Function components; hooks for state |
-| Server state | React Query; no manual fetch/`useEffect` chains |
-| Styling | Tailwind + shadcn, **theme overridden** per [`21-design-system.md`](21-design-system.md). Tokens only — no colour literals in components. No bespoke CSS files |
-| Icons | Lucide only. 16px dense, 20px rail, `1.5` stroke |
+| Runtime | Python 3.12 |
+| Dependency/build | `uv` + `pyproject.toml` |
+| Formatting/lint | Ruff |
+| Types | Type hints on public functions; mypy/pyright-compatible |
+| I/O | Async where the library supports it; no blocking calls in request handlers |
+| Config | Pydantic Settings from environment; missing safety config fails closed |
+| Errors | Typed exceptions; no bare `except` |
+| Logging | Structlog; correlation ID, incident ID and actor on every record |
+| Time | UTC in storage, explicit local zone only in display |
+| Money | Integer minor units or integer INR for the demo; never float |
 
-### Naming
+## TypeScript and UI standards
 
-| Thing | Convention |
+| Rule | Standard |
 | --- | --- |
-| Python modules, functions | `snake_case` |
-| Python classes | `PascalCase` |
-| React components | `PascalCase` |
-| Database tables, columns | `snake_case`, singular table names |
-| Event types | `SCREAMING_SNAKE_CASE` (`HIGH_RISK_DELAY`) |
-| Action types | `snake_case` (`reserve_hotels`) |
-| Prompt files | `<agent>.v<n>.md` |
+| TypeScript | `strict`; no `any` |
+| Server state | React Query; no manual fetch chains |
+| Styling | Tailwind + shadcn theme overridden by [`21-design-system.md`](21-design-system.md) |
+| Colour | Tokens only; zero purple/violet/indigo; no colour literals in components |
+| Icons | Lucide only, 16px dense / 20px rail, 1.5 stroke |
+| Data typography | JetBrains Mono + tabular numerals |
+| Accessibility | WCAG AA, visible focus, status uses icon + label—not colour alone |
 
-### Git
+## API and persistence standards
 
-Trunk-based, short-lived branches, `main` always runnable.
+- Resources use stable IDs; mutation endpoints accept `Idempotency-Key`.
+- Every response that mixes data sources includes `provenance` (`real`, `simulated`, `synthetic`,
+  `fixture`, `unavailable`) plus source timestamp where applicable.
+- Every action references the immutable assurance evaluation that authorised or blocked it; an action
+  following `needs_human` also references the matching immutable approval record.
+- Every entitlement references policy pack, pack version, rule ID and source clause.
+- API contract and state transitions are specified in [`26-implementation-contracts.md`](26-implementation-contracts.md).
 
-```
-feat(agents): add hotel agent with budget constraint
-fix(orchestrator): enforce max iteration cap
-docs: record DGCA compensation rules
-```
+## Test priorities
 
-**`main` must always run.** During a 7-day sprint with daily integration, a broken `main` blocks three
-other people.
+| Priority | Scope |
+| --- | --- |
+| Must | Assurance aggregation and fail-closed behaviour |
+| Must | Policy DSL and every verified entitlement rule |
+| Must | Delay-risk rule output and units |
+| Must | Agent schema validation and unknown-action rejection |
+| Must | Idempotency and conflict detection |
+| Must | End-to-end `bengaluru_storm` in fixture and LLM-off modes |
+| Should | Provider contracts, cold start and reset |
+| Should | Accessibility smoke check and projector viewport |
+| Avoid | Assertions on free-form LLM wording |
 
-### Testing
+## Environment contract
 
-Given [`14-hackathon-plan.md`](14-hackathon-plan.md), testing is targeted rather than exhaustive.
+```dotenv
+APP_ENV=development
+DATABASE_URL=postgresql+asyncpg://travelops:travelops@postgres:5432/travelops
+REDIS_URL=redis://redis:6379/0
 
-| Priority | What | Why |
-| --- | --- | --- |
-| Must | Compensation calculator | Regulatory correctness; pure function, trivial to test |
-| Must | Prediction rules engine | Deterministic; drives the whole demo |
-| Must | Plan schema validation | Guards the LLM boundary |
-| Must | End-to-end `bengaluru_storm` | The demo itself |
-| Should | Idempotency of execution actions | Prevents double-booking |
-| Should | Fallback playbook with Groq disabled | This is Act 6 of the demo |
-| Skip | UI unit tests | Rehearsal covers it more cheaply |
-| Skip | LLM output assertions | Non-deterministic; assert the schema, not the content |
-
-Test the deterministic half properly and the demo path end to end. Do not write tests that assert what
-a language model said.
-
-## Environment
-
-```bash
-# .env.example
+LLM_MODE=fixture                       # live | fixture | off
 GROQ_API_KEY=
 GROQ_MODEL=llama-3.3-70b-versatile
-GROQ_TEMPERATURE=0.1              # NFR-1 reproducibility
-LLM_MODE=live                     # live | fixture | off  <- 'off' powers demo Act 6
 
-DATABASE_URL=postgresql://travelops:travelops@localhost:5432/travelops
-REDIS_URL=redis://localhost:6379/0
-
+WEATHER_MODE=fixture                   # live | fixture
 WEATHER_POLL_SECONDS=60
-DELAY_RISK_THRESHOLD=0.75
-HOTEL_MAX_RATE_INR=6000           # A5: config, never hardcoded
-MEAL_THRESHOLD_MINUTES=120        # DGCA
-HOTEL_THRESHOLD_MINUTES=360       # DGCA
+DELAY_RISK_EVENT_THRESHOLD=75          # risk index, not calibrated probability
 
-MAX_RECURSION_DEPTH=5
-MAX_ITERATIONS=20
-AGENT_TIMEOUT_SECONDS=30
+NOTIFICATION_MODE=console              # console | mailtrap | gmail
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+DEMO_RECIPIENT_ALLOWLIST=
 
-NOTIFICATION_MODE=mailtrap        # mailtrap | gmail | console
+POLICY_MODE=demo                       # demo | verified
+POLICY_PACK_DIR=/app/policy_packs
+ASSURANCE_CONFIG_PATH=/app/config/assurance.v1.yaml
+
+MAX_WORKFLOW_STEPS=20
+ACTION_TIMEOUT_SECONDS=30
 DATA_SEED=20260807
 ```
 
-`LLM_MODE=off` is deliberately a first-class configuration value, not a hack. It is both the graceful
-degradation requirement (NFR-5) and the demo's strongest moment.
+No unverified DGCA threshold or amount belongs in environment defaults. Verified values live in a
+reviewed, versioned policy pack.
+
+## Git discipline
+
+- Short-lived branches; `main` runnable.
+- Conventional commits.
+- Never commit secrets, real PII, SMTP credentials or personal email addresses.
+- Freeze the dataset, policy-pack hashes and prompts before each evaluation.

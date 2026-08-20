@@ -1,103 +1,71 @@
-# Open Questions
+# Open Questions and External Dependencies
 
-Everything previously listed here has been answered — see [`DECISIONS.md`](DECISIONS.md).
+Architecture/product choices are settled. These are remaining external facts, access rights or reviews.
+Ownership and escalation rules are in [`24-input-acquisition.md`](24-input-acquisition.md); public-source
+retrieval is development-owned first.
 
-What follows is what genuinely remains. It is short, but the first item is significant.
+## 1. DGCA primary source and review — blocks verified legal claims
 
----
+Development first attempts the official public CAR download and metadata archive. Team help is needed
+only if portal/device restrictions block access, and for the authorised SME review of the resulting rule
+sheet.
 
-## 1. What are Coforge's internal tools? ⚠️ **Blocking, and it costs score**
+Still needed:
 
-**"Use of Internal Tools" is one of six official judging criteria** — roughly a sixth of the score —
-and it is the only criterion the current design does not address at all.
+- current CAR Section 3, Series M, Part IV PDF
+- revision/effective metadata and amendments
+- reviewed rule sheet from an authorised aviation/legal/domain SME
 
-Every other criterion is covered:
+Until supplied, use `POLICY_MODE=demo`, display `DEMO POLICY FIXTURE`, and show no legally authoritative
+rupee amount. This does **not** block Stage 2 engineering.
 
-| Criterion | Covered by |
-| --- | --- |
-| Creativity | Cascading recovery, force-majeure-aware compensation, replay |
-| Feasibility | Working end-to-end demo, real weather, deterministic fallback |
-| Relevance | Real DGCA rules, Indian airports, genuine operational problem |
-| **Use of Internal Tools** | ❌ **Nothing** |
-| Use of Open Source | FastAPI, React, Postgres, Redis, OurAirports, Open-Meteo |
-| Engineering the Autonomous Enterprise | Event-driven orchestration, agents that decide and execute |
+## 2. Coforge internal tools — blocks only the internal-tool scoring claim
 
-I have no way to research this — Coforge's internal tooling is not public. What would help:
+Need an official eligible tool name, internal documentation, actual team access and a real use. Ask the
+mentor, Arcolab/CIMS architecture/platform lead, TechCon SharePoint resources, or
+`TechCon.x@Coforge.com`.
 
-- An internal developer platform, API gateway, or service catalogue?
-- An internal LLM gateway or AI platform?
-- Internal design system or component library?
-- Internal observability, CI, or data platform?
-- Anything the hackathon brief names explicitly?
+Do not invent a Coforge tool, use a placeholder logo, or integrate something only to tick a box. If
+nothing is available, omit the claim and explain the provider boundary.
 
-**Even a shallow integration scores here.** Deploying behind an internal gateway, using an internal
-component library for the dashboard, or pushing logs to an internal observability stack would each turn
-a zero into a mark. Send me whatever the brief says, or a list of what your team has access to, and I
-will work it into the architecture.
+## 3. Demo environment — blocks reliable live presentation
 
-This is the highest-value outstanding item by a wide margin.
+Need confirmation that the exact presentation device can run Docker Compose, access GitHub and—if live
+mode is planned—reach AWC, Groq and SMTP. The supplied SharePoint page warns that non-compliant devices
+cannot download/sync, so this must be tested rather than assumed.
 
----
+Offline fixture mode handles network loss. A Docker/runtime restriction still requires the team's IT or
+project DevOps support.
 
-## 2. Crew scope — confirm the boundary
+## 4. Credentialed enhancements — do not share secrets
 
-The cascade includes "9 crew changes". I have scoped this as **coordination and display only**:
+- Groq project API key and account-specific rate-limit screenshot/text
+- Mailtrap or approved Gmail/SMTP configuration
+- 2–3 controlled demo recipient addresses stored only in local allowlist
 
-- ✅ Show which crew rotations are affected
-- ✅ Flag a rotation as at-risk against an indicative duty-hour limit
-- ✅ Record reassignments
-- ❌ **No duty-time legality validation**
+Fixture/off/console modes unblock development if these are delayed.
 
-Reasoning: crew legality is a genuinely hard regulated domain and would consume the sprint. It is also
-the one area where getting it subtly wrong is worse than not doing it — an aviation-literate judge will
-spot an incorrect legality claim immediately.
+## 5. AIKosh schedule file — blocks calling schedules “real”
 
-The schema in [`11-data-model.md`](11-data-model.md) reflects this, with `duty_hours_limit` as a display
-flag rather than a compliance decision.
+The catalogue page is known, but the raw artifact, schema and licence are not archived. Development owns
+the first download/validation attempt. The team is asked only if login or managed-device restrictions
+block access. Until validation passes, use synthetic schedules and label them honestly.
 
-**Confirm this is what you meant**, or tell me if you want real duty-time rules — in which case
-something else comes off the must-build list.
+## 6. Optional SME validation — improves problem/value credibility
 
----
+A short airline-operations SME interview should validate the disruption workflow, automation/approval
+boundary, crew-pairing explanation and meaningful prototype metric. Without it, these remain design
+hypotheses—not measured user research.
 
-## 3. Verify the DGCA figures against the primary source
+## Explicitly settled; do not ask again
 
-[`13-compensation-and-policy.md`](13-compensation-and-policy.md) has the real rule *structure*, sourced
-from legal commentary. Three things still need checking against the actual CAR PDF from dgca.gov.in:
-
-- Exact rupee values for cancellation compensation (₹5,000 / ₹7,500 / ₹10,000 banding)
-- The definition of "nighttime" hours that triggers hotel entitlement
-- Whether cancellation banding is by **block time** or **route distance** — sources differ
-
-I could not fetch the PDF directly. Someone should download it and confirm. The force majeure finding —
-that weather exempts cash compensation but not duty of care — is well corroborated and I am confident in
-it; the specific numbers are what need verifying.
-
-This matters because the demo cites a regulation by name. Citing it wrongly is worse than not citing it.
-
----
-
-## 4. Two smaller confirmations
-
-**Demo email inboxes.** [`DECISIONS.md`](DECISIONS.md) sets Mailtrap for development and real Gmail for
-the demo. You need 2–3 addresses you control. Don't send them here — just put them in local config.
-
-**Groq token budget.** The free tier gives roughly 100K tokens/day, about 25–50 planner calls. The
-fixture/replay mode in [`16-folder-structure.md`](16-folder-structure.md) is a Day 1 task specifically
-to protect this. Worth confirming your account's actual limits early rather than discovering them on
-Day 3.
-
----
-
-## Not recoverable
-
-`TravelOps_AI_Startup_Blueprint.docx` arrived as raw ZIP binary and the byte stream was corrupted when
-pasted as text. `.docx` is a compressed archive, so it cannot survive being pasted into chat.
-
-`TravelOps_AI_Master_Blueprint.txt` **was** recovered and is preserved at
-[`reference/master-blueprint.md`](reference/master-blueprint.md), with a table of deliberate divergences
-from it.
-
-Based on the original conversation, the `.docx` was the *first, shorter* version of the blueprint, so
-the recovered Master Blueprint plus the decisions since very likely supersede it. If a specific section
-of it matters, paste that section as plain text and I will reconcile it.
+- Team: SkyForge AI; project: TravelOps AI; Registration ID 201.
+- Operations Controller is the primary user.
+- Crew scope is impact/coordination only, not legality validation.
+- Bookings, passenger data, hotels, transport, flight status and bulk channels are simulated/synthetic.
+- Stack is FastAPI + React/TypeScript + Postgres + Redis + Groq + Docker.
+- Custom orchestrator; MCP/LangGraph/CrewAI are not required.
+- Three reasoning agents, ten deterministic services, one orchestrator.
+- Decision Assurance Gate replaces confidence-based execution.
+- Submitted presentation is frozen.
+- UI is graphite/instrument-cyan with no purple or default AI aesthetic.

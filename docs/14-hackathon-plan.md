@@ -1,197 +1,146 @@
-# 14. Seven-Day Sprint Plan
+# 14. Stage-Aligned Delivery Plan
 
-Resolves backlog item #27. Submission ~**14 August 2026**; idea submission was 7 August.
+The original seven-day plan targeted the idea-submission window and is retired. The submitted deck is
+frozen; implementation continues iteratively through the official evaluation checkpoints.
 
-Four people, seven days, and a must-build list from [`DECISIONS.md`](DECISIONS.md) that is genuinely
-ambitious. This plan is built around one principle:
+## Authoritative TechCon 2026 calendar
 
-> **A working end-to-end slice by Day 4 matters more than any individual feature.**
-
-A demo that does one thing completely beats a demo that does nine things partially. Every day has a
-**gate** — a specific, checkable outcome. Miss a gate and you cut scope, not quality.
-
-## Candid scope assessment
-
-Nine must-build items plus cascading disruption plus ten agents in seven days with four people is
-aggressive. It is achievable **only** because most of it is deterministic code rather than research,
-and because the design work is already done.
-
-The two things most likely to sink it:
-
-1. **Integrating everything on Day 6.** Integrate daily instead. A broken integration found on Day 2
-   costs an hour; found on Day 6 it costs the demo.
-2. **Burning the Groq token budget during development.** ~100K tokens/day is roughly 25–50 planner
-   calls. Build the fixture/cache path on Day 1, before you need it.
-
----
-
-## Day 1 — Friday 8 August: foundations
-
-Nobody builds features today. Today is about a skeleton everyone can work against in parallel.
-
-| Who | Task |
-| --- | --- |
-| **Harsh** | Repo scaffold; agent base class + response contract; Redis Streams event bus; orchestrator skeleton with recursion/iteration/timeout caps |
-| **M3** | `docker-compose` (Postgres + Redis); schema migrations from [`11-data-model.md`](11-data-model.md); load OurAirports for the 10 airports + runways |
-| **M2** | React + Vite + TS + Tailwind + shadcn scaffold; dashboard shell; typed API client |
-| **M4** | pytest harness; `.env.example`; run instructions; **LLM fixture/replay mode**; PPT skeleton |
-
-**Freeze the API contract today.** Agree request/response shapes so M2 can build against stubs while
-the backend is still hollow. Contract drift discovered on Day 5 is the most expensive bug available.
-
-> **Gate:** `docker compose up` yields a running API, database and UI shell. One seeded flight renders
-> in the dashboard.
-
----
-
-## Day 2 — Saturday 9 August: real data in, prediction out
-
-| Who | Task |
-| --- | --- |
-| **Harsh** | Prediction Agent: rules engine over wind, visibility, ceiling, **crosswind vs runway heading**; risk scoring; `HIGH_RISK_DELAY` emission; dedup via the partial unique index |
-| **M3** | `aviationweather.gov` METAR poller for the 10 airports; Open-Meteo 30-day backfill; AIKosh schedule load |
-| **M2** | Live flight board + weather panel wired to real data |
-| **M4** | Synthetic generators: 600+ passengers, bookings/segments tuned to 22 at-risk connections, 11 capacity-short hotels near BLR, crew, transport |
-
-Crosswind is worth the extra hour: it is the difference between a rule that looks like a demo and one
-an operations person would recognise as real.
-
-> **Gate:** genuine live METAR for BLR visible in the UI. Injecting the storm fixture produces exactly
-> one risk event, not one per poll.
-
-**Timebox the AIKosh load to 3 hours.** The format is unverified. If it fights back, hand-build
-schedules for 10 airports and move on — schedules are not the interesting part.
-
----
-
-## Day 3 — Sunday 10 August: planner and memory
-
-| Who | Task |
-| --- | --- |
-| **Harsh** | Planner Agent on Groq; structured JSON + schema validation; reject-and-retry; **deterministic fallback playbook**; prompt v1 as a versioned file |
-| **M3** | SQL precedent retrieval (airport, trigger, severity, weather, flight type); compensation calculator with force-majeure logic from [`13-compensation-and-policy.md`](13-compensation-and-policy.md) |
-| **M2** | Incident detail view: plan, retrieved precedent, confidence + evidence |
-| **M4** | ~150 historical incidents, 70/20/10 success/partial/fail, including one planted BLR-storm precedent |
-
-Build the fallback playbook **the same day** as the Groq path, not later. It is a demo asset (see
-[`15-demo-script.md`](15-demo-script.md)), and writing it while the planner is fresh takes half the
-time.
-
-> **Gate:** storm → validated JSON plan, with the retrieved precedent visible on screen. Disable Groq
-> and the fallback still produces a plan.
-
----
-
-## Day 4 — Monday 11 August: end to end ⚠️ **no-slip gate**
-
-The single most important day.
-
-| Who | Task |
-| --- | --- |
-| **Harsh** | Orchestrator wiring; parallel execution of independent tasks; Hotel, Connection and Communication agents |
-| **M3** | Mailtrap notification dispatch; hotel reservation writes with idempotency keys; gate reassignment |
-| **M2** | Live action feed; cost panel; decision log view |
-| **M4** | Full end-to-end test of `bengaluru_storm`, single flight |
-
-> **Gate:** **a single-flight recovery completes end to end** — weather → prediction → plan → hotels
-> reserved → connections flagged → notifications dispatched → incident resolved → decision log
-> populated.
-
-**If this gate is missed, cut cascading immediately** and ship the single-flight demo well. A polished
-single-flight recovery scores better on Feasibility and Demo than a half-working cascade.
-
----
-
-## Day 5 — Tuesday 12 August: cascading, replay, reports
-
-| Who | Task |
-| --- | --- |
-| **Harsh** | `incident_group` cascade orchestration (8 flights, 600 passengers); crew + transport coordination; confidence surfacing |
-| **M3** | Executive report generation via Groq; analytics aggregates |
-| **M2** | **Timeline replay UI** |
-| **M4** | Rehearsal #1; record a backup demo video |
-
-Record the backup video today, not on Day 7. A recording made while things work is insurance against
-everything that can go wrong on stage.
-
-> **Gate:** cascade runs across 8 flights; timeline replay scrubs through a completed incident.
-
----
-
-## Day 6 — Wednesday 13 August: feature freeze
-
-**No new features. Bug fixes only.** This is not negotiable — it is the difference between a demo that
-works and a demo that worked yesterday.
-
-| Who | Task |
-| --- | --- |
-| **Harsh** | Kill-Groq fallback verification; loop-cap and timeout testing; reproducibility (run the scenario 3× and diff) |
-| **M3** | Freeze the dataset as a committed SQL dump; verify cold-start from `docker compose up` |
-| **M2** | Visual polish; empty and error states |
-| **M4** | Two full rehearsals; PPT final; re-record backup video |
-
-> **Gate:** clean-machine cold start works. Scenario runs 3× with materially identical output.
-
----
-
-## Day 7 — Thursday 14 August: submit
-
-| Time | Task |
-| --- | --- |
-| Morning | Final rehearsal; verify the submission package |
-| Midday | **Submit** |
-| Afternoon | Buffer for submission-portal problems |
-
-Submit early. Never at the deadline.
-
----
-
-## Cut list — in order
-
-When you fall behind, cut from the top. Decide by looking at this list, not by arguing.
-
-| # | Cut | Notes |
+| Checkpoint | Date | TravelOps AI exit condition |
 | --- | --- | --- |
-| 1 | Voice, digital twin, knowledge graph viz, simulation engine | Already nice-to-have; drop without discussion |
-| 2 | Chroma + BGE embeddings | D2 already defers these |
-| 3 | Passenger portal, support and executive surfaces | Ops controller only |
-| 4 | Crew duty-time legality | Display crew changes; never validate legality |
-| 5 | Ground transport agent | Fold transfers into the Hotel Agent as a cost line |
-| 6 | Gate reassignment | Lowest demo value of the execution agents |
-| 7 | Cascading → single flight | Only if the Day 4 gate is missed |
+| Registrations opened | 22 July | Complete |
+| Registrations closed | 9 August | Complete |
+| Idea submission | 10 August | Complete — submitted deck remains unchanged |
+| Stage 1 evaluations | 14–16 August | Architecture and mentor response complete |
+| **Stage 2 evaluations** | **20–24 August** | Working deterministic vertical slice **with assurance gate**; traceable cascade data; premium UI shell |
+| **Stage 3 evaluations** | **1–2 September** | Three reasoning agents, existing assurance gate, SQL precedent retrieval and generic policy-pack flow; verified India pack only if source/review complete |
+| **Semi-finals** | **9–10 September** | Full seven-minute scenario, citations, replay, resilience, backup video |
+| **Finals** | **16 September** | Hardened prototype, evidence pack, rehearsed pitch, no unresolved demo blockers |
+
+Source: the TechCon 2026 schedule supplied by the team. If the organisers publish a revision, update
+this table and [`25-evaluation-readiness.md`](25-evaluation-readiness.md) together.
+
+## Delivery rule
+
+Every checkpoint must end with a **working end-to-end system**, not a collection of disconnected layers.
+If a gate slips, cut from the bottom of the cut list; never weaken auditability, deterministic fallback,
+or honesty about simulated data.
+
+## Immediate baseline
+
+At the time of this plan, the repository contains design documentation and no application code. That is
+not a blocker to starting, but it means the first milestone is a vertical slice—not more architecture.
+
+## Stage 2 — prove feasibility (20–24 August)
+
+**Question to answer:** can the team run and explain one complete disruption recovery?
+
+### Must demonstrate
+
+1. `docker compose up` starts API, Postgres, Redis and the React application.
+2. A committed fixed-seed dataset loads successfully.
+3. The premium Operations Room UI renders one disrupted flight, provenance labels, and a live decision
+   timeline.
+4. Injecting `bengaluru_storm` creates exactly one incident.
+5. The deterministic workflow completes: detect → assess → connection impact → simulated hotel/transport
+   actions → notification records → resolved.
+6. Every proposed action passes through the Decision Assurance Gate and records the six check outcomes.
+7. The cascade dataset makes 8 affected flights and 9 crew pairings individually traceable, even if the
+   first live workflow executes only one flight.
+8. Real AWC weather is shown when reachable; a fixture produces the same screen when offline.
+
+### Must not claim yet
+
+- No legally authoritative rupee entitlement until the current DGCA primary document and rule review are
+  complete.
+- No real rebooking, hotel booking, crew legality, payment, SMS delivery or live flight-status feed.
+- No production-scale performance, calibrated delay probability or historical error rate.
+
+### Team split
+
+| Workstream | Owner | Stage 2 output |
+| --- | --- | --- |
+| Backend/orchestration | Harsh | FastAPI, events, workflow, assurance gate, fixtures |
+| Frontend | Member 2 | Design-system tokens, Ops Board, timeline, assurance panel |
+| Data/integrations | Member 3 | Schema, migrations, seeded dataset, AWC/OurAirports providers |
+| Quality/demo | Member 4 | E2E scenario, source ledger, runbook, first backup recording |
+
+**Gate:** a clean checkout reaches a resolved incident without calling an LLM. If this does not work,
+do not start Phase 3.
+
+## Stage 3 — prove bounded intelligence (1–2 September)
+
+**Question to answer:** does AI add useful reasoning without becoming the control plane?
+
+### Must demonstrate
+
+1. Planner, Explainer and Report Generator return typed, schema-validated output.
+2. `LLM_MODE=live`, `fixture` and `off` all complete the same core recovery.
+3. The assurance gate—not model self-confidence—authorises or blocks each action.
+4. A model-proposed unknown action, stale source, missing entity and high-risk action are visibly blocked.
+5. SQL retrieval surfaces a planted precedent and records why it matched.
+6. Minimum India policy-pack flow works end to end **only if primary-source verification is complete**:
+   source document → extracted clause → reviewed rule → deterministic evaluation → citation card.
+   Otherwise use a conspicuous `DEMO_POLICY_FIXTURE` with no legal-authority claim.
+
+**Gate:** kill the model in front of the reviewer; the recovery still completes and the UI explains the
+degraded path.
+
+## Semi-finals — prove the complete story (9–10 September)
+
+**Question to answer:** is this a compelling, usable autonomous-enterprise product?
+
+- Execute the 8-flight cascade and render the 9-pairing graph.
+- Run the seven-minute demo without a terminal.
+- Show live email to controlled inboxes plus simulated bulk-channel records.
+- Show replay, policy citation, human approval and executive report.
+- Demonstrate source provenance: real, simulated, synthetic, fixture and unavailable.
+- Run from a clean machine and from the backup recording.
+- Present the correction cleanly: 1 orchestrator + 3 reasoning agents + 10 deterministic services.
+
+**Gate:** three consecutive rehearsals complete with the same material outputs and under seven minutes.
+
+## Finals — prove readiness and impact (16 September)
+
+**Question to answer:** is this credible beyond a hackathon demo?
+
+- No new features after the semi-finals unless they remove a blocker.
+- Verify cold start, offline mode, rollback, logs, accessibility and projector legibility.
+- Freeze source documents, policy-pack hashes, demo data and prompts.
+- Prepare measured—not invented—impact metrics from the prototype runs.
+- State the production gaps: airline APIs, certified crew legality, legal review, IAM and operational
+  deployment.
+
+**Gate:** one command starts the demo, one command resets it, and one backup video proves the entire path.
+
+## Cut list — first to last
+
+1. Light theme and decorative motion
+2. Vector database and embeddings; keep SQL retrieval
+3. EU policy-pack structural proof
+4. Learning analytics beyond gate and approval metrics
+5. Timeline scrubbing; retain chronological decision log
+6. Gate/stand reassignment
+7. Full cascade execution; retain traceable cascade data and single-flight execution
 
 ### Never cut
 
-- **Real weather integration.** Live data is the credibility anchor.
-- **Planner + deterministic fallback.** The fallback is a scoring moment, not a safety net.
-- **Notifications.** Something must visibly happen in the world.
-- **Decision log.** Without it there is no explainability, and it powers replay for free.
-- **Timeline replay.** High judge value, and nearly free given the decision log.
+- Deterministic end-to-end recovery
+- Decision Assurance Gate and audit log
+- `LLM_MODE=fixture` and `LLM_MODE=off`
+- Provenance labels for real/simulated/synthetic data
+- Citation on every legal claim or entitlement; if no verified citation exists, omit the claim
+- Fixed-seed demo fixture and reset command
 
----
+## Integration discipline
 
-## Sprint risks
+- `main` remains runnable; short-lived branches only.
+- Freeze API contracts before frontend/backend parallel work.
+- Provider interfaces always include fixtures so external APIs cannot break the demo.
+- Feature freeze at least one day before each live evaluation.
+- Never wait for live weather, a live flight or a vendor response during judging.
 
-| Risk | Mitigation |
-| --- | --- |
-| Day 4 gate slips | Cut cascading same day; do not negotiate |
-| Groq tokens exhausted mid-development | Fixture/replay mode built Day 1; cache aggressively |
-| AIKosh data format fights back | 3-hour timebox, then hand-build 10 airports of schedules |
-| Frontend/backend contract drift | Contract frozen Day 1; M2 works against stubs |
-| Big-bang integration | Integrate daily; `main` must always run |
-| Demo machine fails | Backup video recorded Day 5, re-recorded Day 6 |
-| Dataset changes late and breaks the scenario | Dataset frozen as a committed dump on Day 6 |
+## Inputs the team must obtain
 
-## Mapping to judging criteria
-
-| Criterion | Where it is earned |
-| --- | --- |
-| Creativity | Cascading recovery; force-majeure-aware compensation; replay |
-| Feasibility | Working end-to-end demo; real weather; deterministic fallback |
-| Relevance | Genuine DGCA rules; Indian airports; real operational problem |
-| Use of Internal Tools | ⚠️ Unresolved — see [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) |
-| Use of Open Source | FastAPI, React, Postgres, Redis, OurAirports, Open-Meteo, BGE |
-| Engineering the Autonomous Enterprise | Event-driven orchestration; no chatbot; agents that decide and execute |
-
-Five of six are covered by this plan. **"Use of Internal Tools" is not**, and cannot be until we know
-what Coforge's internal tools are. That is potentially a sixth of the score.
+The implementation can start without production airline data. The small set of team-supplied inputs and
+where to obtain them is maintained in [`24-input-acquisition.md`](24-input-acquisition.md). The exact
+pass/fail checklist for each stage is [`25-evaluation-readiness.md`](25-evaluation-readiness.md).
