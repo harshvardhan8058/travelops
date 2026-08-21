@@ -24,6 +24,7 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { ApiError } from '@/api/client';
+import { flightRiskDerivation } from '@/components/ui/derivation';
 
 function timeOf(iso: string | null): string {
   if (!iso) return '—';
@@ -71,7 +72,19 @@ function AirportTile({ airport }: { airport: AirportConditions }) {
   );
 }
 
-function FlightBoard({ flights }: { flights: FlightRow[] }) {
+function FlightBoard({
+  flights,
+  network,
+}: {
+  flights: FlightRow[];
+  /**
+   * From the same /flights response. The risk popover shows the origin observation and its
+   * freshness, so a stale source is visible before it causes a gate failure.
+   */
+  network: AirportConditions[];
+}) {
+  const originByIcao = new Map(network.map((airport) => [airport.airport_icao, airport]));
+
   if (flights.length === 0) {
     return (
       <EmptyState
@@ -130,8 +143,14 @@ function FlightBoard({ flights }: { flights: FlightRow[] }) {
                 <StateBadge status={flight.status} />
               </td>
               <td className="px-3">
+                {/*
+                 * WhyPopover owns the interaction; RiskChip is presentational here and takes
+                 * no onClick, because a button inside a button is invalid HTML and would
+                 * break the tab order. The derivation comes from the adapter, not from a
+                 * sentence written in this file.
+                 */}
                 <WhyPopover
-                  derivation={`Deterministic index from rule set; band ${flight.risk_level}. Not a calibrated probability.`}
+                  derivation={flightRiskDerivation(flight, originByIcao.get(flight.origin_icao))}
                 >
                   <RiskChip index={flight.risk_index} level={flight.risk_level} />
                 </WhyPopover>
@@ -207,7 +226,7 @@ export function OpsBoard() {
           </span>
         }
       >
-        <FlightBoard flights={data?.flights ?? []} />
+        <FlightBoard flights={data?.flights ?? []} network={data?.network ?? []} />
       </Panel>
     </div>
   );
