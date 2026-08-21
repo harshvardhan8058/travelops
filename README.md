@@ -106,6 +106,19 @@ curl -sS -X POST $API/incidents/$REF/run                     # -> resolved
 The evaluation ID is derived rather than hardcoded, because it depends on how many tasks have
 already been assured.
 
+**On Windows, or to check everything at once**, run the same journey as a self-verifying script
+instead. It works identically on every platform because it runs inside the container:
+
+```bash
+docker compose exec -T api python - < scripts/verify_demo.py            # bash
+Get-Content scripts/verify_demo.py | docker compose exec -T api python -  # PowerShell
+```
+
+It drives the approval itself, checks thirteen things — dependencies, migrations, seed digest,
+injection, the gate holding the bulk action, approval persistence and replay, the terminal
+state, and the audit trail — and exits non-zero on any failure. PowerShell aliases `curl` to
+`Invoke-WebRequest`, which does not accept `-X POST -d`, so the `curl` block above is bash-only.
+
 What that produces, all of it computed from seeded records:
 
 | | |
