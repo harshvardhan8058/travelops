@@ -9,17 +9,31 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/api/client';
 import { AppShell } from '@/components/ui/AppShell';
 import { OpsBoard } from '@/features/ops-board/OpsBoard';
+import { RecoveryWorkspace } from '@/features/incident/RecoveryWorkspace';
 import { DecisionTimeline } from '@/features/timeline/DecisionTimeline';
 import { StreamPlaceholder } from '@/features/placeholder/StreamPlaceholder';
 
-/** Wave 0 focuses the shell on the demo incident. Stream F makes this route-driven. */
+/** Used only when the current route names no incident, e.g. the Ops Board. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
+
+/**
+ * The Decision Timeline and the blocked-actions bar live in the shell, above the router
+ * outlet, so they cannot read route params. Matching the path keeps them following whatever
+ * incident the operator is actually looking at — a timeline showing a different incident from
+ * the workspace beside it would be actively misleading.
+ */
+function useRouteIncidentId(fallback: string): string {
+  const { pathname } = useLocation();
+  const match = /^\/(?:incidents|policy|replay|reports)\/([^/]+)/.exec(pathname);
+  const captured = match?.[1];
+  return captured ? decodeURIComponent(captured) : fallback;
+}
 
 function useUtcClock(): string {
   const [now, setNow] = useState(() => new Date());
@@ -32,6 +46,7 @@ function useUtcClock(): string {
 
 export function App() {
   const clock = useUtcClock();
+  const incidentId = useRouteIncidentId(DEMO_INCIDENT);
 
   const { data: mode } = useQuery({
     queryKey: ['system-mode'],
@@ -39,10 +54,11 @@ export function App() {
     refetchInterval: 30_000,
   });
 
-  // Drives the persistent blocked-actions bar.
+  // Drives the persistent blocked-actions bar. Shares its cache key with the workspace, so a
+  // recorded decision refreshes both.
   const { data: assurance } = useQuery({
-    queryKey: ['assurance', DEMO_INCIDENT],
-    queryFn: () => api.assurance(DEMO_INCIDENT),
+    queryKey: ['assurance', incidentId],
+    queryFn: () => api.assurance(incidentId),
     refetchInterval: 10_000,
   });
 
@@ -51,7 +67,7 @@ export function App() {
       mode={mode}
       clock={clock}
       blockedCount={assurance?.awaiting_approval_count ?? 0}
-      timeline={<DecisionTimeline incidentId={DEMO_INCIDENT} />}
+      timeline={<DecisionTimeline incidentId={incidentId} />}
     >
       <Routes>
         <Route path="/" element={<OpsBoard />} />
@@ -65,16 +81,7 @@ export function App() {
             />
           }
         />
-        <Route
-          path="/incidents/:incidentId"
-          element={
-            <StreamPlaceholder
-              screen="Recovery workspace"
-              owner="Stream F"
-              spec="docs/27-ui-specification.md screen 2"
-            />
-          }
-        />
+        <Route path="/incidents/:incidentId" element={<RecoveryWorkspace />} />
         <Route
           path="/assurance"
           element={
