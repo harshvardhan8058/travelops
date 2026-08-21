@@ -69,6 +69,7 @@ labelled.
 7. [`docs/26-implementation-contracts.md`](docs/26-implementation-contracts.md) — API, state, security and observability baseline
 8. [`docs/27-ui-specification.md`](docs/27-ui-specification.md) — every screen, feature and interaction
 9. [`docs/28-parallel-workstreams.md`](docs/28-parallel-workstreams.md) — running six Kiro accounts without merge conflicts
+10. [`docs/29-kickoff-prompts.md`](docs/29-kickoff-prompts.md) — the exact prompt to paste into each account
 
 ## Core design documents
 
