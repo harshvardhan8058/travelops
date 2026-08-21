@@ -116,6 +116,37 @@ def absent_facts(facts: dict[str, Any], paths: list[str]) -> list[str]:
     return dedupe([path for path in paths if _is_absent(_lookup(facts, path))])
 
 
+def present_facts(facts: dict[str, Any], paths: list[str]) -> list[str]:
+    """Which of `paths` are present, in declaration order."""
+    return dedupe([path for path in paths if not _is_absent(_lookup(facts, path))])
+
+
+def condition_fact_paths(node: Any) -> list[str]:
+    """Every fact path a condition references, in declaration order.
+
+    This is what makes the gate's required facts derivable rather than guessed: the facts a
+    rule needs are the facts its own `when` clause reads. Nothing here interprets meaning, so
+    a new rule contributes its facts without any code change.
+    """
+    if node is None:
+        return []
+    if isinstance(node, list):
+        return dedupe([path for child in node for path in condition_fact_paths(child)])
+    if not isinstance(node, dict):
+        return []
+
+    if "fact" in node:
+        return [str(node["fact"])]
+
+    paths: list[str] = []
+    for key in ("all", "all_of", "any_of", "any"):
+        if key in node:
+            paths.extend(condition_fact_paths(node[key]))
+    if "not" in node:
+        paths.extend(condition_fact_paths(node["not"]))
+    return dedupe(paths)
+
+
 # --------------------------------------------------------------------------------- operators
 
 
@@ -350,6 +381,41 @@ def _cash_spec(entitlement: dict[str, Any]) -> _CashSpec | None:
         )
 
     return None
+
+
+def states_cash_amount(rule: Any) -> bool:
+    """True when this rule would put a figure on the table.
+
+    The distinction the gate depends on: these are the rules whose missing facts make an
+    amount unstatable, as opposed to a care rule whose absence merely leaves an entitlement
+    unestablished.
+    """
+    return _cash_spec(rule.entitlement or {}) is not None
+
+
+def formula_inputs(rule: Any) -> list[str]:
+    """The fact paths this rule's formula reads, or [] if it states a fixed amount."""
+    spec = _cash_spec(rule.entitlement or {})
+    return list(spec.inputs) if spec else []
+
+
+def is_evidence_gated(rule: Any) -> bool:
+    """True when the pack declares required facts AND asks for a human when they are absent.
+
+    That pairing is how a pack marks an exemption as evidence-gated, and it is the only reason
+    the engine ever blocks on a rule that would otherwise reduce an entitlement.
+    """
+    return bool(rule.requires_facts) and rule.on_missing_required_fact == OUTCOME_NEEDS_HUMAN
+
+
+def is_asserted(rule: Any, facts: dict[str, Any]) -> bool:
+    """True when at least one fact the rule declares as required is present.
+
+    An exemption nobody asserted does not apply and must not be demanded — demanding it would
+    stall every ordinary case. One asserted fact means the claim is in play, and from then on
+    the rest of its evidence is required.
+    """
+    return bool(present_facts(facts, list(rule.requires_facts)))
 
 
 def _compute_cash(spec: _CashSpec, facts: dict[str, Any]) -> tuple[int, str]:

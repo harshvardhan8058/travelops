@@ -441,6 +441,8 @@ class TestEvaluate:
                         "unavoidable_despite_reasonable_measures": None,
                     }
                 },
+                constraints=[{"field": "pack_version", "op": "eq", "value": "2019.02"}],
+                payload={"pack_version": "2019.02"},
                 extra_evidence_refs=["incident:INC-2026-0820-VOBL-01"],
             ),
             config=CONFIG,
@@ -513,6 +515,69 @@ class TestEvaluate:
 
         with pytest.raises(ValidationError):
             GateInputs(action_type="check_connections", confidence=92)
+
+    def test_the_orchestrator_call_shape_is_accepted(self):
+        """The adapter's documented interface, which passes a planner task dictionary.
+
+        Before this, the call raised TypeError, the adapter turned that into a refusal, and
+        nothing in the system could ever execute.
+        """
+        result = evaluate(
+            action_type="check_connections",
+            target_refs=["flight:1"],
+            inputs={
+                "required_facts": ["event.type"],
+                "provided_facts": {"event": {"type": "delay"}},
+            },
+            evidence_refs=["incident:INC-1"],
+            incident_state="assuring",
+            config=CONFIG,
+            config_hash=DIGEST,
+        )
+        assert result.decision is AssuranceDecision.execute
+        assert "flight:1" in result.evidence_refs
+        assert "incident:INC-1" in result.evidence_refs
+
+    def test_both_call_shapes_reach_the_same_decision(self):
+        typed = evaluate(
+            inputs=GateInputs(
+                action_type="notify_passengers",
+                required_facts=["event.type"],
+                provided_facts={},
+            ),
+            config=CONFIG,
+            config_hash=DIGEST,
+            now=NOW,
+        )
+        mapped = evaluate(
+            action_type="notify_passengers",
+            target_refs=[],
+            inputs={"required_facts": ["event.type"], "provided_facts": {}},
+            evidence_refs=[],
+            incident_state="assuring",
+            config=CONFIG,
+            config_hash=DIGEST,
+            now=NOW,
+        )
+        assert typed.decision is mapped.decision
+        assert [c.state for c in typed.checks] == [c.state for c in mapped.checks]
+
+    def test_an_unrecognised_task_key_becomes_the_action_payload(self):
+        """A planner key the gate does not know is the action's payload, not a gate input.
+
+        This keeps extra="forbid" meaningful — a caller still cannot invent a gate input —
+        without making the planner learn the gate's field names.
+        """
+        inputs = GateInputs.from_task(
+            action_type="reserve_hotel_block",
+            inputs={"rooms": 12, "hotel_id": 3, "required_facts": ["event.type"]},
+        )
+        assert inputs.payload == {"rooms": 12, "hotel_id": 3}
+        assert inputs.required_facts == ["event.type"]
+
+    def test_a_missing_action_type_is_a_programming_error_not_a_silent_pass(self):
+        with pytest.raises(TypeError, match="action_type"):
+            evaluate(inputs={"required_facts": []}, config=CONFIG)
 
     def test_a_correction_is_a_new_record_not_an_update(self):
         inputs = GateInputs(action_type="notify_passengers")
