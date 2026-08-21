@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.crew import Pairing, PairingLeg
 from app.models.policy import BusinessConstraint
 from app.models.reference import (
+    Airport,
     Booking,
     BookingSegment,
     Flight,
@@ -40,6 +42,9 @@ from app.services.delay_risk import (
     ruleset_from_constraints,
 )
 
+#: Operating timezone. Storage is UTC; this is display only.
+DISPLAY_TZ = ZoneInfo("Asia/Kolkata")
+
 
 def _utc(value: datetime | None) -> datetime | None:
     """Force a database timestamp to aware UTC.
@@ -53,6 +58,12 @@ def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _local(value: datetime) -> str:
+    """Render a stored UTC timestamp in the operating timezone, for display only."""
+    local = value.astimezone(DISPLAY_TZ)
+    return f"{local:%H:%M} IST on {local:%d %b}"
 
 
 async def load_business_constraints(session: AsyncSession) -> list[dict[str, Any]]:
@@ -321,6 +332,97 @@ async def load_crew_impact_inputs(
 
     affected = [flights[flight_id] for flight_id in sorted(affected_flight_ids)]
     return affected, pairings, flights
+
+
+async def latest_actual_observation_at(
+    session: AsyncSession, airport_icao: str, *, as_of: datetime
+) -> datetime | None:
+    """Timestamp of the newest ACTUAL observation at or before `as_of`, or None.
+
+    Offered for `sources_fresh`. The gate's freshness check FAILs a future-dated timestamp —
+    correctly, because a broken feed must not read as maximally fresh — and it FAILs an
+    undated one. Both are easy to hand it by accident from this schema:
+
+      * The seeded dataset holds real archived observations on their own true timestamps
+        (2026-08-21) alongside the injected scenario observation (2026-08-20). Asking for the
+        plain latest row returns one dated *after* the moment being assessed.
+      * `weather_observation` also holds TAF rows. A forecast is not an observation, and
+        offering one to a freshness check is the leakage bug `docs/11-data-model.md` names.
+
+    So this filters `is_forecast = false` and bounds by `as_of`, exactly as
+    `load_delay_risk_inputs` does. Returning None is meaningful: no observation existed yet,
+    which the gate must treat as unproven rather than fresh.
+    """
+    observed_at = (
+        await session.execute(
+            select(WeatherObservation.observed_at)
+            .where(
+                WeatherObservation.airport_icao == airport_icao,
+                WeatherObservation.is_forecast.is_(False),
+                WeatherObservation.observed_at <= as_of,
+            )
+            .order_by(WeatherObservation.observed_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _utc(observed_at)
+
+
+async def load_notification_recipients(
+    session: AsyncSession, affected_flight_ids: set[int]
+) -> list[dict[str, Any]]:
+    """Passengers on the affected flights, with the facts the delay template requires.
+
+    Times are rendered in the operating timezone because a controller and a passenger both
+    read local time, while storage stays UTC.
+
+    Every fact the template declares is supplied here. A missing one makes the Communication
+    service refuse that recipient rather than send `Dear ,` — so this query is where an
+    incomplete message becomes impossible rather than merely unlikely.
+    """
+    rows = (
+        await session.execute(
+            select(Passenger, Booking, Flight, Airport.city.label("origin_city"))
+            .join(Booking, Booking.passenger_id == Passenger.id)
+            .join(BookingSegment, BookingSegment.booking_id == Booking.id)
+            .join(Flight, Flight.id == BookingSegment.flight_id)
+            .join(Airport, Airport.icao_code == Flight.origin_icao)
+            .where(BookingSegment.flight_id.in_(affected_flight_ids))
+            .order_by(Passenger.id)
+        )
+    ).all()
+
+    destination_cities = dict(
+        (await session.execute(select(Airport.icao_code, Airport.city))).all()
+    )
+
+    recipients: list[dict[str, Any]] = []
+    for passenger, booking, flight, origin_city in rows:
+        scheduled = _utc(flight.scheduled_departure)
+        estimated = _utc(flight.estimated_departure) or scheduled
+        assert scheduled is not None and estimated is not None
+        delay_minutes = max(0, int((estimated - scheduled).total_seconds() // 60))
+
+        recipients.append(
+            {
+                "passenger_id": passenger.id,
+                "passenger_reference": passenger.reference,
+                "email": passenger.email,
+                "facts": {
+                    "passenger_name": passenger.full_name,
+                    "flight_number": flight.flight_number,
+                    "origin_city": origin_city or flight.origin_icao,
+                    "destination_city": destination_cities.get(
+                        flight.destination_icao, flight.destination_icao
+                    ),
+                    "scheduled_departure_local": _local(scheduled),
+                    "revised_departure_local": _local(estimated),
+                    "delay_minutes": delay_minutes,
+                    "pnr": booking.pnr,
+                },
+            }
+        )
+    return recipients
 
 
 #: Forward walk over `pairing_leg`, in SQL.
