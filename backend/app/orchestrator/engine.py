@@ -144,6 +144,10 @@ class _AssuranceOutcome:
     unavailable_reason: str | None = None
     #: The GateInputs the orchestrator gathered, so coverage can be recorded.
     gathered: dict[str, Any] = field(default_factory=dict)
+    #: Stream B's GateRequirements, recorded as the provenance of the two policy checks.
+    requirements: Any = None
+    #: The GateInputs the orchestrator gathered, so coverage can be recorded.
+    gathered: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -558,7 +562,9 @@ class Orchestrator:
             return self._now()
         return _as_utc(incident.opened_at) or self._now()
 
-    async def _gate_inputs(self, ctx: WorkflowContext, task: PlanTask) -> dict[str, Any]:
+    async def _gate_inputs(
+        self, ctx: WorkflowContext, task: PlanTask
+    ) -> tuple[dict[str, Any], Any]:
         """Gather everything the six checks need.
 
         Stream B's checks are pure functions — "no check reaches back for a database row, a
@@ -566,29 +572,27 @@ class Orchestrator:
         where those facts are collected. Gathering a fact is not judging it: nothing here
         decides a check outcome.
 
-        Three fields are deliberately left empty rather than guessed, and each is a real
-        integration gap rather than an oversight:
+        `required_facts` and `constraints` come from Stream B's
+        `policy.requirements.gate_requirements`, which is the contract this stream was
+        waiting on. They are still never assembled here: the facts a rule needs are a
+        property of the rule, so asking is correct and deriving would be Stream A writing
+        policy. For an action the pack has nothing to say about, B answers
+        `policy_bearing=False` with empty lists — an authoritative answer rather than the
+        guess this stream had before.
 
-        * `required_facts` and `constraints` are declared by the policy rule selected for an
-          action. Stream B's policy layer is trip-scoped, not action-scoped: `requires_facts`
-          lives on a `PackRule`, and choosing the rule needs a full trip context through
-          their resolver. There is no `required_facts_for(action_type)`, and nothing in the
-          repository authors a gate-shaped `{field, op, value}` constraint. Deriving either
-          here would be Stream A writing policy.
-        * `provided_facts` follows from `required_facts`; supplying facts nobody asked for
-          would not make the evidence check meaningful.
+        `provided_facts` carries only facts a caller supplied explicitly, under
+        `inputs["facts"]`. Nothing is synthesised to satisfy a requirement, because a fact
+        invented to make `evidence_complete` pass is the exact failure that check exists to
+        catch.
 
-        The consequence is that `evidence_complete` and `policy_compliant` currently PASS
-        with nothing to check. That is recorded on every evaluation — see
-        `POLICY_INPUTS_PENDING` — because six green checks that include two vacuous ones
-        would otherwise read as "policy was verified", which is not true yet.
-
-        Everything the orchestrator genuinely knows is supplied for real, so
-        `entities_valid`, `sources_fresh`, `no_conflicts` and `action_risk` are doing actual
-        work today.
+        Everything else is the orchestrator's own knowledge: resolved entities from real
+        lookups, prior actions so conflicts are visible, and the observation the assessment
+        actually reasoned from.
         """
         referenced = list(task.target_refs)
-        return {
+        facts = self._policy_facts(task)
+        requirements = self._policy_requirements(task, facts)
+        gathered = {
             "action_type": task.action.value,
             "target_refs": referenced,
             "referenced_refs": referenced,
@@ -596,11 +600,31 @@ class Orchestrator:
             "payload": dict(task.inputs),
             "pending_or_executed": await self._prior_actions(ctx),
             "sources": await self._source_timestamps(ctx),
-            "required_facts": [],
-            "provided_facts": {},
-            "constraints": [],
+            "required_facts": list(requirements.required_facts),
+            "provided_facts": facts,
+            "constraints": list(requirements.constraints),
             "extra_evidence_refs": list(ctx.evidence_refs),
         }
+        return gathered, requirements
+
+    def _policy_facts(self, task: PlanTask) -> dict[str, Any]:
+        """Trip-context facts a caller supplied, and only those.
+
+        The orchestrator does not assemble a trip context. When one is absent for a
+        policy-bearing action, Stream B's requirements fail closed and the gate refuses,
+        which is the right outcome: an entitlement decided on facts nobody supplied would be
+        an unreviewed legal claim.
+        """
+        supplied = task.inputs.get("facts")
+        return dict(supplied) if isinstance(supplied, dict) else {}
+
+    def _policy_requirements(self, task: PlanTask, facts: dict[str, Any]) -> Any:
+        """Ask Stream B what this action must satisfy. Never raises, by their contract."""
+        from app.policy.requirements import gate_requirements
+
+        return gate_requirements(
+            action_type=task.action.value, facts=facts, settings=self._settings
+        )
 
     async def _resolve_entities(self, refs: Sequence[str]) -> dict[str, Any]:
         """Resolve each `kind:id` reference against the database.
@@ -709,7 +733,7 @@ class Orchestrator:
             )
 
         config, config_hash = assurance_adapter.load_config()
-        gathered = await self._gate_inputs(ctx, task)
+        gathered, requirements = await self._gate_inputs(ctx, task)
         try:
             result = await assurance_adapter.evaluate(
                 **gathered,
@@ -748,15 +772,17 @@ class Orchestrator:
                 gate_available=False,
                 unavailable_reason=exc.reason,
                 gathered=gathered,
+                requirements=requirements,
             )
-        return _AssuranceOutcome(result=result, gate_available=True, gathered=gathered)
+        return _AssuranceOutcome(
+            result=result, gate_available=True, gathered=gathered, requirements=requirements
+        )
 
     async def _record_assurance(
         self,
         ctx: WorkflowContext,
         task_row: PlanTaskRow,
         outcome: _AssuranceOutcome,
-        gathered: dict[str, Any] | None = None,
     ) -> AssuranceEvaluation:
         """Persist the immutable evaluation. Never updated; a correction is a new row."""
         result = outcome.result
@@ -800,9 +826,8 @@ class Orchestrator:
                 "config_version": result.config_version,
                 "config_hash": result.config_hash,
                 "gate_available": outcome.gate_available,
-                # Which of the six checks had real inputs to work with. Two of them do not
-                # yet, and a green check with nothing to check is not evidence of compliance.
-                "gate_inputs": _gate_input_coverage(gathered or {}),
+                # What each check had to work with, and where the policy inputs came from.
+                "gate_inputs": _gate_input_coverage(outcome.gathered, outcome.requirements),
             },
         )
         await self._publish(
@@ -1217,7 +1242,7 @@ class Orchestrator:
                 "as_of": as_of.isoformat() if as_of else None,
                 "rule_version": payload.get("rule_version"),
                 "ruleset_version": payload.get("ruleset_version"),
-                "factors": [factor.get("label") for factor in (payload.get("factors") or [])],
+                "factors": [factor.get("name") for factor in (payload.get("factors") or [])],
                 "observation_age_minutes": payload.get("observation_age_minutes"),
                 "is_stale": payload.get("is_stale"),
                 "missing_inputs": payload.get("missing_inputs") or [],
@@ -1235,9 +1260,9 @@ class Orchestrator:
                     risk_level=payload["risk_level"],
                     rule_version=str(payload["rule_version"]),
                     factors=[
-                        str(factor.get("label"))
+                        str(factor.get("name"))
                         for factor in (payload.get("factors") or [])
-                        if factor.get("label")
+                        if factor.get("name")
                     ],
                     evidence_refs=list(result.evidence_refs),
                 ),
@@ -1276,7 +1301,7 @@ class Orchestrator:
 
         task = _contract_task(task_row)
         outcome = await self._assure(ctx, task)
-        evaluation = await self._record_assurance(ctx, task_row, outcome, outcome.gathered)
+        evaluation = await self._record_assurance(ctx, task_row, outcome)
         ctx.metadata["current_plan_task_id"] = task_row.id
         ctx.metadata["current_assurance_id"] = evaluation.id
 
@@ -1670,35 +1695,47 @@ def _new_correlation_id() -> str:
     return uuid.uuid4().hex
 
 
-#: Recorded when a check ran against nothing, so a PASS is not mistaken for verification.
-POLICY_INPUTS_PENDING = "POLICY_INPUTS_PENDING"
+#: Recorded when the pack has nothing to say about an action, so two green checks are not
+#: mistaken for a policy verification that never happened.
+POLICY_NOT_APPLICABLE = "POLICY_NOT_APPLICABLE"
 
 
-def _gate_input_coverage(gathered: dict[str, Any]) -> dict[str, Any]:
-    """State which gate inputs had something in them.
+def _gate_input_coverage(gathered: dict[str, Any], requirements: Any = None) -> dict[str, Any]:
+    """State what each check had to work with, and where the policy inputs came from.
 
-    Two of the six checks — `evidence_complete` and `policy_compliant` — currently receive
-    empty lists, because the facts and constraints a rule declares come from Stream B's
-    policy layer and Stream A must not invent them. Those checks therefore PASS without
-    checking anything.
+    Six green checks look like six verifications. When the pack has nothing to say about an
+    action — `POLICY_BEARING_ACTIONS` is only `evaluate_entitlements` — `evidence_complete`
+    and `policy_compliant` pass with empty lists. That is now Stream B's authoritative
+    answer rather than this stream's guess, but it is still worth naming in the record, so a
+    reader can tell "checked and satisfied" from "nothing applicable to check".
 
-    Recording that is the difference between an honest audit trail and a misleading one. Six
-    green checks look like six verifications; this says which two were vacuous, so nobody
-    reads the panel as proof that policy was evaluated.
+    `selected_rule_ids` and `pack_hash` make the answer traceable: they say which rules
+    decided the requirement, without anybody inferring it.
     """
-    coverage = {
+    coverage: dict[str, Any] = {
         "required_facts": len(gathered.get("required_facts") or []),
         "constraints": len(gathered.get("constraints") or []),
+        "provided_facts": len(gathered.get("provided_facts") or {}),
         "resolved_entities": len(gathered.get("resolved_entities") or {}),
         "sources": len(gathered.get("sources") or {}),
         "pending_or_executed": len(gathered.get("pending_or_executed") or []),
     }
-    vacuous = [name for name in ("required_facts", "constraints") if coverage[name] == 0]
-    if vacuous:
-        coverage["notice"] = POLICY_INPUTS_PENDING
-        coverage["vacuous_checks"] = (
-            ["evidence_complete"] if "required_facts" in vacuous else []
-        ) + (["policy_compliant"] if "constraints" in vacuous else [])
+    if requirements is None:
+        return coverage
+
+    coverage["policy_bearing"] = bool(getattr(requirements, "policy_bearing", False))
+    coverage["policy_mode"] = getattr(requirements, "policy_mode", None)
+    coverage["selected_rule_ids"] = list(getattr(requirements, "selected_rule_ids", []) or [])
+    coverage["pack_hash"] = getattr(requirements, "pack_hash", None)
+    blocking = list(getattr(requirements, "blocking_reasons", []) or [])
+    if blocking:
+        coverage["requirements_blocked"] = blocking
+
+    if not coverage["policy_bearing"]:
+        # Not a gap: the pack genuinely has no rule about checking a connection. Named so the
+        # two empty checks read as "not applicable" rather than "verified".
+        coverage["notice"] = POLICY_NOT_APPLICABLE
+        coverage["not_applicable_checks"] = ["evidence_complete", "policy_compliant"]
     return coverage
 
 

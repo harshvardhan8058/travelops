@@ -51,7 +51,15 @@ services:
       - ./backend/app:/app/app
       - ./policy_packs:/app/policy_packs:ro
       - ./config:/app/config:ro
-      - ./data:/app/data
+      # Mounted at the CONTAINER ROOT, not /app/data. `app.config.REPO_ROOT` is
+      # `Path(app/config.py).parents[2]`, which is the repository root on the host and `/`
+      # inside the image, because the package lives at /app/app. `app/db/seed.py` puts
+      # REPO_ROOT on sys.path to import `data.generators.*`, so with ./data at /app/data the
+      # import fails and `make seed` dies with ModuleNotFoundError: data.
+      #
+      # Same reason and same shape as the fixtures mount below. Asserted in
+      # tests/contract/test_container_runtime_paths.py so it cannot drift back.
+      - ./data:/data
       # app/api/fixtures_router.py resolves FIXTURE_DIR to /fixtures/api inside the
       # container. Without this mount every fixture endpoint returns ENTITY_NOT_FOUND,
       # because the build context is ./backend and repo-root fixtures/ is never copied in.
