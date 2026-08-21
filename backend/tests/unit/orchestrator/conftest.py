@@ -170,6 +170,24 @@ def needs_human_result(*, check=CHECK_ORDER[-1]) -> AssuranceResult:
     )
 
 
+@pytest.fixture(autouse=True)
+def isolated_service_registry():
+    """Keep the dispatch registry out of unit tests unless a test opts in.
+
+    `dispatch.SERVICE_REGISTRY` is process-global and the application lifespan populates it,
+    so an e2e test running first would otherwise change what a unit test sees. Global mutable
+    state plus test ordering is a bad combination to debug, so it is neutralised here rather
+    than relied upon.
+    """
+    from app.orchestrator import dispatch
+
+    saved = dict(dispatch.SERVICE_REGISTRY)
+    dispatch.SERVICE_REGISTRY.clear()
+    yield dispatch.SERVICE_REGISTRY
+    dispatch.SERVICE_REGISTRY.clear()
+    dispatch.SERVICE_REGISTRY.update(saved)
+
+
 @pytest.fixture
 def no_gate(monkeypatch):
     """Remove the gate entry point.

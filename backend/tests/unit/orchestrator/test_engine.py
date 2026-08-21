@@ -235,6 +235,92 @@ class TestAdvance:
         # notify_passengers depends on check_connections, stored as a resolved task ID.
         assert rows[3].depends_on == [str(rows[0].id)]
 
+    async def test_the_plan_narrows_to_actions_with_a_registered_service(
+        self, session, flight, settings
+    ):
+        """A plan proposing work nothing can do stops dead and overstates the system."""
+        from app.orchestrator import dispatch
+        from app.services.base import ServiceResult
+
+        async def ok(**_kwargs):
+            return ServiceResult(status=ActionStatus.success, reason="done")
+
+        dispatch.register(ActionType.check_connections, ok)
+        dispatch.register(ActionType.assess_crew_impact, ok)
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        for _ in range(3):
+            await engine.advance(ctx)
+
+        rows = (
+            (await session.execute(select(PlanTaskRow).order_by(PlanTaskRow.task_order)))
+            .scalars()
+            .all()
+        )
+        assert [r.action_type for r in rows] == ["check_connections", "assess_crew_impact"]
+
+    async def test_a_deferred_action_is_named_in_the_record(self, session, flight, settings):
+        from app.orchestrator import dispatch
+        from app.services.base import ServiceResult
+
+        async def ok(**_kwargs):
+            return ServiceResult(status=ActionStatus.success, reason="done")
+
+        dispatch.register(ActionType.check_connections, ok)
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        for _ in range(3):
+            await engine.advance(ctx)
+
+        plan = (await session.execute(select(Plan))).scalars().one()
+        assert "find_hotel_options" in plan.rationale
+        assert "no deterministic service is available" in plan.rationale
+
+        stmt = select(DecisionLog).where(DecisionLog.event_type == "PLAN_PROPOSED")
+        proposed = (await session.execute(stmt)).scalars().one()
+        assert "find_hotel_options" in proposed.detail["deferred_actions"]
+
+    async def test_a_dependency_on_a_deferred_action_is_dropped_not_left_dangling(
+        self, session, flight, settings
+    ):
+        """notify_passengers depends on check_connections; if that is deferred the edge goes.
+
+        A dependency naming a task that was never created can never be satisfied, so the
+        plan would deadlock on its own edge rather than on anything real.
+        """
+        from app.orchestrator import dispatch
+        from app.services.base import ServiceResult
+
+        async def ok(**_kwargs):
+            return ServiceResult(status=ActionStatus.success, reason="done")
+
+        dispatch.register(ActionType.notify_passengers, ok)
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        for _ in range(3):
+            await engine.advance(ctx)
+
+        rows = (await session.execute(select(PlanTaskRow))).scalars().all()
+        assert [r.action_type for r in rows] == ["notify_passengers"]
+        assert rows[0].depends_on == []
+
+    async def test_an_empty_registry_keeps_the_whole_playbook(self, session, flight, settings):
+        """An empty plan would let an incident resolve without doing anything at all.
+
+        That is a worse failure than a visible refusal, so with nothing registered the full
+        playbook is proposed and the run blocks honestly at the first dispatch.
+        """
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        for _ in range(3):
+            await engine.advance(ctx)
+
+        rows = (await session.execute(select(PlanTaskRow))).scalars().all()
+        assert len(rows) == 5
+
     async def test_a_plan_is_not_regenerated_on_re_entry(self, session, flight, settings):
         engine = build(session, settings=settings)
         ctx = await engine.open_incident(flight.id, "weather")
@@ -254,14 +340,30 @@ class TestAdvance:
         entries = (
             (await session.execute(select(DecisionLog).order_by(DecisionLog.id))).scalars().all()
         )
+        # No weather observation is seeded in this fixture, so the risk assessment records
+        # that it could not run rather than defaulting to a number nobody measured.
         assert [e.event_type for e in entries] == [
             "INCIDENT_OPENED",
             "STATE_CHANGED",
+            "DELAY_RISK_UNAVAILABLE",
             "STATE_CHANGED",
             "PLAN_PROPOSED",
             "STATE_CHANGED",
         ]
         assert [e.id for e in entries] == sorted(e.id for e in entries)
+
+    async def test_absent_weather_leaves_the_risk_absent(self, session, flight, settings):
+        """No observation means no Prediction, not a zero-risk one."""
+        from app.models.workflow import Prediction
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        await engine.advance(ctx)
+        await engine.advance(ctx)
+
+        assert await _count(session, Prediction) == 0
+        incident = await session.get(Incident, ctx.incident_id)
+        assert incident.prediction_id is None
 
     async def test_a_terminal_incident_does_not_advance(self, session, flight, settings):
         engine = build(session, settings=settings)
@@ -747,6 +849,53 @@ class TestAssuranceInvocation:
             ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
         )
         assert gathered["sources"] == {"metar:VOBL": FIXED_NOW}
+
+    async def test_policy_inputs_are_absent_and_that_absence_is_recorded(
+        self, session, flight, settings, working_gate
+    ):
+        """Tripwire for the one integration still outstanding.
+
+        `required_facts` and `constraints` come from Stream B's policy layer, which is
+        trip-scoped rather than action-scoped: there is no `required_facts_for(action_type)`
+        and nothing in the repository authors a gate-shaped constraint. Stream A must not
+        invent either, so `evidence_complete` and `policy_compliant` currently pass with
+        nothing to check.
+
+        That is only acceptable while it is *visible*. This asserts both halves — the inputs
+        are empty, and the record says so. When Stream B exposes the contract, this test
+        fails, which is the point: it is the reminder to wire it rather than a rule that it
+        stay unwired.
+        """
+        from app.orchestrator.engine import POLICY_INPUTS_PENDING
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        await engine.run(ctx)
+
+        stmt = select(DecisionLog).where(DecisionLog.event_type == "ASSURANCE_EVALUATED")
+        recorded = (await session.execute(stmt)).scalars().all()
+        assert recorded
+
+        for entry in recorded:
+            coverage = entry.detail["gate_inputs"]
+            assert coverage["required_facts"] == 0
+            assert coverage["constraints"] == 0
+            assert coverage["notice"] == POLICY_INPUTS_PENDING
+            assert coverage["vacuous_checks"] == ["evidence_complete", "policy_compliant"]
+
+    async def test_the_inputs_the_orchestrator_does_own_are_populated(
+        self, session, flight, settings, working_gate
+    ):
+        """The other four checks must not be vacuous too."""
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        await engine.run(ctx)
+
+        stmt = select(DecisionLog).where(DecisionLog.event_type == "ASSURANCE_EVALUATED")
+        first = (await session.execute(stmt)).scalars().first()
+        coverage = first.detail["gate_inputs"]
+
+        assert coverage["resolved_entities"] >= 1, "entities_valid had nothing to validate"
 
     async def test_the_orchestrator_computes_no_check_outcome_itself(self):
         """Stream A gathers facts; Stream B judges them. Assert the boundary in code.

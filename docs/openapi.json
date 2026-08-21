@@ -884,10 +884,33 @@
       },
       "RiskFactor": {
         "additionalProperties": false,
+        "description": "One named contributor to the risk index.\n\n`value` is the observed figure where the rule recorded one, so a reader can check the\nfactor against the observation instead of taking the label on trust. `points` shows the\ncontribution, which is what makes an index of 80 explainable rather than asserted.",
         "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
           },
           "runway": {
             "anyOf": [

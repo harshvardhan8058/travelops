@@ -67,12 +67,16 @@ _RAIL: tuple[IncidentState, ...] = (
     IncidentState.assessing,
     IncidentState.planning,
     IncidentState.assuring,
+    # In the spine, not appended afterwards. Waiting for an operator is part of the normal
+    # path whenever the gate asks for one, and a rail that listed it after `resolved` would
+    # read as though approval happened after resolution.
+    IncidentState.awaiting_approval,
     IncidentState.executing,
     IncidentState.resolved,
 )
 
-_BRANCH_STATES: tuple[IncidentState, ...] = (
-    IncidentState.awaiting_approval,
+#: Only ever appended, and only when reached: these end the incident.
+_TERMINAL_BRANCHES: tuple[IncidentState, ...] = (
     IncidentState.blocked,
     IncidentState.failed,
 )
@@ -215,12 +219,35 @@ async def _state_rail(session: AsyncSession, incident: Incident) -> list[StateRa
         target = (entry.detail or {}).get("to")
         if target and target not in reached:
             reached[target] = _as_utc(entry.occurred_at)
-    reached.setdefault(IncidentState.detected.value, _as_utc(incident.opened_at))
+
+    # `detected` comes from the log entry that recorded the opening, not from
+    # `incident.opened_at`. For a replayed scenario those differ — opened_at is the
+    # disruption's own time — and a rail mixing two clocks reads as a 23-hour gap that
+    # never happened. Every entry on the rail is now the real time its step ran.
+    opened = (
+        (
+            await session.execute(
+                select(DecisionLog)
+                .where(
+                    DecisionLog.incident_id == incident.id,
+                    DecisionLog.event_type == "INCIDENT_OPENED",
+                )
+                .order_by(DecisionLog.id)
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    reached.setdefault(
+        IncidentState.detected.value,
+        _as_utc(opened.occurred_at) if opened else _as_utc(incident.opened_at),
+    )
 
     rail = [StateRailEntry(state=state, reached_at=reached.get(state.value)) for state in _RAIL]
     rail.extend(
         StateRailEntry(state=state, reached_at=reached[state.value])
-        for state in _BRANCH_STATES
+        for state in _TERMINAL_BRANCHES
         if state.value in reached
     )
     return rail
@@ -289,14 +316,24 @@ async def _evidence(
 
 
 def _risk_factor(item: Any) -> RiskFactor:
-    if isinstance(item, dict):
-        return RiskFactor(
-            name=str(item.get("name", "")),
-            value=str(item.get("value", "")),
-            threshold=item.get("threshold"),
-            runway=item.get("runway"),
-        )
-    return RiskFactor(name=str(item), value="")
+    """Map a stored Delay Risk factor onto the response contract.
+
+    Stream C records `{name, detail, points, observed_value}`. `value` carries the observed
+    figure when there is one, because that is what makes a factor auditable — "visibility
+    800 m" can be checked against the observation, "visibility low" cannot. `detail` is kept
+    alongside it rather than discarded, and `points` shows how the index was reached.
+    """
+    if not isinstance(item, dict):
+        return RiskFactor(name=str(item), value="")
+    observed = item.get("observed_value")
+    return RiskFactor(
+        name=str(item.get("name", "")),
+        value="" if observed is None else str(observed),
+        detail=item.get("detail"),
+        points=item.get("points"),
+        threshold=item.get("threshold"),
+        runway=item.get("runway"),
+    )
 
 
 async def _plan_summary(session: AsyncSession, incident_id: int) -> PlanSummary | None:

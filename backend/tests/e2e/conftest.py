@@ -104,6 +104,22 @@ async def seeded(db_engine) -> AsyncIterator:
     yield db_engine
 
 
+@pytest.fixture(autouse=True)
+def registered_services() -> AsyncIterator[list[str]]:
+    """Bind the implemented services, as the application lifespan does in production.
+
+    Made explicit rather than left to whichever test happened to construct a TestClient
+    first: `dispatch.SERVICE_REGISTRY` is process-global, so relying on lifespan ordering
+    makes these tests depend on each other.
+    """
+    from app.orchestrator import dispatch
+    from app.orchestrator.service_registry import register_stage2_services
+
+    dispatch.SERVICE_REGISTRY.clear()
+    yield register_stage2_services()
+    dispatch.SERVICE_REGISTRY.clear()
+
+
 @pytest.fixture
 def client(seeded) -> AsyncIterator[TestClient]:
     factory = async_sessionmaker(bind=seeded, expire_on_commit=False, autoflush=False)

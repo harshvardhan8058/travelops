@@ -32,17 +32,19 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contract import PlanTask
 from app.assurance.contract import AssuranceResult
 from app.config import ResolvedModes, Settings, get_modes, get_settings
+from app.db.scenario_queries import load_delay_risk_inputs
 from app.errors import AssuranceBlocked, EntityNotFound, WorkflowLimitExceeded
 from app.events.types import (
     ActionCompleted,
     AssuranceEvaluated,
+    HighRiskDelay,
     IncidentOpened,
     IncidentResolved,
     PlanProposed,
@@ -65,6 +67,7 @@ from app.models.workflow import (
     HumanDecision,
     Incident,
     Plan,
+    Prediction,
 )
 from app.models.workflow import PlanTask as PlanTaskRow
 from app.observability.logging import correlation_id_var, get_logger
@@ -73,10 +76,12 @@ from app.orchestrator.limits import Limits, check_step_budget
 from app.orchestrator.playbook import (
     FALLBACK_GENERATOR,
     FALLBACK_RATIONALE,
+    PlaybookStep,
     playbook_for,
 )
 from app.orchestrator.state import assert_transition, is_terminal
 from app.services.base import ServiceResult
+from app.services.delay_risk import DelayRiskService
 
 log = get_logger(__name__)
 
@@ -137,6 +142,8 @@ class _AssuranceOutcome:
     result: AssuranceResult
     gate_available: bool
     unavailable_reason: str | None = None
+    #: The GateInputs the orchestrator gathered, so coverage can be recorded.
+    gathered: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -193,6 +200,7 @@ class Orchestrator:
         correlation_id: str | None = None,
         demo_dataset_id: str | None = None,
         evidence_refs: Sequence[str] | None = None,
+        opened_at: datetime | None = None,
     ) -> WorkflowContext:
         """Create an incident, or return the existing active one for this flight.
 
@@ -201,6 +209,13 @@ class Orchestrator:
         two pollers arriving inside the same millisecond — by turning the duplicate into a
         database error, which is recovered here rather than surfaced. A 60-second weather
         poll must not open 60 incidents an hour.
+
+        `opened_at` is when the disruption occurred, which for an injected scenario is the
+        fixture's anchor rather than the moment somebody ran the command. It becomes the
+        incident's reference clock: evidence is selected as of that time and freshness is
+        judged against it. Audit timestamps are never backdated with it — every
+        `decision_log` entry records the real time its step ran, because a falsified
+        `occurred_at` would corrupt the one record this system asks to be trusted.
         """
         correlation = correlation_id or correlation_id_var.get() or _new_correlation_id()
         token = correlation_id_var.set(correlation)
@@ -214,7 +229,7 @@ class Orchestrator:
                 raise EntityNotFound("flight not found", details={"flight_id": flight_id})
 
             trigger = _coerce_trigger(trigger_type)
-            opened_at = self._now()
+            opened_at = _as_utc(opened_at) or self._now()
             incident = Incident(
                 reference=await self._next_reference(flight, opened_at),
                 group_id=group_id,
@@ -361,7 +376,22 @@ class Orchestrator:
         plan = await self._current_plan(incident_id)
         if plan is not None:
             ctx.plan_id = plan.id
+        # Steps already taken are recovered from the durable record, not restarted at zero.
+        # Otherwise the step budget resets on every POST /run and stops being a budget: a
+        # caller could drive an incident indefinitely, one HTTP call at a time.
+        ctx.steps_taken = await self._recorded_steps(incident_id)
         return ctx
+
+    async def _recorded_steps(self, incident_id: int) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(DecisionLog)
+            .where(
+                DecisionLog.incident_id == incident_id,
+                DecisionLog.event_type == "STATE_CHANGED",
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
 
     # ------------------------------------------------------------------------- planning
 
@@ -375,16 +405,32 @@ class Orchestrator:
         Every task's action is an `ActionType`, validated by the `PlanTask` contract before
         anything is persisted, so an unknown action type cannot reach assurance.
         """
-        steps = playbook_for(ctx.trigger_type or TriggerType.other)
+        steps, deferred = self._executable_steps(ctx)
         tasks = [
             PlanTask(
                 action=step.action,
                 target_refs=self._target_refs(ctx),
                 inputs=dict(step.inputs),
-                depends_on=[dependency.value for dependency in step.depends_on],
+                depends_on=[
+                    dependency.value
+                    for dependency in step.depends_on
+                    # A dependency that was deferred cannot gate anything, so the edge is
+                    # dropped rather than left dangling and permanently unsatisfiable.
+                    if dependency not in deferred
+                ],
             )
             for step in steps
         ]
+
+        rationale = FALLBACK_RATIONALE
+        if deferred:
+            # Stated on the plan itself, so the omission is part of the record a reviewer
+            # reads rather than something they have to notice is missing.
+            rationale = (
+                f"{FALLBACK_RATIONALE} Not proposed, because no deterministic service is "
+                f"available to carry them out yet: "
+                f"{', '.join(sorted(action.value for action in deferred))}."
+            )
 
         plan = Plan(
             incident_id=ctx.incident_id,
@@ -393,7 +439,7 @@ class Orchestrator:
             # No model was involved, so there is no prompt version and no self-report.
             prompt_version=None,
             model_self_report=None,
-            rationale=FALLBACK_RATIONALE,
+            rationale=rationale,
             raw_response=None,
             retrieved_incident_ids=[],
         )
@@ -437,6 +483,7 @@ class Orchestrator:
                 "model_self_report": None,
                 "llm_mode": self.modes.llm.value,
                 "actions": [task.action.value for task in tasks],
+                "deferred_actions": sorted(action.value for action in deferred),
             },
         )
         await self._publish(
@@ -454,6 +501,33 @@ class Orchestrator:
         )
         return tasks
 
+    def _executable_steps(
+        self, ctx: WorkflowContext
+    ) -> tuple[tuple[PlaybookStep, ...], set[ActionType]]:
+        """Narrow the playbook to steps a deterministic service can actually carry out.
+
+        Proposing a task nothing can execute has two bad outcomes and no good one: the run
+        stops dead at the first unavailable capability, and the plan implies work the system
+        cannot do. So an action with no registered service is *deferred* — left out of the
+        plan and named in the rationale and the decision log, rather than proposed and failed.
+
+        This is not the same as pretending the work was done. Nothing is marked succeeded,
+        no count is invented, and the omission is written into the record.
+
+        The filter reads the dispatch registry, so a plan widens by itself as Stream C lands
+        each service. There is no second list to keep in step.
+
+        If nothing at all is registered, the full playbook is kept: an empty plan would let
+        an incident resolve without a single task, which is a far worse failure than a
+        visible refusal.
+        """
+        steps = playbook_for(ctx.trigger_type or TriggerType.other)
+        available = tuple(step for step in steps if dispatch.is_implemented(step.action))
+        if not available:
+            return steps, set()
+        deferred = {step.action for step in steps if step not in available}
+        return available, deferred
+
     def _target_refs(self, ctx: WorkflowContext) -> list[str]:
         refs = [f"incident:{ctx.incident_reference}"]
         if ctx.flight_id is not None:
@@ -470,6 +544,20 @@ class Orchestrator:
         """
         return (await self._assure(ctx, task)).result
 
+    async def _incident_clock(self, ctx: WorkflowContext) -> datetime:
+        """The incident's reference time: when the disruption happened.
+
+        One clock, used everywhere evidence is selected or aged — the Delay Risk `as_of` and
+        the gate's freshness reference. Two clocks for those two jobs is how a replayed
+        scenario ends up scoring a storm against the next day's clear-weather observation.
+
+        This is deliberately NOT the clock used for audit timestamps. Those are real time.
+        """
+        incident = await self._session.get(Incident, ctx.incident_id)
+        if incident is None or incident.opened_at is None:
+            return self._now()
+        return _as_utc(incident.opened_at) or self._now()
+
     async def _gate_inputs(self, ctx: WorkflowContext, task: PlanTask) -> dict[str, Any]:
         """Gather everything the six checks need.
 
@@ -482,13 +570,22 @@ class Orchestrator:
         integration gap rather than an oversight:
 
         * `required_facts` and `constraints` are declared by the policy rule selected for an
-          action. That selection lives in Stream B's resolver, so inventing a list here
-          would be Stream A writing policy.
+          action. Stream B's policy layer is trip-scoped, not action-scoped: `requires_facts`
+          lives on a `PackRule`, and choosing the rule needs a full trip context through
+          their resolver. There is no `required_facts_for(action_type)`, and nothing in the
+          repository authors a gate-shaped `{field, op, value}` constraint. Deriving either
+          here would be Stream A writing policy.
         * `provided_facts` follows from `required_facts`; supplying facts nobody asked for
           would not make the evidence check meaningful.
 
+        The consequence is that `evidence_complete` and `policy_compliant` currently PASS
+        with nothing to check. That is recorded on every evaluation — see
+        `POLICY_INPUTS_PENDING` — because six green checks that include two vacuous ones
+        would otherwise read as "policy was verified", which is not true yet.
+
         Everything the orchestrator genuinely knows is supplied for real, so
-        `entities_valid` and `no_conflicts` are doing actual work today.
+        `entities_valid`, `sources_fresh`, `no_conflicts` and `action_risk` are doing actual
+        work today.
         """
         referenced = list(task.target_refs)
         return {
@@ -562,9 +659,18 @@ class Orchestrator:
     async def _source_timestamps(self, ctx: WorkflowContext) -> dict[str, datetime | None]:
         """Observation timestamps for `sources_fresh`, keyed `<kind>:<identifier>`.
 
-        Only sources that actually exist are reported. A source is never invented with
-        `now` as its timestamp, because that would manufacture freshness — precisely the
-        thing this check exists to detect.
+        This must report the age of the observation the system **actually reasoned from**,
+        which is the same one Delay Risk selected: the latest actual report at or before the
+        incident clock. Reporting the newest row in the table instead means judging the
+        freshness of evidence no decision used — and for a replayed scenario that row is
+        dated *after* the incident, which is not a freshness question at all.
+
+        Forecasts are excluded for the same reason: a TAF is not an observation of what
+        happened, and ageing one against `metar_minutes` compares unlike things.
+
+        Only sources that exist are reported. A source is never invented with `now` as its
+        timestamp, because that would manufacture freshness — precisely what this check
+        exists to detect.
         """
         sources: dict[str, datetime | None] = {}
         if ctx.flight_id is None:
@@ -572,9 +678,15 @@ class Orchestrator:
         flight = await self._session.get(Flight, ctx.flight_id)
         if flight is None:
             return sources
+
+        as_of = await self._incident_clock(ctx)
         stmt = (
             select(WeatherObservation)
-            .where(WeatherObservation.airport_icao == flight.origin_icao)
+            .where(
+                WeatherObservation.airport_icao == flight.origin_icao,
+                WeatherObservation.is_forecast.is_(False),
+                WeatherObservation.observed_at <= as_of,
+            )
             .order_by(WeatherObservation.observed_at.desc())
             .limit(1)
         )
@@ -597,13 +709,25 @@ class Orchestrator:
             )
 
         config, config_hash = assurance_adapter.load_config()
+        gathered = await self._gate_inputs(ctx, task)
         try:
             result = await assurance_adapter.evaluate(
-                **await self._gate_inputs(ctx, task),
+                **gathered,
                 config=config,
                 config_hash=config_hash or self.modes.assurance_config_hash,
-                # Explicit, so the evaluation is reproducible on replay.
-                now=self._now(),
+                # The incident's own clock, not the wall clock.
+                #
+                # `now` is the reference `sources_fresh` measures an observation against. Using
+                # wall time means a scenario replayed the next day reports every source stale,
+                # which is not an operational risk — it is an artefact of when the demo ran.
+                # Anchoring to the incident asks the question that matters: was this evidence
+                # current when the disruption happened?
+                #
+                # This does not soften the check. An observation already stale at `opened_at`
+                # still fails. And it does not touch the audit trail: `AssuranceResult.
+                # evaluated_at` is set by the gate from the real clock, so the record still
+                # says when the decision was actually made.
+                now=await self._incident_clock(ctx),
             )
         except assurance_adapter.GateUnavailableError as exc:
             log.error(
@@ -623,11 +747,16 @@ class Orchestrator:
                 ),
                 gate_available=False,
                 unavailable_reason=exc.reason,
+                gathered=gathered,
             )
-        return _AssuranceOutcome(result=result, gate_available=True)
+        return _AssuranceOutcome(result=result, gate_available=True, gathered=gathered)
 
     async def _record_assurance(
-        self, ctx: WorkflowContext, task_row: PlanTaskRow, outcome: _AssuranceOutcome
+        self,
+        ctx: WorkflowContext,
+        task_row: PlanTaskRow,
+        outcome: _AssuranceOutcome,
+        gathered: dict[str, Any] | None = None,
     ) -> AssuranceEvaluation:
         """Persist the immutable evaluation. Never updated; a correction is a new row."""
         result = outcome.result
@@ -671,6 +800,9 @@ class Orchestrator:
                 "config_version": result.config_version,
                 "config_hash": result.config_hash,
                 "gate_available": outcome.gate_available,
+                # Which of the six checks had real inputs to work with. Two of them do not
+                # yet, and a green check with nothing to check is not evidence of compliance.
+                "gate_inputs": _gate_input_coverage(gathered or {}),
             },
         )
         await self._publish(
@@ -782,6 +914,9 @@ class Orchestrator:
             target_refs=list(task.target_refs),
             inputs=dict(task.inputs),
             evidence_refs=list(ctx.evidence_refs),
+            # Stream C's services are pure; their loaders need the session. The orchestrator
+            # owns the transaction, so it is the one that can hand it over.
+            session=self._session,
         )
 
         action = Action(
@@ -989,13 +1124,131 @@ class Orchestrator:
         )
 
     async def _step_assessing(self, ctx: WorkflowContext) -> None:
+        assessment = await self._assess_delay_risk(ctx)
         await self._transition(
             ctx,
             IncidentState.planning,
             stage=STAGE_PLAN,
             summary="Impact assessed; generating a recovery plan",
-            detail={"llm_mode": self.modes.llm.value},
+            detail={"llm_mode": self.modes.llm.value, **(assessment or {})},
         )
+
+    async def _assess_delay_risk(self, ctx: WorkflowContext) -> dict[str, Any] | None:
+        """Score disruption risk from the recorded observation, and persist a Prediction.
+
+        This is evidence gathering, not an action, so it does not pass through the Decision
+        Assurance Gate — there is no external side effect and nothing to authorise. It
+        matches the flow in docs/02-disruption-flow.md, where the Delay Risk service runs
+        before the incident is worked.
+
+        **The `as_of` timestamp is the incident's own `opened_at`, not the wall clock.** The
+        archive holds later, clear-weather observations for VOBL, so asking "what is the
+        latest METAR now" scores a storm at zero. Asking "what was known when this incident
+        opened" is both correct and reproducible, which is what makes a replay meaningful.
+        """
+        if ctx.flight_id is None:
+            return None
+        flight = await self._session.get(Flight, ctx.flight_id)
+        if flight is None:
+            return None
+
+        incident = await self._session.get(Incident, ctx.incident_id)
+        as_of = await self._incident_clock(ctx)
+
+        try:
+            weather, runways, ruleset = await load_delay_risk_inputs(
+                self._session, flight.origin_icao, as_of=as_of
+            )
+        except LookupError as exc:
+            # No observation to reason from. Recorded, and the risk stays absent rather than
+            # being defaulted to a number nobody measured.
+            await self._journal(
+                ctx,
+                stage=STAGE_ASSESS,
+                actor="delay_risk_service",
+                event_type="DELAY_RISK_UNAVAILABLE",
+                summary=f"No weather observation available for {flight.origin_icao}",
+                detail={"airport_icao": flight.origin_icao, "detail": str(exc)},
+            )
+            return None
+
+        result = await DelayRiskService().execute(
+            weather=weather,
+            runways=runways,
+            ruleset=ruleset,
+            event_threshold=self._settings.delay_risk_event_threshold,
+        )
+        payload = result.payload
+
+        prediction = Prediction(
+            flight_id=flight.id,
+            airport_icao=flight.origin_icao,
+            predicted_at=as_of or self._now(),
+            risk_index=int(payload["risk_index"]),
+            risk_level=payload["risk_level"],
+            rule_version=str(payload["rule_version"]),
+            factors=payload.get("factors") or [],
+            evidence_refs=list(result.evidence_refs),
+        )
+        self._session.add(prediction)
+        await self._session.flush()
+
+        if incident is not None and incident.prediction_id is None:
+            incident.prediction_id = prediction.id
+            await self._session.flush()
+
+        for ref in result.evidence_refs:
+            if ref not in ctx.evidence_refs:
+                ctx.evidence_refs.append(ref)
+
+        await self._journal(
+            ctx,
+            stage=STAGE_ASSESS,
+            actor="delay_risk_service",
+            event_type="HIGH_RISK_DELAY"
+            if payload.get("event_recommended")
+            else "DELAY_RISK_SCORED",
+            summary=(
+                f"Risk index {payload['risk_index']} ({payload['risk_level']}) "
+                f"against threshold {payload.get('event_threshold')}"
+            ),
+            detail={
+                "prediction_id": prediction.id,
+                "as_of": as_of.isoformat() if as_of else None,
+                "rule_version": payload.get("rule_version"),
+                "ruleset_version": payload.get("ruleset_version"),
+                "factors": [factor.get("label") for factor in (payload.get("factors") or [])],
+                "observation_age_minutes": payload.get("observation_age_minutes"),
+                "is_stale": payload.get("is_stale"),
+                "missing_inputs": payload.get("missing_inputs") or [],
+            },
+        )
+
+        if payload.get("event_recommended"):
+            await self._publish(
+                HighRiskDelay(
+                    producer="delay_risk_service",
+                    correlation_id=ctx.correlation_id,
+                    incident_id=ctx.incident_id,
+                    flight_id=flight.id,
+                    risk_index=int(payload["risk_index"]),
+                    risk_level=payload["risk_level"],
+                    rule_version=str(payload["rule_version"]),
+                    factors=[
+                        str(factor.get("label"))
+                        for factor in (payload.get("factors") or [])
+                        if factor.get("label")
+                    ],
+                    evidence_refs=list(result.evidence_refs),
+                ),
+                ctx,
+            )
+
+        return {
+            "prediction_id": prediction.id,
+            "risk_index": payload["risk_index"],
+            "risk_level": payload["risk_level"],
+        }
 
     async def _step_planning(self, ctx: WorkflowContext) -> None:
         plan = await self._current_plan(ctx.incident_id)
@@ -1023,7 +1276,7 @@ class Orchestrator:
 
         task = _contract_task(task_row)
         outcome = await self._assure(ctx, task)
-        evaluation = await self._record_assurance(ctx, task_row, outcome)
+        evaluation = await self._record_assurance(ctx, task_row, outcome, outcome.gathered)
         ctx.metadata["current_plan_task_id"] = task_row.id
         ctx.metadata["current_assurance_id"] = evaluation.id
 
@@ -1415,6 +1668,38 @@ def _new_correlation_id() -> str:
     import uuid
 
     return uuid.uuid4().hex
+
+
+#: Recorded when a check ran against nothing, so a PASS is not mistaken for verification.
+POLICY_INPUTS_PENDING = "POLICY_INPUTS_PENDING"
+
+
+def _gate_input_coverage(gathered: dict[str, Any]) -> dict[str, Any]:
+    """State which gate inputs had something in them.
+
+    Two of the six checks — `evidence_complete` and `policy_compliant` — currently receive
+    empty lists, because the facts and constraints a rule declares come from Stream B's
+    policy layer and Stream A must not invent them. Those checks therefore PASS without
+    checking anything.
+
+    Recording that is the difference between an honest audit trail and a misleading one. Six
+    green checks look like six verifications; this says which two were vacuous, so nobody
+    reads the panel as proof that policy was evaluated.
+    """
+    coverage = {
+        "required_facts": len(gathered.get("required_facts") or []),
+        "constraints": len(gathered.get("constraints") or []),
+        "resolved_entities": len(gathered.get("resolved_entities") or {}),
+        "sources": len(gathered.get("sources") or {}),
+        "pending_or_executed": len(gathered.get("pending_or_executed") or []),
+    }
+    vacuous = [name for name in ("required_facts", "constraints") if coverage[name] == 0]
+    if vacuous:
+        coverage["notice"] = POLICY_INPUTS_PENDING
+        coverage["vacuous_checks"] = (
+            ["evidence_complete"] if "required_facts" in vacuous else []
+        ) + (["policy_compliant"] if "constraints" in vacuous else [])
+    return coverage
 
 
 def _as_utc(value: datetime | None) -> datetime | None:

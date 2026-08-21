@@ -43,10 +43,19 @@ class FlightSummary(BaseModel):
 
 
 class RiskFactor(BaseModel):
+    """One named contributor to the risk index.
+
+    `value` is the observed figure where the rule recorded one, so a reader can check the
+    factor against the observation instead of taking the label on trust. `points` shows the
+    contribution, which is what makes an index of 80 explainable rather than asserted.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     name: str
     value: str
+    detail: str | None = None
+    points: int | None = None
     threshold: str | None = None
     runway: str | None = None
 

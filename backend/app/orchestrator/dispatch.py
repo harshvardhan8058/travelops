@@ -110,12 +110,28 @@ async def dispatch(
         )
         return refusal(action, evidence_refs=evidence_refs)
 
-    result = await call(
-        target_refs=target_refs,
-        inputs=inputs,
-        evidence_refs=evidence_refs or [],
-        **kwargs,
-    )
+    try:
+        result = await call(
+            target_refs=target_refs,
+            inputs=inputs,
+            evidence_refs=evidence_refs or [],
+            **kwargs,
+        )
+    except NotImplementedError as exc:
+        # A registered-but-unfinished service is the same situation as an unregistered one,
+        # so it produces the same explicit refusal rather than a 500. This lets Stream C
+        # register a service the moment its class exists, without a half-built body turning
+        # a run into a crash.
+        log.warning(
+            "service_dispatch_refused",
+            outcome="needs_human",
+            action_type=action.value,
+            reason_code=SERVICE_NOT_IMPLEMENTED,
+            owning_service=ACTION_OWNERS.get(action, "unassigned"),
+            detail=str(exc) or None,
+        )
+        return refusal(action, evidence_refs=evidence_refs)
+
     if not isinstance(result, ServiceResult):
         # A service that does not honour the contract is a failure, not a success.
         raise TypeError(

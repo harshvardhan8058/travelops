@@ -52,10 +52,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             detail="assurance config unavailable; no action can be authorised",
         )
 
+    # Bind the deterministic services that are implemented. An action with no service here
+    # keeps producing an explicit refusal rather than a fabricated success, so this list
+    # growing is the only thing that changes as Stream C lands each one.
+    from app.orchestrator.service_registry import register_stage2_services
+
+    register_stage2_services()
+
     yield
 
     from app.db.session import dispose_engine
+    from app.events.bus import dispose_event_bus
 
+    await dispose_event_bus()
     await dispose_engine()
     log.info("shutdown")
 
