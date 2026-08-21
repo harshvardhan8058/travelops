@@ -1,0 +1,43 @@
+{
+  "generated_by": "hand-authored, reviewed content",
+  "note": "Approved notification templates. Versioned data, not code, so wording can be reviewed without a deploy. Placeholders are substituted literally — there is no expression evaluation in the renderer.",
+  "version": "notify-v1",
+  "templates": [
+    {
+      "template_id": "delay_notice",
+      "version": "notify-v1",
+      "channel": "email",
+      "review_status": "approved",
+      "subject": "{flight_number} to {destination_city} is delayed",
+      "body": "Dear {passenger_name},\n\nYour flight {flight_number} from {origin_city} to {destination_city} on {scheduled_departure_local} is delayed by approximately {delay_minutes} minutes. The revised departure time is {revised_departure_local}.\n\nWe are sorry for the disruption. Our operations team is managing your itinerary and will contact you if anything changes.\n\nBooking reference: {pnr}\n\nThis is an automated message from a demonstration system. No booking has been changed and no payment has been taken.",
+      "required_facts": [
+        "passenger_name",
+        "flight_number",
+        "origin_city",
+        "destination_city",
+        "scheduled_departure_local",
+        "revised_departure_local",
+        "delay_minutes",
+        "pnr"
+      ]
+    },
+    {
+      "template_id": "connection_at_risk",
+      "version": "notify-v1",
+      "channel": "email",
+      "review_status": "approved",
+      "subject": "Action needed: your connection at {connection_airport}",
+      "body": "Dear {passenger_name},\n\nYour flight {flight_number} is now expected to arrive at {connection_airport} at {revised_arrival_local}. Your onward flight {onward_flight_number} is scheduled to depart at {onward_departure_local}, which no longer allows the minimum connection time of {minimum_connection_minutes} minutes.\n\nOur operations team is reviewing alternatives for you. You do not need to do anything yet.\n\nBooking reference: {pnr}\n\nThis is an automated message from a demonstration system. No booking has been changed and no payment has been taken.",
+      "required_facts": [
+        "passenger_name",
+        "flight_number",
+        "connection_airport",
+        "revised_arrival_local",
+        "onward_flight_number",
+        "onward_departure_local",
+        "minimum_connection_minutes",
+        "pnr"
+      ]
+    }
+  ]
+}
