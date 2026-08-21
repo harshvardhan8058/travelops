@@ -16,8 +16,9 @@ approved Coforge location unless sharing is authorised.
 | ✅ **Received** | MoCA Passenger Charter, Feb 2019 | Team — **done 2026-08-20** | Optionally confirm PDF redistribution so we can archive the file and hash it | Encoded as `in-moca-charter-2019` |
 | **P0** | Current DGCA CAR Part IV + amendments + revision metadata | Development first | Escalate only if portal/device policy blocks access; approve storage route | `charter` mode with dated-source badge |
 | **P0** | Aviation/legal SME sign-off on the encoded charter rules | **Team** | Nominate authorised reviewer; they complete `review.yaml` | Remain in `POLICY_MODE=charter`, never `verified` |
-| **P0** | Demo-machine capability/network check | **Team** | Test exact presentation device/network | Offline mode handles network only |
-| **P1** | Groq account + observed limits | **Team** | Create key locally; share limits, never key | Fixture/off modes |
+| ✅ **Confirmed** | Demo machine runs Docker | Team — **done 2026-08-20** | Re-verify projector and offline backup nearer the checkpoint | — |
+| **P1** | Groq key + observed limits | **Team, in progress** | Key stays in local `.env`; share only the console limits | Fixture/off modes |
+| ⏸ **Deferred by team** | Coforge internal tools | Team will verify separately | — | Claim omitted; no invented integration |
 | **P1** | Controlled SMTP/Mailtrap setup | **Team** | Configure local secret + allowlisted inboxes | Console/simulated notifications |
 | **P1** | Coforge internal-tool names and access | **Team** | Obtain official eligibility/access | Omit claim; never invent integration |
 | **P1** | AIKosh schedule artifact + terms | Development first | Escalate only if login/download restriction blocks access | Synthetic schedules |
