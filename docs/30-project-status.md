@@ -21,7 +21,7 @@ cd .. && python3 scripts/verify_docs.py
 | # | Item | Blocks | Who to ask | Fallback if it never arrives |
 | --- | --- | --- | --- | --- |
 | 1 | **Groq API key** | Live reasoning (Phase 3) | Create at [console.groq.com](https://console.groq.com/) | `LLM_MODE=fixture` and `off` both work. Demo survives |
-| 2 | **Run `make doctor && make up && make migrate` once on the demo laptop** | Confidence the stack starts on your hardware | You | None. This must actually be done |
+| 2 | **Run the stack once on the demo laptop** — ✅ API confirmed 21 Aug on Windows/Docker Desktop 29.x. Console and migration still to confirm | Confidence the stack starts on your hardware | You | None. This must actually be done |
 | 3 | **Aviation/legal SME to sign off the policy rules** | `POLICY_MODE=verified` | Mentor, or Arcolab/CIMS architecture lead, or `TechCon.x@Coforge.com` | `POLICY_MODE=charter` shows real cited figures behind a dated badge |
 
 **The Groq key goes in `backend/.env` as `GROQ_API_KEY=`. Never paste it into chat, a commit,
@@ -172,9 +172,15 @@ and left each stream's logic to its owner, with required behaviour in the docstr
 
 ### Not verified, and I will not claim otherwise
 
-- **`docker compose up` has never been executed end to end.** The sandbox blocks container
-  starts, so the compose file was validated structurally only. This is why item 2 in section 1
-  exists.
+- **`docker compose up` now confirmed working** on Windows with Docker Desktop 29.x (WSL2) on
+  21 August: the stack builds, starts, and `/docs` serves all 12 endpoints. Still unconfirmed on
+  that machine: postgres/redis health, `alembic upgrade head`, and the console at `:5173`.
+- **The `make` targets do not run on Windows.** PowerShell equivalents are in
+  [`31-team-actions.md`](31-team-actions.md).
+- **Fixture endpoints have no response models.** They return `Any`, so OpenAPI renders their
+  schema as `"string"`. Harmless now — Streams E and F hand-wrote their types — but Stream A must
+  add a Pydantic response model to each endpoint it makes real, otherwise a generated client
+  would be useless.
 - No live Groq call has been made.
 - No live METAR fetch has been made.
 - No real email has been sent.
