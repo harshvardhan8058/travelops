@@ -164,6 +164,29 @@ docker compose up --build -d       # 3. equivalent of `make up`
 docker compose ps                  #    wait until postgres and redis show healthy
 
 docker compose run --rm api alembic upgrade head   # 4. equivalent of `make migrate`
+
+docker compose run --rm api python -m app.cli seed  # 5. equivalent of `make seed`
+docker compose run --rm api python -m app.cli inject --scenario bengaluru_storm  # 6. `make demo`
+
+# 7. verify the whole recovery and print a pasteable report
+Get-Content scripts/verify_demo.py | docker compose exec -T api python -
+```
+
+**Steps 5 and 6 are not optional.** Without them the database is empty, there is no incident,
+and every incident endpoint correctly returns `ENTITY_NOT_FOUND`. This block used to stop at
+step 4, which is why the first attempt looked like a broken build.
+
+Step 7 replaces hand-running `curl`. On PowerShell `curl` is an alias for `Invoke-WebRequest`
+and does not accept `-X POST -d`, and `python3` does not exist on Windows — so the bash examples
+in `README.md` do not port. The script runs inside the container with the container's own Python,
+which sidesteps all of that. It drives the approval itself and exits non-zero on any failure,
+so it cannot be misread as a pass.
+
+Paste its output into the PR or the team channel. A full pass ends with:
+
+```text
+13 of 13 checks passed
+Stage 2 deterministic slice verified end to end on this machine.
 ```
 
 If `Copy-Item` reports `Cannot find path ...\.env.example` or compose reports
@@ -181,7 +204,9 @@ PowerShell equivalents for the remaining targets:
 | `make migrate` | `docker compose run --rm api alembic upgrade head` |
 | `make seed` | `docker compose run --rm api python -m app.cli seed` |
 | `make demo` | `docker compose run --rm api python -m app.cli inject --scenario bengaluru_storm` |
+| `make demo-reset` | `docker compose run --rm api python -m app.cli demo-reset` |
 | `make db-shell` | `docker compose exec postgres psql -U travelops -d travelops` |
+| the recovery calls in `README.md` | `Get-Content scripts/verify_demo.py \| docker compose exec -T api python -` |
 
 `make doctor` has no direct equivalent; `docker --version` plus `docker info` covers the part
 that matters. WSL2 is an alternative if you prefer the Make targets: `wsl --install`, then work

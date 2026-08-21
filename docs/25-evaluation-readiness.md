@@ -66,6 +66,9 @@ checks in `30-project-status.md` and every UI box in this file remain the demo m
       The API builds and starts on Windows with Docker Desktop 29.x (WSL2), 21 August, and
       `/docs` serves. Still unconfirmed on that machine: `alembic upgrade head`, `make seed`,
       `make demo`, the recovery calls, and the console at `:5173`.
+      **To close this box:** run steps 1–7 in [`31-team-actions.md`](31-team-actions.md) and paste
+      the output of `scripts/verify_demo.py`. A full pass prints `13 of 13 checks passed` and
+      exits 0; anything less names the failing check.
 - [x] Health endpoint confirms database/Redis/provider state. With Redis unreachable,
       `/health/ready` returns 503 and names `redis: down` per dependency rather than failing
       opaquely; `/system/mode` reports modes with no secret in the payload.
