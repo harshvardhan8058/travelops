@@ -113,6 +113,13 @@ cases:
       flight: { block_time_minutes: 95 }
       fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
       passenger: { contact_info_provided_at_booking: true, reported_for_original_flight: true }
+      # `offered` added 2026-08-21 (Stream B). The expected outcome below includes
+      # cancellation.care.meals_while_waiting, whose third condition is
+      # `alternate_flight.offered == true`. The original facts omitted it, so the rule was
+      # correctly undetermined and meals were not owed. The scenario intends an alternate to
+      # have been offered — the rule's own text is "waiting for the alternate flight" — so the
+      # fixture was incomplete, not the rule. Expectations were NOT changed.
+      alternate_flight: { offered: true }
       cause_evidence:
         operational_cause: crew_rostering
         external_to_carrier: false
@@ -146,6 +153,10 @@ cases:
       flight: { block_time_minutes: 95 }
       fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
       passenger: { contact_info_provided_at_booking: true, reported_for_original_flight: true }
+      # `offered` added 2026-08-21 (Stream B) for the same reason as the case above: the
+      # expected `meals_refreshments` comes from cancellation.care.meals_while_waiting, which
+      # requires it. Expectations were NOT changed.
+      alternate_flight: { offered: true }
       cause_evidence:
         operational_cause: meteorological
         external_to_carrier: true
