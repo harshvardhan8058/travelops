@@ -1,0 +1,107 @@
+{
+  "generated_by": "wave0-fixture",
+  "id": 1,
+  "reference": "INC-2026-0820-VOBL-01",
+  "group_reference": "GRP-2026-0820-VOBL",
+  "flight": {
+    "id": 1,
+    "flight_number": "6E 2134",
+    "route": "BLR → DEL",
+    "scheduled_departure": "2026-08-20T15:40:00Z",
+    "estimated_departure": "2026-08-20T22:40:00Z",
+    "delay_minutes": 420,
+    "block_time_minutes": 165,
+    "passengers": 174
+  },
+  "trigger_type": "weather",
+  "severity": "high",
+  "state": "executing",
+  "opened_at": "2026-08-20T15:36:00Z",
+  "state_rail": [
+    { "state": "detected", "reached_at": "2026-08-20T15:36:00Z" },
+    { "state": "assessing", "reached_at": "2026-08-20T15:36:12Z" },
+    { "state": "planning", "reached_at": "2026-08-20T15:36:40Z" },
+    { "state": "assuring", "reached_at": "2026-08-20T15:37:01Z" },
+    { "state": "executing", "reached_at": "2026-08-20T15:37:06Z" },
+    { "state": "resolved", "reached_at": null }
+  ],
+  "evidence": {
+    "risk": {
+      "risk_index": 87,
+      "risk_level": "severe",
+      "rule_version": "delay-risk-v1",
+      "factors": [
+        { "name": "visibility_below_threshold", "value": "800 m", "threshold": "1500 m" },
+        { "name": "crosswind_elevated", "value": "23.5 kt", "runway": "09L", "threshold": "20 kt" },
+        { "name": "precipitation_present", "value": "rain" }
+      ],
+      "note": "A deterministic index and band, not a calibrated probability."
+    },
+    "weather": {
+      "airport_icao": "VOBL",
+      "observed_at": "2026-08-20T15:30:00Z",
+      "wind_speed_kt": 24,
+      "wind_direction_deg": 250,
+      "visibility_m": 800,
+      "ceiling_ft": 900,
+      "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:weather:VOBL" }
+    },
+    "affected_entities": {
+      "passengers": 174,
+      "bookings": 151,
+      "connections_at_risk": 6,
+      "crew_pairings": 3,
+      "candidate_hotels": 4
+    },
+    "retrieved_precedent": {
+      "incident_reference": "INC-2026-0714-VOBL-03",
+      "matched_on": ["airport=VOBL", "trigger=weather", "severity=high", "night_departure=true"],
+      "outcome": "resolved",
+      "note": "Matched by explainable SQL filtering, not vector similarity."
+    }
+  },
+  "plan": {
+    "id": 1,
+    "generator": "fallback-playbook · deterministic",
+    "prompt_version": null,
+    "model_self_report": null,
+    "generated_at": "2026-08-20T15:36:44Z",
+    "rationale": "Reasoning agents arrive in Phase 3. This plan came from the deterministic playbook.",
+    "tasks": [
+      { "id": 1, "task_order": 1, "action_type": "check_connections", "state": "succeeded", "depends_on": [], "assurance_id": 101 },
+      { "id": 2, "task_order": 2, "action_type": "find_hotel_options", "state": "succeeded", "depends_on": [], "assurance_id": 102 },
+      { "id": 3, "task_order": 3, "action_type": "assess_crew_impact", "state": "succeeded", "depends_on": [], "assurance_id": 105 },
+      { "id": 4, "task_order": 4, "action_type": "notify_passengers", "state": "needs_human", "depends_on": ["1"], "assurance_id": 103 },
+      { "id": 5, "task_order": 5, "action_type": "evaluate_entitlements", "state": "needs_human", "depends_on": [], "assurance_id": 104 }
+    ]
+  },
+  "actions": [
+    {
+      "id": 501,
+      "plan_task_id": 1,
+      "assurance_id": 101,
+      "human_decision_id": null,
+      "actor": "connection_service",
+      "status": "success",
+      "reason": "6 itineraries identified as at risk",
+      "cost_inr": null,
+      "idempotency_key": "check_connections:incident:1:v1",
+      "executed_at": "2026-08-20T15:37:03Z",
+      "provenance_kind": "synthetic"
+    },
+    {
+      "id": 502,
+      "plan_task_id": 2,
+      "assurance_id": 102,
+      "human_decision_id": null,
+      "actor": "hotel_service",
+      "status": "success",
+      "reason": "4 candidate hotels within budget; capacity short by 38 rooms",
+      "cost_inr": 0,
+      "idempotency_key": "find_hotel_options:incident:1:v1",
+      "executed_at": "2026-08-20T15:37:07Z",
+      "provenance_kind": "synthetic"
+    }
+  ],
+  "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:incident" }
+}

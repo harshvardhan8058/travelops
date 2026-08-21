@@ -1,0 +1,25 @@
+{
+  "llm_mode": "off",
+  "weather_mode": "fixture",
+  "notification_mode": "console",
+  "policy_mode": "charter",
+  "real_email_enabled": false,
+  "app_env": "development",
+  "assurance": {
+    "config_present": true,
+    "config_version": "assurance-v1",
+    "config_hash": "9f2c4b71d3e85a06",
+    "workflow_executable": true
+  },
+  "degradations": [
+    "LLM_MODE=off: recovery runs on the deterministic fallback playbook",
+    "WEATHER_MODE=fixture: serving the committed snapshot, not live METAR"
+  ],
+  "policy_pack": {
+    "id": "in-moca-charter-2019",
+    "version": "2019.02",
+    "ui_label": "MoCA PASSENGER CHARTER · FEB 2019 · PENDING CAR VERIFICATION"
+  },
+  "limits": { "max_workflow_steps": 20, "action_timeout_seconds": 30 },
+  "data_seed": 20260807
+}

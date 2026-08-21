@@ -3,8 +3,10 @@
 **An autonomous operating layer for airline disruption recovery.**
 Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 
-> **Status:** submitted deck frozen; corrected architecture and implementation contracts ready;
-> application code not started. Stage dates are recorded in [`DECISIONS.md`](DECISIONS.md).
+> **Status:** submitted deck frozen. Wave 0 bootstrap is complete — scaffold, 33-table schema,
+> typed contracts, gate config, API fixtures and the UI shell all run and are verified. The six
+> streams can now build in parallel per [`29-kickoff-prompts.md`](29-kickoff-prompts.md). Stage
+> dates are in [`DECISIONS.md`](DECISIONS.md).
 
 ## Read in this order
 

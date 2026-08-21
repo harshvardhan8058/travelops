@@ -1,0 +1,120 @@
+{
+  "generated_by": "wave0-fixture",
+  "note": "Counts are DERIVED from the arrays below. The UI must never render a hardcoded total.",
+  "id": 1,
+  "reference": "GRP-2026-0820-VOBL",
+  "root_cause": "weather",
+  "airport_icao": "VOBL",
+  "severity": "high",
+  "state": "executing",
+  "opened_at": "2026-08-20T15:36:00Z",
+  "rollups": {
+    "flights_affected": 8,
+    "passengers_affected": 604,
+    "connections_at_risk": 22,
+    "candidate_hotels": 11,
+    "crew_pairings_affected": 9,
+    "note": "Each value is the length of the corresponding array, computed server-side."
+  },
+  "flights": [
+    { "id": 1, "flight_number": "6E 2134", "route": "BLR → DEL", "delay_minutes": 420, "passengers": 174, "state": "executing" },
+    { "id": 2, "flight_number": "6E 811", "route": "BLR → BOM", "delay_minutes": 110, "passengers": 158, "state": "assuring" },
+    { "id": 3, "flight_number": "AI 503", "route": "BLR → HYD", "delay_minutes": 65, "passengers": 96, "state": "planning" },
+    { "id": 5, "flight_number": "6E 455", "route": "BLR → MAA", "delay_minutes": 95, "passengers": 72, "state": "planning" },
+    { "id": 6, "flight_number": "UK 812", "route": "BLR → CCU", "delay_minutes": 140, "passengers": 41, "state": "detected" },
+    { "id": 7, "flight_number": "AI 611", "route": "BLR → COK", "delay_minutes": 55, "passengers": 33, "state": "detected" },
+    { "id": 8, "flight_number": "6E 297", "route": "BLR → GOI", "delay_minutes": 80, "passengers": 18, "state": "detected" },
+    { "id": 9, "flight_number": "UK 705", "route": "BLR → AMD", "delay_minutes": 70, "passengers": 12, "state": "detected" }
+  ],
+  "crew_pairings": [
+    {
+      "pairing_reference": "PAIR-A1",
+      "base_icao": "VOBL",
+      "source_flight": "6E 2134",
+      "affected_leg": "leg 1 of 4",
+      "mechanism": "operating",
+      "detail": "Cockpit crew are working the delayed flight itself.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-A2",
+      "base_icao": "VOBL",
+      "source_flight": "6E 2134",
+      "affected_leg": "leg 1 of 3",
+      "mechanism": "second_pairing",
+      "detail": "Cabin crew on the same flight sit on a different pairing from the cockpit crew.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-A3",
+      "base_icao": "VIDP",
+      "source_flight": "6E 2134",
+      "affected_leg": "leg 3 of 4",
+      "mechanism": "onward_duty",
+      "detail": "A later leg of this pairing departs DEL before the delayed aircraft can arrive.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-B1",
+      "base_icao": "VOBL",
+      "source_flight": "6E 811",
+      "affected_leg": "leg 2 of 3",
+      "mechanism": "operating",
+      "detail": "Crew are working the delayed BOM service.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-B2",
+      "base_icao": "VABB",
+      "source_flight": "6E 811",
+      "affected_leg": "leg 1 of 2",
+      "mechanism": "positioning",
+      "detail": "Crew were deadheading on 6E 811 to operate a BOM departure. That departure now has no crew even though it was never delayed.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-C1",
+      "base_icao": "VOBL",
+      "source_flight": "AI 503",
+      "affected_leg": "leg 1 of 2",
+      "mechanism": "operating",
+      "detail": "Crew are working the HYD service.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-C2",
+      "base_icao": "VOHS",
+      "source_flight": "AI 503",
+      "affected_leg": "leg 2 of 2",
+      "mechanism": "onward_duty",
+      "detail": "Return leg turnaround drops below the minimum connection time.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-D1",
+      "base_icao": "VOBL",
+      "source_flight": "6E 455",
+      "affected_leg": "leg 3 of 5",
+      "mechanism": "operating",
+      "detail": "Crew are working the MAA service.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-E1",
+      "base_icao": "VOBL",
+      "source_flight": "UK 812",
+      "affected_leg": "leg 1 of 3",
+      "mechanism": "operating",
+      "detail": "Crew are working the CCU service.",
+      "at_risk": true
+    }
+  ],
+  "mechanism_legend": {
+    "operating": "Crew are working the affected flight",
+    "onward_duty": "A later leg of the same pairing is now infeasible",
+    "second_pairing": "Cockpit and cabin crew sit on different pairings",
+    "positioning": "Crew were travelling as passengers to operate another flight"
+  },
+  "why_nine_not_eight": "Crew are assigned to multi-leg pairings, not to individual flights. Eight flights touch nine pairings because one flight can carry two pairings, a delay propagates to a later leg, and a positioning crew member can strand an otherwise on-time departure. Every edge above names its mechanism.",
+  "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:cascade" }
+}

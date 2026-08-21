@@ -1,0 +1,37 @@
+@import './design/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--fg-primary);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 0.875rem; /* 14px: ops density, not marketing density */
+    line-height: 1.25rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* All operational data uses tabular figures so columns align. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Focus is always visible. Never `outline: none`. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent-subtle);
+  }
+}

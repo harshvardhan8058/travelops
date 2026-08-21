@@ -1,0 +1,63 @@
+{
+  "generated_by": "wave0-fixture",
+  "note": "The definitive answer to 'is any of this real?'. Badges elsewhere derive from these rows.",
+  "sources": [
+    {
+      "name": "Aviation Weather Center METAR/TAF",
+      "kind": "real",
+      "provider": "awc",
+      "current_mode": "fixture",
+      "last_checked": "2026-08-20T15:36:00Z",
+      "licence": "US Government work, public domain",
+      "attribution_required": false,
+      "health": "not_checked_in_fixture_mode"
+    },
+    {
+      "name": "OurAirports airports and runways",
+      "kind": "real",
+      "provider": "ourairports",
+      "current_mode": "snapshot",
+      "last_checked": "2026-08-20T00:00:00Z",
+      "licence": "Public domain",
+      "attribution_required": false,
+      "health": "ok"
+    },
+    {
+      "name": "Open-Meteo historical",
+      "kind": "real",
+      "provider": "open-meteo",
+      "current_mode": "unused",
+      "last_checked": null,
+      "licence": "CC-BY 4.0, non-commercial free tier",
+      "attribution_required": true,
+      "health": "not_configured"
+    },
+    {
+      "name": "Flight schedules",
+      "kind": "synthetic",
+      "provider": "generator",
+      "current_mode": "synthetic",
+      "last_checked": "2026-08-20T15:00:00Z",
+      "licence": "n/a",
+      "attribution_required": false,
+      "health": "ok",
+      "note": "AIKosh is a candidate source but its file, schema and licence are not yet archived, so schedules are synthetic and labelled as such."
+    },
+    { "name": "Flight status", "kind": "simulated", "provider": "local-simulator", "current_mode": "simulated", "licence": "n/a", "health": "ok" },
+    { "name": "Passengers and bookings", "kind": "synthetic", "provider": "generator", "current_mode": "synthetic", "licence": "n/a", "health": "ok", "note": "No real personal data exists in any code path." },
+    { "name": "Hotel inventory", "kind": "synthetic", "provider": "generator", "current_mode": "synthetic", "licence": "n/a", "health": "ok" },
+    { "name": "Crew and pairings", "kind": "synthetic", "provider": "generator", "current_mode": "synthetic", "licence": "n/a", "health": "ok" },
+    {
+      "name": "MoCA Passenger Charter Feb 2019",
+      "kind": "real",
+      "provider": "moca",
+      "current_mode": "charter",
+      "last_checked": "2026-08-20T00:00:00Z",
+      "licence": "Government of India publication; redistribution not yet confirmed",
+      "attribution_required": true,
+      "health": "ok",
+      "note": "Official but dated. Source PDF hash is PENDING_ARCHIVAL, so verified mode stays blocked."
+    },
+    { "name": "Reasoning model", "kind": "unavailable", "provider": "groq", "current_mode": "off", "licence": "Llama 3.3 community licence", "health": "not_configured" }
+  ]
+}

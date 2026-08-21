@@ -1,0 +1,22 @@
+{
+  "generated_by": "wave0-fixture",
+  "groups": [
+    {
+      "id": 1,
+      "reference": "GRP-2026-0820-VOBL",
+      "root_cause": "weather",
+      "airport_icao": "VOBL",
+      "severity": "high",
+      "state": "executing",
+      "opened_at": "2026-08-20T15:36:00Z",
+      "rollups": {
+        "flights_affected": 8,
+        "passengers_affected": 604,
+        "connections_at_risk": 22,
+        "crew_pairings_affected": 9
+      },
+      "awaiting_approval_count": 2,
+      "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:cascade" }
+    }
+  ]
+}

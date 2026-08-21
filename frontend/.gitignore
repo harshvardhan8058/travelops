@@ -1,0 +1,5 @@
+dist/
+node_modules/
+
+# Build artifact: canonical source is ../fixtures/api
+public/fixtures/

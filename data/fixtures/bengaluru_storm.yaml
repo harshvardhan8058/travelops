@@ -1,0 +1,103 @@
+# The canonical demo scenario.
+#
+# Committed and fixed-seed so a run is repeatable. Never regenerate during an evaluation:
+# if the dataset shifts between runs you cannot tell whether a behaviour change came from
+# your code or your data.
+#
+# Owner: Stream C (generation) / Stream A (injection endpoint).
+
+scenario: bengaluru_storm
+description: >-
+  Evening adverse weather at Bengaluru. One airport event propagates to eight flights and
+  nine crew pairings. Chosen because the 21:10 departure falls inside the charter's
+  20:00-03:00 night window, which makes the hotel entitlement rule fire.
+
+seed: 20260807
+demo_dataset_id: bengaluru_storm
+
+airport: VOBL
+injected_at: "2026-08-20T15:36:00Z"
+
+# Units matter. METAR reports knots; 45 km/h is roughly 24 kt. Storing the wrong unit here
+# would silently invalidate every downstream risk score.
+injected_conditions:
+  wind_speed_kt: 24
+  wind_direction_deg: 250
+  visibility_m: 800
+  ceiling_ft: 900
+  precipitation: rain
+
+primary_flight:
+  flight_number: "6E 2134"
+  route: BLR-DEL
+  scheduled_departure_local: "21:10"
+  block_time_minutes: 165
+  delay_minutes: 420
+  passengers: 174
+  is_domestic: true
+
+expected:
+  # Assert these in the E2E test. They are targets the generator must hit, not hopes.
+  risk_index_min: 75
+  risk_level: severe
+  incidents_opened: 1
+
+  incident_group:
+    flights_affected: 8
+    passengers_affected_approx: 604
+    at_risk_connections: 22
+    candidate_hotels: 11
+    crew_pairings_affected: 9
+
+  # Capacity is deliberately short so partial allocation and prioritisation are exercised.
+  hotel_capacity_shortfall: true
+
+  # Charter-mode policy outcome for this scenario.
+  policy:
+    mode: charter
+    cash_inr: 0
+    cash_reason_codes:
+      - NO_DELAY_COMPENSATION_PROVISION
+      - BEYOND_CARRIER_CONTROL
+    entitlements:
+      - meals_refreshments
+      - hotel_accommodation
+      - passenger_choice
+    pack_id: in-moca-charter-2019
+    pack_version: "2019.02"
+    verified_mode_eligible: false
+
+  # High-risk actions must stop for a human even when every check passes.
+  assurance:
+    needs_human_actions:
+      - notify_passengers
+      - evaluate_entitlements
+
+# Contrast case for the demo's cause-comparison toggle. Same airport, internal cause, so no
+# exemption applies and cash becomes payable.
+contrast_case:
+  description: Cancellation caused by crew rostering rather than weather.
+  event_type: cancellation
+  operational_cause: crew_rostering
+  external_to_carrier: false
+  block_time_minutes: 95
+  fare:
+    one_way_basic_fare_inr: 4200
+    airline_fuel_charge_inr: 800
+  expected:
+    cash_inr: 5000
+    formula_used: least_of(cap 7500, 4200 + 800) = 5000
+    rules_fired:
+      - cancellation.compensation.block_60_to_120
+
+# Must produce needs_human, not a guessed exemption. This is the case that proves the
+# system is not doing a trigger_type lookup.
+missing_evidence_case:
+  description: Weather cause asserted without reasonable-measures evidence.
+  operational_cause: meteorological
+  external_to_carrier: true
+  unavoidable_despite_reasonable_measures: null
+  expected:
+    decision: needs_human
+    missing_facts:
+      - cause_evidence.unavoidable_despite_reasonable_measures
