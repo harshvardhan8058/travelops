@@ -53,6 +53,16 @@ class Runway(Base):
     designator: Mapped[str] = mapped_column(String(8), nullable=False)
     # Crosswind computation needs true heading; without it delay risk is not credible.
     heading_degrees_true: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # Where that heading came from. OurAirports leaves le_heading_degT blank for some
+    # runways — VOBL 09L/27R among them, which is the demo airport — so the value is
+    # derived from the designator in those cases. Recording which is which keeps a
+    # crosswind score from implicitly claiming a surveyed heading it does not have.
+    #   ourairports_true    | le_heading_degT / he_heading_degT from the snapshot
+    #   designator_derived  | designator x 10, accurate to the 10 degrees the designator
+    #                         encodes and ignoring magnetic variation
+    heading_source: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="ourairports_true"
+    )
     length_ft: Mapped[int | None] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
@@ -72,6 +82,11 @@ class WeatherObservation(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     airport_icao: Mapped[str] = mapped_column(ForeignKey("airport.icao_code"), nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # TAF, not METAR. Scoring a forecast as though it were an observation is a subtle and
+    # very common leakage bug, so the two are separable by column rather than by convention.
+    # The provider signals it with a `taf:` source_ref prefix; this is where that is recorded.
+    is_forecast: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Units are normalised at the provider boundary. Knots, metres, feet. Never km/h.
     wind_speed_kt: Mapped[int | None] = mapped_column(SmallInteger)

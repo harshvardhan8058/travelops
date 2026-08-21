@@ -1,5 +1,5 @@
 {
-  "generated_by": "wave0-fixture",
+  "generated_by": "data/generators/build_incident_group_fixture.py",
   "note": "Counts are DERIVED from the arrays below. The UI must never render a hardcoded total.",
   "id": 1,
   "reference": "GRP-2026-0820-VOBL",
@@ -17,14 +17,70 @@
     "note": "Each value is the length of the corresponding array, computed server-side."
   },
   "flights": [
-    { "id": 1, "flight_number": "6E 2134", "route": "BLR → DEL", "delay_minutes": 420, "passengers": 174, "state": "executing" },
-    { "id": 2, "flight_number": "6E 811", "route": "BLR → BOM", "delay_minutes": 110, "passengers": 158, "state": "assuring" },
-    { "id": 3, "flight_number": "AI 503", "route": "BLR → HYD", "delay_minutes": 65, "passengers": 96, "state": "planning" },
-    { "id": 5, "flight_number": "6E 455", "route": "BLR → MAA", "delay_minutes": 95, "passengers": 72, "state": "planning" },
-    { "id": 6, "flight_number": "UK 812", "route": "BLR → CCU", "delay_minutes": 140, "passengers": 41, "state": "detected" },
-    { "id": 7, "flight_number": "AI 611", "route": "BLR → COK", "delay_minutes": 55, "passengers": 33, "state": "detected" },
-    { "id": 8, "flight_number": "6E 297", "route": "BLR → GOI", "delay_minutes": 80, "passengers": 18, "state": "detected" },
-    { "id": 9, "flight_number": "UK 705", "route": "BLR → AMD", "delay_minutes": 70, "passengers": 12, "state": "detected" }
+    {
+      "id": 1,
+      "flight_number": "6E 2134",
+      "route": "BLR → DEL",
+      "delay_minutes": 420,
+      "passengers": 174,
+      "state": "executing"
+    },
+    {
+      "id": 2,
+      "flight_number": "6E 811",
+      "route": "BLR → BOM",
+      "delay_minutes": 110,
+      "passengers": 158,
+      "state": "assuring"
+    },
+    {
+      "id": 3,
+      "flight_number": "AI 503",
+      "route": "BLR → HYD",
+      "delay_minutes": 65,
+      "passengers": 96,
+      "state": "planning"
+    },
+    {
+      "id": 5,
+      "flight_number": "6E 455",
+      "route": "BLR → MAA",
+      "delay_minutes": 95,
+      "passengers": 72,
+      "state": "planning"
+    },
+    {
+      "id": 6,
+      "flight_number": "UK 812",
+      "route": "BLR → CCU",
+      "delay_minutes": 140,
+      "passengers": 41,
+      "state": "detected"
+    },
+    {
+      "id": 7,
+      "flight_number": "AI 611",
+      "route": "BLR → COK",
+      "delay_minutes": 55,
+      "passengers": 33,
+      "state": "detected"
+    },
+    {
+      "id": 8,
+      "flight_number": "6E 297",
+      "route": "BLR → GOI",
+      "delay_minutes": 80,
+      "passengers": 18,
+      "state": "detected"
+    },
+    {
+      "id": 9,
+      "flight_number": "UK 705",
+      "route": "AMD → BLR",
+      "delay_minutes": 70,
+      "passengers": 12,
+      "state": "detected"
+    }
   ],
   "crew_pairings": [
     {
@@ -33,7 +89,7 @@
       "source_flight": "6E 2134",
       "affected_leg": "leg 1 of 4",
       "mechanism": "operating",
-      "detail": "Cockpit crew are working the delayed flight itself.",
+      "detail": "Crew are operating 6E 2134, delayed 420 minutes to 04:10 (+1) IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
       "at_risk": true
     },
     {
@@ -42,34 +98,25 @@
       "source_flight": "6E 2134",
       "affected_leg": "leg 1 of 3",
       "mechanism": "second_pairing",
-      "detail": "Cabin crew on the same flight sit on a different pairing from the cockpit crew.",
-      "at_risk": true
-    },
-    {
-      "pairing_reference": "PAIR-A3",
-      "base_icao": "VIDP",
-      "source_flight": "6E 2134",
-      "affected_leg": "leg 3 of 4",
-      "mechanism": "onward_duty",
-      "detail": "A later leg of this pairing departs DEL before the delayed aircraft can arrive.",
+      "detail": "A second rotation on 6E 2134: PAIR-A1 already carries this flight, so this is a distinct crew complement — cockpit and cabin sit on different pairings.",
       "at_risk": true
     },
     {
       "pairing_reference": "PAIR-B1",
       "base_icao": "VOBL",
       "source_flight": "6E 811",
-      "affected_leg": "leg 2 of 3",
+      "affected_leg": "leg 1 of 2",
       "mechanism": "operating",
-      "detail": "Crew are working the delayed BOM service.",
+      "detail": "Crew are operating 6E 811, delayed 110 minutes to 23:15 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
       "at_risk": true
     },
     {
       "pairing_reference": "PAIR-B2",
       "base_icao": "VABB",
       "source_flight": "6E 811",
-      "affected_leg": "leg 1 of 2",
+      "affected_leg": "leg 3 of 4",
       "mechanism": "positioning",
-      "detail": "Crew were deadheading on 6E 811 to operate a BOM departure. That departure now has no crew even though it was never delayed.",
+      "detail": "Crew were positioning on 6E 811 to operate 6E 289, scheduled 23:50 IST. 6E 811 now arrives 00:55 (+1) IST, so 6E 289 loses its crew although it was never delayed.",
       "at_risk": true
     },
     {
@@ -78,16 +125,7 @@
       "source_flight": "AI 503",
       "affected_leg": "leg 1 of 2",
       "mechanism": "operating",
-      "detail": "Crew are working the HYD service.",
-      "at_risk": true
-    },
-    {
-      "pairing_reference": "PAIR-C2",
-      "base_icao": "VOHS",
-      "source_flight": "AI 503",
-      "affected_leg": "leg 2 of 2",
-      "mechanism": "onward_duty",
-      "detail": "Return leg turnaround drops below the minimum connection time.",
+      "detail": "Crew are operating AI 503, delayed 65 minutes to 21:55 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
       "at_risk": true
     },
     {
@@ -96,16 +134,34 @@
       "source_flight": "6E 455",
       "affected_leg": "leg 3 of 5",
       "mechanism": "operating",
-      "detail": "Crew are working the MAA service.",
+      "detail": "Crew are operating 6E 455, delayed 95 minutes to 23:10 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
       "at_risk": true
     },
     {
       "pairing_reference": "PAIR-E1",
       "base_icao": "VOBL",
-      "source_flight": "UK 812",
-      "affected_leg": "leg 1 of 3",
+      "source_flight": "UK 705",
+      "affected_leg": "leg 3 of 4",
+      "mechanism": "onward_duty",
+      "detail": "UK 705 arrives 23:05 IST, 70 minutes late. The crew's next duty UK 812 is scheduled 22:40 IST and needs 45 minutes minimum connection, so it cannot be operated as published.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-F1",
+      "base_icao": "VOBL",
+      "source_flight": "AI 611",
+      "affected_leg": "leg 1 of 2",
       "mechanism": "operating",
-      "detail": "Crew are working the CCU service.",
+      "detail": "Crew are operating AI 611, delayed 55 minutes to 22:45 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
+      "at_risk": true
+    },
+    {
+      "pairing_reference": "PAIR-G1",
+      "base_icao": "VOBL",
+      "source_flight": "6E 297",
+      "affected_leg": "leg 1 of 2",
+      "mechanism": "operating",
+      "detail": "Crew are operating 6E 297, delayed 80 minutes to 22:35 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
       "at_risk": true
     }
   ],
@@ -115,6 +171,10 @@
     "second_pairing": "Cockpit and cabin crew sit on different pairings",
     "positioning": "Crew were travelling as passengers to operate another flight"
   },
-  "why_nine_not_eight": "Crew are assigned to multi-leg pairings, not to individual flights. Eight flights touch nine pairings because one flight can carry two pairings, a delay propagates to a later leg, and a positioning crew member can strand an otherwise on-time departure. Every edge above names its mechanism.",
-  "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:cascade" }
+  "why_nine_not_eight": "Crew are assigned to multi-leg pairings, not to individual flights, so the count of affected rotations has no reason to equal the count of affected flights. 8 affected flights are carried by 7 rotations. PAIR-E1 spans 2 of them, which is why the rotation count is lower than the flight count. PAIR-A2 is additional via second_pairing. PAIR-B2 is additional via positioning. 7 + 2 = 9 rotations at risk. Every edge above names the mechanism that put that rotation at risk, so the total can be counted from the graph rather than taken on trust. Coordination and display only: duty-time legality is not validated anywhere in this system.",
+  "provenance": {
+    "kind": "fixture",
+    "provider": "fixture",
+    "source_ref": "fixture:bengaluru_storm:cascade"
+  }
 }
