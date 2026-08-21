@@ -439,19 +439,24 @@ async def test_reset_leaves_no_orphaned_workflow_rows(session):
     await seed_demo_dataset(session)
     await session.commit()
 
-    # Stand in for a run: an incident with a prediction and an audit entry pointing at it.
-    from app.db.assessment import record_delay_risk_prediction
-
-    record = await record_delay_risk_prediction(
-        session,
-        airport_icao="VOBL",
+    # Stand in for a run: a prediction, an incident referencing it, and an audit entry.
+    prediction = Prediction(
         flight_id=BENGALURU_STORM.affected_flights[0].flight_id,
-        as_of=BENGALURU_STORM.injected_at,
+        airport_icao="VOBL",
+        predicted_at=BENGALURU_STORM.injected_at,
+        risk_index=80,
+        risk_level="severe",
+        rule_version="delay-risk-v1",
+        factors=[],
+        evidence_refs=[],
     )
+    session.add(prediction)
+    await session.flush()
+
     incident = Incident(
         reference="INC-2026-0820-VOBL-99",
         flight_id=BENGALURU_STORM.affected_flights[0].flight_id,
-        prediction_id=record.prediction_id,
+        prediction_id=prediction.id,
         trigger_type="weather",
         severity="high",
         state="detected",

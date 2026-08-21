@@ -19,16 +19,17 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, text
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.crew import Pairing, PairingLeg
 from app.models.policy import BusinessConstraint
 from app.models.reference import (
-    Airport,
     Booking,
     BookingSegment,
     Flight,
+    Hotel,
     Passenger,
     Runway,
     WeatherObservation,
@@ -334,97 +335,6 @@ async def load_crew_impact_inputs(
     return affected, pairings, flights
 
 
-async def latest_actual_observation_at(
-    session: AsyncSession, airport_icao: str, *, as_of: datetime
-) -> datetime | None:
-    """Timestamp of the newest ACTUAL observation at or before `as_of`, or None.
-
-    Offered for `sources_fresh`. The gate's freshness check FAILs a future-dated timestamp —
-    correctly, because a broken feed must not read as maximally fresh — and it FAILs an
-    undated one. Both are easy to hand it by accident from this schema:
-
-      * The seeded dataset holds real archived observations on their own true timestamps
-        (2026-08-21) alongside the injected scenario observation (2026-08-20). Asking for the
-        plain latest row returns one dated *after* the moment being assessed.
-      * `weather_observation` also holds TAF rows. A forecast is not an observation, and
-        offering one to a freshness check is the leakage bug `docs/11-data-model.md` names.
-
-    So this filters `is_forecast = false` and bounds by `as_of`, exactly as
-    `load_delay_risk_inputs` does. Returning None is meaningful: no observation existed yet,
-    which the gate must treat as unproven rather than fresh.
-    """
-    observed_at = (
-        await session.execute(
-            select(WeatherObservation.observed_at)
-            .where(
-                WeatherObservation.airport_icao == airport_icao,
-                WeatherObservation.is_forecast.is_(False),
-                WeatherObservation.observed_at <= as_of,
-            )
-            .order_by(WeatherObservation.observed_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    return _utc(observed_at)
-
-
-async def load_notification_recipients(
-    session: AsyncSession, affected_flight_ids: set[int]
-) -> list[dict[str, Any]]:
-    """Passengers on the affected flights, with the facts the delay template requires.
-
-    Times are rendered in the operating timezone because a controller and a passenger both
-    read local time, while storage stays UTC.
-
-    Every fact the template declares is supplied here. A missing one makes the Communication
-    service refuse that recipient rather than send `Dear ,` — so this query is where an
-    incomplete message becomes impossible rather than merely unlikely.
-    """
-    rows = (
-        await session.execute(
-            select(Passenger, Booking, Flight, Airport.city.label("origin_city"))
-            .join(Booking, Booking.passenger_id == Passenger.id)
-            .join(BookingSegment, BookingSegment.booking_id == Booking.id)
-            .join(Flight, Flight.id == BookingSegment.flight_id)
-            .join(Airport, Airport.icao_code == Flight.origin_icao)
-            .where(BookingSegment.flight_id.in_(affected_flight_ids))
-            .order_by(Passenger.id)
-        )
-    ).all()
-
-    destination_cities = dict(
-        (await session.execute(select(Airport.icao_code, Airport.city))).all()
-    )
-
-    recipients: list[dict[str, Any]] = []
-    for passenger, booking, flight, origin_city in rows:
-        scheduled = _utc(flight.scheduled_departure)
-        estimated = _utc(flight.estimated_departure) or scheduled
-        assert scheduled is not None and estimated is not None
-        delay_minutes = max(0, int((estimated - scheduled).total_seconds() // 60))
-
-        recipients.append(
-            {
-                "passenger_id": passenger.id,
-                "passenger_reference": passenger.reference,
-                "email": passenger.email,
-                "facts": {
-                    "passenger_name": passenger.full_name,
-                    "flight_number": flight.flight_number,
-                    "origin_city": origin_city or flight.origin_icao,
-                    "destination_city": destination_cities.get(
-                        flight.destination_icao, flight.destination_icao
-                    ),
-                    "scheduled_departure_local": _local(scheduled),
-                    "revised_departure_local": _local(estimated),
-                    "delay_minutes": delay_minutes,
-                    "pnr": booking.pnr,
-                },
-            }
-        )
-    return recipients
-
-
 #: Forward walk over `pairing_leg`, in SQL.
 #:
 #: The Python attribution in `app.services.crew_impact` is the authority on *why* each pairing
@@ -476,3 +386,217 @@ async def affected_pairings_recursive(
         }
         for row in result
     ]
+
+
+# ---------------------------------------------------------------------- cascade rollup
+#
+# An incident is per flight, so its recovery plan is authorised for that flight and its
+# `check_connections` and `assess_crew_impact` actions correctly report that flight's
+# numbers. The cascade figures — 22 at-risk connections, 9 crew rotations — belong to the
+# incident GROUP, which is the entity the weather event actually disrupted.
+#
+# Reporting 22 inside one flight's incident would be wrong twice over: it would claim work
+# that incident did not do, and eight incidents each claiming 22 would imply 176.
+#
+# So the group total is derived here, from the action payloads the services actually
+# recorded. Nothing is recomputed and nothing is assumed: an incident that has not run
+# contributes nothing, and `incidents_assessed` says so.
+
+
+class CascadePairing(BaseModel):
+    """One affected rotation, as the cascade graph renders it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pairing_reference: str
+    base_icao: str
+    source_flight: str
+    affected_leg: str
+    mechanism: str
+    detail: str
+    at_risk: bool = True
+
+
+class CascadeRollup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    group_reference: str
+    airport_icao: str
+
+    flights_affected: int
+    passengers_affected: int
+    connections_at_risk: int
+    candidate_hotels: int
+    crew_pairings_affected: int
+
+    pairings: list[CascadePairing]
+    #: Distinct bookings behind `connections_at_risk`, so the count is traceable and cannot
+    #: double-count a passenger whose itinerary appears in two incidents.
+    at_risk_booking_ids: list[int]
+
+    #: How much of the group has actually been worked. A rollup over three of eight
+    #: incidents is a partial answer and must not read as a complete one.
+    incidents_in_group: int
+    incidents_assessed_connections: int
+    incidents_assessed_crew: int
+
+    @property
+    def is_complete(self) -> bool:
+        return (
+            self.incidents_in_group > 0
+            and self.incidents_assessed_connections == self.incidents_in_group
+            and self.incidents_assessed_crew == self.incidents_in_group
+        )
+
+
+#: Precedence for choosing one mechanism when a rotation is reached from more than one
+#: flight. Identical to the attribution precedence in `app.services.crew_impact`, so the
+#: group view and the per-incident view can never disagree about which label wins.
+#:
+#: PAIR-E1 is the case: assessed from UK 705 it is `onward_duty` (its next duty breaks),
+#: assessed from UK 812 it is `operating` (the crew are aboard). `onward_duty` names the leg
+#: that actually fails, so it wins.
+_MECHANISM_PRECEDENCE: dict[str, int] = {
+    "positioning": 0,
+    "onward_duty": 1,
+    "second_pairing": 2,
+    "operating": 3,
+}
+
+
+async def _group_incident_flight_ids(session: AsyncSession, group_id: int) -> dict[int, int]:
+    """incident_id -> flight_id for every incident in the group."""
+    from app.models.workflow import Incident
+
+    rows = (
+        await session.execute(
+            select(Incident.id, Incident.flight_id).where(Incident.group_id == group_id)
+        )
+    ).all()
+    return {int(incident_id): int(flight_id) for incident_id, flight_id in rows}
+
+
+async def _recorded_action_payloads(
+    session: AsyncSession, incident_ids: list[int], action_type: str
+) -> list[tuple[int, dict[str, Any]]]:
+    """(incident_id, payload) for every successful action of this type in the group.
+
+    Only `success` counts. A `needs_human` refusal carries no findings, and treating one as
+    an empty finding would quietly shrink a total.
+    """
+    from app.models.enums import ActionStatus
+    from app.models.workflow import Action, Plan, PlanTask
+
+    if not incident_ids:
+        return []
+
+    rows = (
+        await session.execute(
+            select(Plan.incident_id, Action.payload)
+            .join(PlanTask, PlanTask.plan_id == Plan.id)
+            .join(Action, Action.plan_task_id == PlanTask.id)
+            .where(
+                Plan.incident_id.in_(incident_ids),
+                PlanTask.action_type == action_type,
+                Action.status == ActionStatus.success,
+            )
+            .order_by(Plan.incident_id, Action.id)
+        )
+    ).all()
+    return [(int(incident_id), payload or {}) for incident_id, payload in rows]
+
+
+async def cascade_rollup(session: AsyncSession, *, group_id: int) -> CascadeRollup:
+    """Group-level cascade figures, derived from what the services recorded.
+
+    `connections_at_risk` is the size of the *union* of booking ids, not a sum of counts, so
+    a booking cannot be counted twice if two incidents both touch it.
+
+    `crew_pairings_affected` is the number of distinct pairing references across the group's
+    crew assessments, each carrying the highest-information mechanism it was seen with.
+    """
+    from app.models.enums import ActionType
+    from app.models.workflow import IncidentGroup
+
+    group = await session.get(IncidentGroup, group_id)
+    if group is None:
+        raise LookupError(f"incident group {group_id} not found")
+
+    incident_flights = await _group_incident_flight_ids(session, group_id)
+    incident_ids = sorted(incident_flights)
+    flight_ids = set(incident_flights.values())
+
+    # Passengers on the affected flights, counted from booking records rather than taken
+    # from a target figure.
+    passengers_affected = 0
+    if flight_ids:
+        passengers_affected = int(
+            (
+                await session.execute(
+                    select(func.count(func.distinct(Booking.passenger_id)))
+                    .join(BookingSegment, BookingSegment.booking_id == Booking.id)
+                    .where(BookingSegment.flight_id.in_(flight_ids))
+                )
+            ).scalar_one()
+        )
+
+    candidate_hotels = int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(Hotel)
+                .where(Hotel.airport_icao == group.airport_icao)
+            )
+        ).scalar_one()
+    )
+
+    connection_payloads = await _recorded_action_payloads(
+        session, incident_ids, ActionType.check_connections.value
+    )
+    booking_ids: set[int] = set()
+    for _incident_id, payload in connection_payloads:
+        for item in payload.get("at_risk") or []:
+            booking_id = item.get("booking_id")
+            if booking_id is not None:
+                booking_ids.add(int(booking_id))
+
+    crew_payloads = await _recorded_action_payloads(
+        session, incident_ids, ActionType.assess_crew_impact.value
+    )
+    best: dict[str, CascadePairing] = {}
+    for _incident_id, payload in crew_payloads:
+        for impact in payload.get("impacts") or []:
+            if not impact.get("is_at_risk", True):
+                continue
+            reference = str(impact["pairing_reference"])
+            candidate = CascadePairing(
+                pairing_reference=reference,
+                base_icao=str(impact["base_icao"]),
+                source_flight=str(impact["source_flight_number"]),
+                affected_leg=(
+                    f"leg {impact['affected_leg_order']} of {impact['pairing_leg_count']}"
+                ),
+                mechanism=str(impact["mechanism"]),
+                detail=str(impact["detail"]),
+                at_risk=True,
+            )
+            held = best.get(reference)
+            if held is None or _MECHANISM_PRECEDENCE.get(
+                candidate.mechanism, 99
+            ) < _MECHANISM_PRECEDENCE.get(held.mechanism, 99):
+                best[reference] = candidate
+
+    return CascadeRollup(
+        group_reference=group.reference,
+        airport_icao=group.airport_icao,
+        flights_affected=len(flight_ids),
+        passengers_affected=passengers_affected,
+        connections_at_risk=len(booking_ids),
+        candidate_hotels=candidate_hotels,
+        crew_pairings_affected=len(best),
+        pairings=[best[key] for key in sorted(best)],
+        at_risk_booking_ids=sorted(booking_ids),
+        incidents_in_group=len(incident_ids),
+        incidents_assessed_connections=len({i for i, _ in connection_payloads}),
+        incidents_assessed_crew=len({i for i, _ in crew_payloads}),
+    )
