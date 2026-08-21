@@ -1,0 +1,14 @@
+# `RUN npm install` happens before `COPY . .`, so a host node_modules would overwrite the
+# container's with the wrong architecture. Alpine/musl vs Windows binaries do not mix.
+node_modules
+
+# Build artifacts and generated files
+dist
+public/fixtures
+*.tsbuildinfo
+
+# Never needed in the image
+.git
+.env
+.env.*
+*.log
