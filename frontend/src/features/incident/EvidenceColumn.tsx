@@ -205,25 +205,61 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
                   The endpoint returned an index and a band with no contributing factors.
                 </p>
               ) : (
-                <ul className="mt-1.5 flex flex-col gap-1">
+                <ul className="mt-1.5 flex flex-col gap-1.5">
                   {risk.factors.map((factor) => (
-                    <li key={factor.name} className="flex items-start justify-between gap-2">
-                      <span className="min-w-0 text-caption text-fg-secondary">
-                        {factor.name.replace(/_/g, ' ')}
+                    <li key={factor.name} className="flex flex-col gap-0.5">
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="min-w-0 text-caption text-fg-secondary">
+                          {factor.name.replace(/_/g, ' ')}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          {/*
+                           * `value` is the observed figure and is an empty string when the rule
+                           * recorded none — rendering it raw left a blank cell. The points
+                           * contribution is what makes the index add up, so it is shown beside
+                           * the figure rather than being dropped.
+                           */}
+                          {factor.value.length > 0 ? (
+                            <MonoValue>{factor.value}</MonoValue>
+                          ) : (
+                            <span
+                              className="font-mono text-mono-sm text-fg-muted"
+                              title="No observed figure recorded for this factor."
+                            >
+                              —
+                            </span>
+                          )}
+                          {/*
+                           * Explicit separator, not just a margin: "1.5" beside "0 pts" renders
+                           * as "1.50 pts" to the eye and to a screen reader.
+                           */}
+                          {typeof factor.points === 'number' && (
+                            <MonoValue muted className="ml-1 text-caption">
+                              {' · '}
+                              {factor.points} pts
+                            </MonoValue>
+                          )}
+                          {factor.threshold && (
+                            <MonoValue muted className="ml-1 text-caption">
+                              {' · limit '}
+                              {factor.threshold}
+                            </MonoValue>
+                          )}
+                          {factor.runway && (
+                            <MonoValue muted className="ml-1 text-caption">
+                              ({factor.runway})
+                            </MonoValue>
+                          )}
+                        </span>
                       </span>
-                      <span className="shrink-0 text-right">
-                        <MonoValue>{factor.value}</MonoValue>
-                        {factor.threshold && (
-                          <MonoValue muted className="ml-1 text-caption">
-                            / {factor.threshold}
-                          </MonoValue>
-                        )}
-                        {factor.runway && (
-                          <MonoValue muted className="ml-1 text-caption">
-                            ({factor.runway})
-                          </MonoValue>
-                        )}
-                      </span>
+                      {/*
+                       * The rule's own explanation, verbatim. Without it a factor reads as an
+                       * unexplained number — "1.5" says nothing, "crosswind 1.5 kt on runway 27L,
+                       * nearly aligned, so it contributes nothing" is the actual evidence.
+                       */}
+                      {factor.detail && (
+                        <span className="text-caption text-fg-muted">{factor.detail}</span>
+                      )}
                     </li>
                   ))}
                 </ul>

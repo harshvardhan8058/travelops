@@ -400,6 +400,10 @@ function DerivationBody({ derivation }: { derivation: Derivation }) {
                   </>
                 )}
               </span>
+              {/* An API-supplied explanation of this input, verbatim. */}
+              {input.detail && (
+                <span className="mt-0.5 block text-caption text-fg-muted">{input.detail}</span>
+              )}
             </DerivationRow>
           ))
         )}

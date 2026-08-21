@@ -221,9 +221,20 @@ export interface AssuranceResponse {
 // ---------------------------------------------------------------- incidents
 export interface RiskFactor {
   name: string;
+  /**
+   * The observed figure, e.g. `"1.5"`. Empty string when the rule recorded no observed value,
+   * so a renderer must fall back rather than leaving a blank cell.
+   */
   value: string;
-  threshold?: string;
-  runway?: string;
+  /**
+   * Why this factor says what it says, in the rule's own words. Added by Stream C alongside
+   * `points`; without it a factor reads as an unexplained number.
+   */
+  detail?: string | null;
+  /** Contribution to the index. This is what makes an index explainable rather than asserted. */
+  points?: number | null;
+  threshold?: string | null;
+  runway?: string | null;
 }
 
 export interface TimelineEntry {
