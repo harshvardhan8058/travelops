@@ -137,6 +137,19 @@ class PairingLegRole(StrEnum):
     positioning = "positioning"
 
 
+class PairingMechanism(StrEnum):
+    """Why a pairing is at risk. Rendered as the edge label in the cascade graph.
+
+    Exactly one is attributed per affected pairing, by the deterministic precedence in
+    `app.services.crew_impact`. This is a coordination label, never a legality verdict.
+    """
+
+    operating = "operating"
+    onward_duty = "onward_duty"
+    second_pairing = "second_pairing"
+    positioning = "positioning"
+
+
 class ProvenanceKind(StrEnum):
     real = "real"
     simulated = "simulated"
