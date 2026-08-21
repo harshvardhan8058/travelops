@@ -87,6 +87,8 @@ log = get_logger(__name__)
 
 ACTOR_ORCHESTRATOR = "orchestrator"
 ACTOR_GATE = "assurance_gate"
+#: A person. Recorded when an operator decides, never for the orchestrator acting on it.
+ACTOR_HUMAN = "human"
 PRODUCER = "orchestrator"
 
 # Timeline stages. Matches the vocabulary the committed timeline fixture already uses.
@@ -1382,11 +1384,14 @@ class Orchestrator:
                 ctx,
                 IncidentState.executing,
                 stage=STAGE_EXECUTE,
-                summary=f"Operator approved evaluation {evaluation_id}",
+                # Says what the orchestrator did, not what the operator did. The approval
+                # itself is the adjacent human-attributed entry; two entries both reading
+                # "Operator approved" is what made the attribution ambiguous in the first place.
+                summary=f"Proceeding on operator approval of evaluation {evaluation_id}",
                 detail={
                     "assurance_id": evaluation_id,
                     "plan_task_id": plan_task_id,
-                    "actor_id": decision.actor_id,
+                    "approved_by": decision.actor_id,
                 },
             )
             return
@@ -1394,19 +1399,9 @@ class Orchestrator:
         if task_row is not None:
             task_row.state = TaskState.rejected
             await self._session.flush()
-        await self._journal(
-            ctx,
-            stage=STAGE_ASSURE,
-            actor="human",
-            event_type="HUMAN_DECISION_RECORDED",
-            summary=f"Operator rejected evaluation {evaluation_id}",
-            detail={
-                "assurance_id": evaluation_id,
-                "plan_task_id": plan_task_id,
-                "actor_id": decision.actor_id,
-                "reason": decision.reason,
-            },
-        )
+        # The rejection itself is journalled by POST /assurance/{id}/decision, attributed to
+        # the operator and timestamped when they decided. Writing it again here would put a
+        # second entry for one human act on the timeline, at the later moment the run noticed.
         ctx.metadata.pop("current_assurance_id", None)
         ctx.metadata.pop("current_plan_task_id", None)
         if await self._next_actionable_task(ctx) is None:
