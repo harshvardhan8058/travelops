@@ -69,12 +69,18 @@ function formatDuration(fromIso: string, toIso: string): string {
 }
 
 /**
- * The most recent thing the records say happened — a state transition or an executed action.
- * Used as the far end of the elapsed measurement so the figure comes from records rather than
- * from the browser clock.
+ * Every timestamp the records carry for this incident, oldest first.
+ *
+ * `incident.opened_at` is deliberately NOT in here. In an injected scenario it is the
+ * disruption's own time — 2026-08-20T15:36 for bengaluru_storm — while the state transitions
+ * carry the real time the workflow ran. Measuring from one to the other produced
+ * "ELAPSED 26h 46m" for a recovery that took 21 seconds. Stream A removed exactly this
+ * clock-mixing from the state rail; this is the same bug on the same screen.
+ *
+ * Both ends now come from the same clock: the recorded transitions and actions.
  */
-function latestRecord(incident: IncidentDetail): { at: string; label: string } | null {
-  const stamps: { at: string; label: string }[] = [
+function recordedStamps(incident: IncidentDetail): { at: string; label: string }[] {
+  return [
     ...incident.state_rail
       .filter((step) => step.reached_at !== null)
       .map((step) => ({ at: step.reached_at as string, label: `state ${step.state}` })),
@@ -82,8 +88,6 @@ function latestRecord(incident: IncidentDetail): { at: string; label: string } |
       .filter((action) => action.executed_at !== null)
       .map((action) => ({ at: action.executed_at as string, label: `action ${action.id}` })),
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-
-  return stamps[stamps.length - 1] ?? null;
 }
 
 function Header({
@@ -98,7 +102,10 @@ function Header({
   runError?: string | null;
 }) {
   const { flight } = incident;
-  const latest = latestRecord(incident);
+  const stamps = recordedStamps(incident);
+  const first = stamps[0] ?? null;
+  // Needs two distinct records to be an interval; one record is a point in time, not a duration.
+  const latest = stamps.length > 1 ? (stamps[stamps.length - 1] ?? null) : null;
   // Terminal states cannot advance: the backend returns a note saying so rather than erroring,
   // but there is no reason to offer the control.
   const isTerminal =
@@ -134,10 +141,10 @@ function Header({
         </span>
 
         <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
-          elapsed {/* Records minus records. No wall clock: see elapsedDerivation for why. */}
-          <WhyPopover derivation={elapsedDerivation(incident, latest)}>
+          workflow {/* Both ends are recorded transitions, so this cannot mix two clocks. */}
+          <WhyPopover derivation={elapsedDerivation(incident, first, latest)}>
             <MonoValue>
-              {latest ? formatDuration(incident.opened_at, latest.at) : 'not derivable'}
+              {first && latest ? formatDuration(first.at, latest.at) : 'not derivable'}
             </MonoValue>
           </WhyPopover>
         </span>
@@ -379,7 +386,8 @@ export function RecoveryWorkspace() {
        */}
       {lastRun && (
         <Panel>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
+          {/* Compact: this strip competes for vertical budget with the approval control. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5">
             <span className="text-label uppercase text-fg-muted">Last run</span>
             <span className="flex items-center gap-1.5">
               <StateBadge status={lastRun.previous_state} />
@@ -395,7 +403,7 @@ export function RecoveryWorkspace() {
             {lastRun.replayed && <StateBadge status="skipped" label="replayed" />}
           </div>
           {lastRun.note && (
-            <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-secondary">
+            <p className="border-t border-border-subtle px-3 py-1.5 text-caption text-fg-secondary">
               {lastRun.note}
             </p>
           )}

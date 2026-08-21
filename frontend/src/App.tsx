@@ -76,7 +76,7 @@ export function App() {
           element={
             <StreamPlaceholder
               screen="Cascade view"
-              owner="Stream F"
+              owner="Stream D"
               spec="docs/27-ui-specification.md screen 3"
             />
           }
@@ -87,7 +87,7 @@ export function App() {
           element={
             <StreamPlaceholder
               screen="Approval queue"
-              owner="Stream F"
+              owner="Stream D"
               spec="docs/27-ui-specification.md screen 4"
             />
           }
@@ -97,7 +97,7 @@ export function App() {
           element={
             <StreamPlaceholder
               screen="Policy and citation"
-              owner="Stream F"
+              owner="Stream D"
               spec="docs/27-ui-specification.md screen 5"
             />
           }
@@ -107,7 +107,7 @@ export function App() {
           element={
             <StreamPlaceholder
               screen="Timeline replay"
-              owner="Stream E"
+              owner="Stream D"
               spec="docs/27-ui-specification.md screen 6"
             />
           }
@@ -117,7 +117,7 @@ export function App() {
           element={
             <StreamPlaceholder
               screen="Executive report"
-              owner="Stream F"
+              owner="Stream D"
               spec="docs/27-ui-specification.md screen 7"
             />
           }
@@ -127,7 +127,7 @@ export function App() {
           element={
             <StreamPlaceholder
               screen="Provenance ledger"
-              owner="Stream E"
+              owner="Stream D"
               spec="docs/27-ui-specification.md screen 8"
             />
           }
