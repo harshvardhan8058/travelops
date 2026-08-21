@@ -27,6 +27,4 @@ class Base(DeclarativeBase):
 class TimestampMixin:
     """UTC timestamps. Storage is always UTC; local time is a display concern only."""
 
-    created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

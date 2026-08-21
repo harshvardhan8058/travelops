@@ -176,8 +176,30 @@ class ResolvedModes:
         }
 
 
+#: Repository root, derived from this file's location: backend/app/config.py -> ../..
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def resolve_repo_path(path: Path) -> Path:
+    """Resolve a possibly-relative path predictably.
+
+    An absolute path is returned unchanged. A relative path is tried against the current
+    working directory first, then against the repository root.
+
+    Without this, `./config/assurance.v1.yaml` resolves differently depending on whether a
+    process was started from the repo root, from `backend/`, or inside the container — and
+    the symptom is a confusing "workflow execution blocked" instead of an obvious error.
+    """
+    if path.is_absolute():
+        return path
+    if path.exists():
+        return path
+    return REPO_ROOT / path
+
+
 def _read_assurance_config(path: Path) -> tuple[str | None, str | None]:
     """Return (version, sha256) for the gate config, or (None, None) if unreadable."""
+    path = resolve_repo_path(path)
     if not path.is_file():
         return None, None
     raw = path.read_bytes()
@@ -191,7 +213,7 @@ def _read_assurance_config(path: Path) -> tuple[str | None, str | None]:
         if isinstance(parsed, dict):
             value = parsed.get("version")
             version = str(value) if value is not None else None
-    except Exception:  # noqa: BLE001 - unreadable config must not crash resolution
+    except Exception:
         version = None
     return version, digest
 
@@ -250,16 +272,15 @@ def resolve_modes(settings: Settings) -> ResolvedModes:
     config_present = digest is not None
     if not config_present:
         degradations.append(
-            f"assurance config not found at {settings.assurance_config_path}; "
+            "assurance config not found at "
+            f"{resolve_repo_path(settings.assurance_config_path)}; "
             "workflow execution is blocked"
         )
 
     # ---------------------------------------------------------------- policy
     policy = settings.policy_mode
     if policy is PolicyMode.verified:
-        pack_dir = (
-            settings.policy_pack_dir / settings.policy_pack_id / settings.policy_pack_version
-        )
+        pack_dir = settings.policy_pack_dir / settings.policy_pack_id / settings.policy_pack_version
         raise ConfigurationError(
             "POLICY_MODE=verified requires an approved primary-source pack whose "
             f"verified_mode_eligible is true. {pack_dir} is not eligible "

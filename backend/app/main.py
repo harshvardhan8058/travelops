@@ -80,7 +80,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def correlation_middleware(request: Request, call_next):  # noqa: ANN001, ANN201
+async def correlation_middleware(request: Request, call_next):
     correlation_id = request.headers.get("X-Correlation-Id") or uuid.uuid4().hex
     token = correlation_id_var.set(correlation_id)
     try:
@@ -108,9 +108,7 @@ async def handle_travelops_error(request: Request, exc: TravelOpsError) -> JSONR
 
 
 @app.exception_handler(RequestValidationError)
-async def handle_validation_error(
-    _request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def handle_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=422,
         content=error_payload(

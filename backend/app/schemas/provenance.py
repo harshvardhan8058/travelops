@@ -31,7 +31,9 @@ class Provenance(BaseModel):
     is_stale: bool = False
 
     @classmethod
-    def synthetic_data(cls, provider: str = "generator", source_ref: str | None = None) -> Provenance:
+    def synthetic_data(
+        cls, provider: str = "generator", source_ref: str | None = None
+    ) -> Provenance:
         return cls(kind=ProvenanceKind.synthetic, provider=provider, source_ref=source_ref)
 
     @classmethod

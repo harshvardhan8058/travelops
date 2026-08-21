@@ -103,9 +103,7 @@ class CrewPairingAssignment(Base):
 
     pairing: Mapped[Pairing] = relationship(back_populates="assignments")
 
-    __table_args__ = (
-        UniqueConstraint("crew_member_id", "pairing_id", name="crew_pairing_unique"),
-    )
+    __table_args__ = (UniqueConstraint("crew_member_id", "pairing_id", name="crew_pairing_unique"),)
 
 
 class PairingImpact(Base):

@@ -119,16 +119,12 @@ class PolicyRule(Base):
     # draft | superseded_suspected | informational | approved
     review_status: Mapped[str] = mapped_column(String(32), nullable=False)
     # Suspected-superseded rules must never evaluate.
-    excluded_from_evaluation: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    excluded_from_evaluation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     interpretation: Mapped[str | None] = mapped_column(Text)
 
     pack: Mapped[PolicyPack] = relationship(back_populates="rules")
 
-    __table_args__ = (
-        UniqueConstraint("policy_pack_id", "rule_key", name="policy_rule_unique"),
-    )
+    __table_args__ = (UniqueConstraint("policy_pack_id", "rule_key", name="policy_rule_unique"),)
 
 
 class PolicyApplicability(Base):
@@ -195,7 +191,5 @@ class BusinessConstraint(Base):
     description: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
-        UniqueConstraint(
-            "service", "constraint_key", "version", name="business_constraint_unique"
-        ),
+        UniqueConstraint("service", "constraint_key", "version", name="business_constraint_unique"),
     )

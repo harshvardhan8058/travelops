@@ -34,7 +34,7 @@ async def _check_database() -> dict[str, Any]:
         async with factory() as session:
             await session.execute(text("SELECT 1"))
         return {"status": "up"}
-    except Exception as exc:  # noqa: BLE001 - report, never crash the probe
+    except Exception as exc:
         return {"status": "down", "detail": type(exc).__name__}
 
 
@@ -48,7 +48,7 @@ async def _check_redis() -> dict[str, Any]:
         finally:
             await client.aclose()
         return {"status": "up"}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"status": "down", "detail": type(exc).__name__}
 
 

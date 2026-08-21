@@ -175,7 +175,9 @@ class Plan(Base):
     retrieved_incident_ids: Mapped[list] = mapped_column(JSON_TYPE, nullable=False, default=list)
 
     incident: Mapped[Incident] = relationship(back_populates="plans")
-    tasks: Mapped[list[PlanTask]] = relationship(back_populates="plan", order_by="PlanTask.task_order")
+    tasks: Mapped[list[PlanTask]] = relationship(
+        back_populates="plan", order_by="PlanTask.task_order"
+    )
 
 
 class PlanTask(Base):
@@ -202,7 +204,9 @@ class AssuranceEvaluation(Base):
     __tablename__ = "assurance_evaluation"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_task_id: Mapped[int] = mapped_column(ForeignKey("plan_task.id"), nullable=False, index=True)
+    plan_task_id: Mapped[int] = mapped_column(
+        ForeignKey("plan_task.id"), nullable=False, index=True
+    )
     decision: Mapped[AssuranceDecision] = mapped_column(String(20), nullable=False)
     risk_tier: Mapped[RiskTier] = mapped_column(String(8), nullable=False)
 
@@ -251,10 +255,10 @@ class Action(Base):
     __tablename__ = "action"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_task_id: Mapped[int] = mapped_column(ForeignKey("plan_task.id"), nullable=False, index=True)
-    assurance_id: Mapped[int] = mapped_column(
-        ForeignKey("assurance_evaluation.id"), nullable=False
+    plan_task_id: Mapped[int] = mapped_column(
+        ForeignKey("plan_task.id"), nullable=False, index=True
     )
+    assurance_id: Mapped[int] = mapped_column(ForeignKey("assurance_evaluation.id"), nullable=False)
     # Required when the gate decided needs_human. Enforced in the service transaction.
     human_decision_id: Mapped[int | None] = mapped_column(ForeignKey("human_decision.id"))
 
