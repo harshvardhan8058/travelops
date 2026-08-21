@@ -42,6 +42,11 @@ export interface DerivationInput {
   label: string;
   /** Formatted from API values only. Never a sentence about what the value means. */
   value: string;
+  /**
+   * An API-supplied explanation of this input, rendered verbatim beneath it — e.g. a risk
+   * factor's `detail`. Adapters pass it through; they never compose one.
+   */
+  detail?: string | null;
   provenance?: Provenance;
 }
 
@@ -217,13 +222,20 @@ export function incidentRiskDerivation(
 ): Derivation {
   const inputs: DerivationInput[] = risk.factors.map((factor) => ({
     label: factor.name.replace(/_/g, ' '),
-    value: [
-      factor.value,
-      factor.threshold ? `threshold ${factor.threshold}` : null,
-      factor.runway ? `runway ${factor.runway}` : null,
-    ]
-      .filter(isPresent)
-      .join(' · '),
+    value:
+      [
+        // `value` is the observed figure and can be an empty string when the rule recorded
+        // none. Falling through to the points contribution keeps the row meaningful instead
+        // of rendering a blank.
+        isPresent(factor.value) ? factor.value : null,
+        typeof factor.points === 'number' ? `${factor.points} pts` : null,
+        factor.threshold ? `threshold ${factor.threshold}` : null,
+        factor.runway ? `runway ${factor.runway}` : null,
+      ]
+        .filter(isPresent)
+        .join(' · ') || 'no figure recorded',
+    // The rule's own explanation, verbatim. This is the whole point of the popover.
+    detail: factor.detail,
     provenance: weather?.provenance,
   }));
 
