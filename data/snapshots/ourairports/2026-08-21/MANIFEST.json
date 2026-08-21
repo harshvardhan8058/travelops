@@ -15,6 +15,11 @@
     "VAAH",
     "VAPO"
   ],
+  "integrity": {
+    "subset_line_ending": "LF",
+    "subset_encoding": "utf-8",
+    "note": "subset_sha256 is the SHA-256 of the committed bytes, which use LF line endings. data/.gitattributes marks these files -text so no checkout rewrites them; a CRLF working tree hashes differently and verify_snapshot() will refuse it."
+  },
   "files": {
     "airports": {
       "url": "https://davidmegginson.github.io/ourairports-data/airports.csv",
@@ -22,6 +27,7 @@
       "upstream_bytes": 12703998,
       "subset_file": "airports.subset.csv",
       "subset_sha256": "affd0426485e5420bf26e71f509c84bb59ac174cf06461fb6f3c6be79d0af66b",
+      "subset_bytes": 2623,
       "subset_rows": 10
     },
     "runways": {
@@ -30,6 +36,7 @@
       "upstream_bytes": 3960362,
       "subset_file": "runways.subset.csv",
       "subset_sha256": "bfe0e95a6e8ff7cb7e9255bb606f79146ae45c8c7a47ac6c827ea47312aeea7c",
+      "subset_bytes": 2341,
       "subset_rows": 19
     }
   },

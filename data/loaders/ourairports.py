@@ -202,6 +202,17 @@ def refresh(date: str = SNAPSHOT_DATE) -> dict:
         "attribution": "Airport and runway data from OurAirports (ourairports.com/data)",
         "retrieved_at": retrieved_at,
         "airport_icaos": list(AIRPORT_ICAOS),
+        # The hash is only meaningful for a known byte form, so the byte form is stated.
+        "integrity": {
+            "subset_line_ending": "LF",
+            "subset_encoding": "utf-8",
+            "note": (
+                "subset_sha256 is the SHA-256 of the committed bytes, which use LF line "
+                "endings. data/.gitattributes marks these files -text so no checkout "
+                "rewrites them; a CRLF working tree hashes differently and "
+                "verify_snapshot() will refuse it."
+            ),
+        },
         "files": {
             "airports": {
                 "url": AIRPORTS_URL,
@@ -209,6 +220,7 @@ def refresh(date: str = SNAPSHOT_DATE) -> dict:
                 "upstream_bytes": len(airports_raw),
                 "subset_file": "airports.subset.csv",
                 "subset_sha256": sha256_bytes(airport_subset),
+                "subset_bytes": len(airport_subset),
                 "subset_rows": len(airport_rows),
             },
             "runways": {
@@ -217,6 +229,7 @@ def refresh(date: str = SNAPSHOT_DATE) -> dict:
                 "upstream_bytes": len(runways_raw),
                 "subset_file": "runways.subset.csv",
                 "subset_sha256": sha256_bytes(runway_subset),
+                "subset_bytes": len(runway_subset),
                 "subset_rows": len(runway_rows),
             },
         },
@@ -241,16 +254,40 @@ def read_manifest(date: str = SNAPSHOT_DATE) -> dict:
 def verify_snapshot(date: str = SNAPSHOT_DATE) -> None:
     """Recompute the archived subsets' hashes and compare against the manifest.
 
-    An archive whose hash is not checked is a claim, not evidence.
+    An archive whose hash is not checked is a claim, not evidence, so a mismatch always
+    raises. What the message adds is the *cause*, because the overwhelmingly likely one is not
+    a corrupted archive.
+
+    The subsets are committed with LF line endings and hashed as such. Git for Windows
+    defaults to `core.autocrlf=true` and rewrites them to CRLF on checkout, which adds a byte
+    per line and changes the hash — so the archive is intact, the repository is intact, and the
+    working tree is simply no longer the bytes the manifest describes. `data/.gitattributes`
+    marks these files `-text` to prevent it; a checkout taken before that existed still needs
+    refreshing. Diagnosing that from a bare hash mismatch costs an hour, so it is named here.
     """
     manifest = read_manifest(date)
     for key, entry in manifest["files"].items():
         payload = (snapshot_dir(date) / entry["subset_file"]).read_bytes()
         actual = sha256_bytes(payload)
-        if actual != entry["subset_sha256"]:
-            raise RuntimeError(
-                f"{key} subset hash mismatch: manifest {entry['subset_sha256']}, actual {actual}"
-            )
+        if actual == entry["subset_sha256"]:
+            continue
+
+        expected = entry["subset_sha256"]
+        detail = ""
+        if b"\r\n" in payload:
+            normalised = sha256_bytes(payload.replace(b"\r\n", b"\n"))
+            if normalised == expected:
+                detail = (
+                    " The file holds CRLF line endings; with LF it hashes correctly, so the "
+                    "archive is intact and the checkout rewrote it. Ensure "
+                    "data/.gitattributes is present, then restore the file: "
+                    "`git rm --cached -r data/snapshots && git checkout -- data/snapshots` "
+                    "(or re-clone). Do not update the manifest to the CRLF hash — that would "
+                    "record a platform-specific value and break every other platform."
+                )
+        raise RuntimeError(
+            f"{key} subset hash mismatch: manifest {expected}, actual {actual}.{detail}"
+        )
 
 
 def load_airports(date: str = SNAPSHOT_DATE) -> list[AirportRecord]:

@@ -1,0 +1,9 @@
+# Patterns here are relative to fixtures/.
+#
+# The archived Aviation Weather Center payloads are captured evidence. Their manifest records
+# the SHA-256 of the UPSTREAM response rather than of the committed file, so end-of-line
+# translation would not fail a check here — it would quietly make the committed capture differ
+# from the bytes that were actually captured, which is worse because nothing would say so.
+#
+# Held byte-exact for the same reason as data/snapshots. See data/.gitattributes.
+weather/*.json -text
