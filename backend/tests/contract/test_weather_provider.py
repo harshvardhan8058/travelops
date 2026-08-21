@@ -414,6 +414,21 @@ async def test_connection_failure_maps_to_unavailable():
     assert exc.value.kind is ProviderErrorKind.unavailable
 
 
+@pytest.mark.parametrize("response", [httpx.Response(204), httpx.Response(200, content=b"")])
+async def test_no_content_is_unavailable_not_invalid_response(response):
+    """Observed against the real API, and originally missed because the mock returned `[]`.
+
+    AWC answers a station it has no report for with **HTTP 204 and an empty body**, not with
+    an empty JSON list. Mapping that to `invalid_response` would tell the orchestrator the
+    provider is broken when the truth is that the station files no METAR — a different
+    problem with a different fallback.
+    """
+    provider = _failing_live(lambda request: response)
+    with pytest.raises(ProviderError) as exc:
+        await provider.get_observation("VAPO")
+    assert exc.value.kind is ProviderErrorKind.unavailable
+
+
 async def test_malformed_body_maps_to_invalid_response():
     provider = _failing_live(lambda request: httpx.Response(200, text="<html>outage</html>"))
     with pytest.raises(ProviderError) as exc:

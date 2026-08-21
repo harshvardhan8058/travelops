@@ -231,6 +231,13 @@ class LiveWeatherProvider:
 
         _raise_for_status(response)
 
+        # AWC answers a station it has no report for with 204 and an empty body. That is
+        # "no data", not a malformed response, and it must reach the caller as
+        # `unavailable` so the orchestrator can fall back. Observed against VAPO, which
+        # files a TAF but no METAR.
+        if response.status_code == 204 or not response.content.strip():
+            return []
+
         try:
             return response.json()
         except ValueError as exc:
