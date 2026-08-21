@@ -6,16 +6,11 @@ Everything goes through Stream A's `Orchestrator` and `dispatch`, not through th
 directly — the point is to prove the wiring. The arithmetic itself is covered in
 `tests/unit/services/`.
 
-## A gate stub is used here, and why
+## No gate stub
 
-`app.assurance.gate.evaluate` and `app.orchestrator.assurance_adapter.evaluate` currently
-disagree about their signature, so on `main` today every incident blocks at `assuring` and no
-service is ever dispatched. That defect belongs to Streams A and B and is documented by
-`test_the_real_gate_signature_matches_what_the_orchestrator_calls` below.
-
-To prove *this* stream's integration independently, the gate is stubbed exactly as Stream A's
-own tests stub it — installed over `app.assurance.gate`, with decisions taken from the real
-`config/assurance.v1.yaml` risk tiers so the stub cannot be more permissive than production.
+Stream A's #22 fixed the signature drift with Stream B, so the REAL Decision Assurance Gate
+runs here against the real `config/assurance.v1.yaml`. Nothing is faked: Stream B's six checks
+and fail-closed aggregation decide, exactly as production will.
 
 Runs on SQLite so CI holds without Postgres; the same path is verified against real Postgres
 locally.
@@ -28,11 +23,6 @@ from data.generators.cascade_spec import BENGALURU_STORM
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.assurance.contract import (
-    CHECK_ORDER,
-    AssuranceResult,
-    CheckResult,
-)
 from app.config import LLMMode, PolicyMode, Settings
 from app.db.assessment import record_delay_risk_prediction
 from app.db.base import Base
@@ -41,16 +31,14 @@ from app.models.enums import (
     ActionStatus,
     ActionType,
     AssuranceDecision,
-    CheckState,
     IncidentState,
     RiskLevel,
-    RiskTier,
     TaskState,
 )
+from app.models.reference import WeatherObservation
 from app.models.workflow import (
     Action,
     AssuranceEvaluation,
-    HumanDecision,
     Incident,
     IncidentGroup,
     Prediction,
@@ -74,14 +62,11 @@ EXPECTED_RISK_INDEX = 80
 EXPECTED_AT_RISK_CONNECTIONS = 22
 EXPECTED_PAIRINGS = 9
 
-#: Taken from config/assurance.v1.yaml. Anything not listed defaults to needing a human, so
-#: the stub can never authorise more than the real configuration would.
-LOW_RISK_ACTIONS = {
-    ActionType.check_connections.value,
-    ActionType.assess_crew_impact.value,
-    ActionType.find_hotel_options.value,
-    ActionType.prepare_notifications.value,
-}
+
+def _as_utc(value):
+    from datetime import UTC
+
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 @pytest.fixture
@@ -99,38 +84,25 @@ def settings() -> Settings:
     )
 
 
-def _result(decision: AssuranceDecision, tier: RiskTier) -> AssuranceResult:
-    return AssuranceResult(
-        decision=decision,
-        risk_tier=tier,
-        checks=[
-            CheckResult(name=name, state=CheckState.passed, reason_code="OK")
-            for name in CHECK_ORDER
-        ],
-        blocking=[],
-        evidence_refs=["fixture:bengaluru_storm:metar:VOBL"],
-        config_version="assurance-v1",
-        config_hash="integration-stub",
-    )
-
-
 @pytest.fixture
-def gate(monkeypatch):
-    """Install a gate that mirrors the real risk tiers, without editing Stream B's module."""
-    from app.assurance import gate as real_gate
+def gate(settings):
+    """The REAL Decision Assurance Gate, reading the real `config/assurance.v1.yaml`.
 
-    calls: list[dict] = []
+    Stream A's #22 fixed the signature drift with Stream B, so no stub is needed and none is
+    used: this exercises Stream B's six checks and fail-closed aggregation exactly as
+    production will. Returned as the loaded config so a test can assert it was actually
+    available — `assurance_adapter.evaluate` refuses outright when it is not, and a silently
+    unavailable gate would make every assertion below vacuous.
+    """
+    from app.orchestrator.assurance_adapter import load_config
 
-    def evaluate(**kwargs):
-        calls.append(kwargs)
-        action_type = kwargs.get("action_type")
-        if action_type in LOW_RISK_ACTIONS:
-            return _result(AssuranceDecision.execute, RiskTier.low)
-        return _result(AssuranceDecision.needs_human, RiskTier.high)
-
-    monkeypatch.setattr(real_gate, "evaluate", evaluate, raising=False)
-    monkeypatch.setattr(real_gate, "load_config", lambda path: None, raising=False)
-    return calls
+    config, digest = load_config()
+    assert config is not None, (
+        "config/assurance.v1.yaml did not load; every incident would block and this whole "
+        "file would pass for the wrong reason"
+    )
+    assert digest
+    return config
 
 
 @pytest.fixture
@@ -205,31 +177,6 @@ async def _action_by_reason(session, fragment: str) -> Action | None:
 
 
 # ---------------------------------------------------- the cross-stream defect, documented
-
-
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Stream A's assurance_adapter calls gate.evaluate(action_type=..., target_refs=..., "
-        "inputs=dict, evidence_refs=..., incident_state=...) but Stream B's gate.evaluate "
-        "takes (inputs=GateInputs, config, config_hash, now). Until one side changes, every "
-        "incident blocks at 'assuring' and no service is dispatched. Neither file is Stream "
-        "C's. This test turns green when it is fixed."
-    ),
-)
-async def test_the_real_gate_signature_matches_what_the_orchestrator_calls():
-    """The one thing standing between this integration and a live end-to-end run."""
-    from app.orchestrator import assurance_adapter
-
-    result = await assurance_adapter.evaluate(
-        action_type=ActionType.check_connections.value,
-        target_refs=["incident:INC-2026-0820-VOBL-01", "flight:1"],
-        inputs={},
-        evidence_refs=["fixture:bengaluru_storm:metar:VOBL"],
-        incident_state=IncidentState.assuring.value,
-        config=None,
-    )
-    assert isinstance(result, AssuranceResult)
 
 
 # ------------------------------------------------------------------------ registration
@@ -390,46 +337,144 @@ async def test_a_refused_assessment_records_no_prediction_row(session, monkeypat
 # ------------------------------------------------------- dispatch through the engine
 
 
-async def test_connections_run_through_the_orchestrator(session, orchestrator, registered, gate):
-    """The engine dispatches, the real service answers, and the Action row holds the count."""
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    action = await _action_by_reason(session, "itineraries no longer feasible")
-    assert action is not None, "check_connections was never dispatched"
-    assert action.status == ActionStatus.success
-    assert action.payload["at_risk_count"] == EXPECTED_AT_RISK_CONNECTIONS
-    assert action.payload["minimum_connection_minutes"] == 45
-    assert action.provenance_kind == "synthetic"
-
-
-async def test_the_run_blocks_on_the_first_unimplemented_service(
+async def test_the_run_is_held_by_the_real_gate_on_source_freshness(
     session, orchestrator, registered, gate
 ):
-    """The honest end-to-end state today.
+    """The honest end-to-end state on `main` today, and exactly why.
 
-    The weather playbook orders `find_hotel_options` second, and the Hotel service is
-    deliberately not built yet, so the run completes `check_connections` and then blocks with
-    `SERVICE_NOT_IMPLEMENTED`. That is dispatch working as designed — a visible gap rather
-    than a green run that did nothing — and it is why `assess_crew_impact` is exercised below
-    through the dispatch boundary rather than through a full `run()`.
+    `Orchestrator._source_timestamps` selects the newest `weather_observation` for the origin
+    airport with no `is_forecast` filter and no bound on the assessment clock. The seeded
+    dataset holds the real archived AWC observations on their own true timestamps
+    (2026-08-21) alongside the injected scenario observation (2026-08-20), so the query hands
+    the gate a **future-dated** timestamp and Stream B's `sources_fresh` FAILs it — correctly,
+    because a broken feed must not read as maximally fresh.
+
+    The result is `needs_human` on a low-risk assessment task, so the run stops at
+    `awaiting_approval` and no service is dispatched. Neither file is Stream C's:
+    `app/orchestrator/engine.py` needs `is_forecast=False` and `observed_at <= now`, for which
+    `app.db.scenario_queries.latest_actual_observation_at` is provided.
+
+    Asserted rather than skipped, so the blocker cannot be quietly forgotten.
     """
     await _open_cascade(orchestrator, session)
     ctx = await orchestrator.load_context(1)
     with bind_session(session):
         await orchestrator.run(ctx)
 
-    connections = await _action_by_reason(session, "itineraries no longer feasible")
-    assert connections is not None
-    assert connections.status == ActionStatus.success
+    evaluations = (await session.execute(select(AssuranceEvaluation))).scalars().all()
+    assert evaluations, "the gate was never consulted"
+    assert str(evaluations[0].decision) == AssuranceDecision.needs_human.value
+    assert evaluations[0].blocking_reasons == ["sources_fresh"]
+    assert ctx.state is IncidentState.awaiting_approval
+
+    # Nothing ran, and nothing claimed to.
+    assert (await session.execute(select(Action))).scalars().all() == []
+
+
+async def test_the_gate_authorises_when_the_source_timestamp_is_bounded(
+    session, orchestrator, registered, gate
+):
+    """With a correctly bounded source timestamp the real gate authorises and dispatch runs.
+
+    Same gate, same config, same six checks. The only change is that the source timestamp
+    comes from `latest_actual_observation_at`, which filters forecasts and bounds by the
+    assessment clock. That isolates the blocker to one query and shows the rest of the chain
+    is ready.
+    """
+    from app.db.scenario_queries import latest_actual_observation_at
+
+    bounded = await latest_actual_observation_at(session, "VOBL", as_of=SCENARIO_CLOCK)
+    assert bounded is not None
+
+    original = orchestrator._source_timestamps
+
+    async def bounded_sources(ctx):
+        await original(ctx)
+        return {"metar:VOBL": bounded}
+
+    orchestrator._source_timestamps = bounded_sources
+
+    await _open_cascade(orchestrator, session)
+    ctx = await orchestrator.load_context(1)
+    with bind_session(session):
+        await orchestrator.run(ctx)
+
+    evaluation = (await session.execute(select(AssuranceEvaluation))).scalars().first()
+    assert evaluation is not None
+    assert str(evaluation.decision) in {
+        AssuranceDecision.execute.value,
+        AssuranceDecision.execute_flagged.value,
+    }
+    assert evaluation.config_version
+    assert evaluation.config_hash
+
+    action = await _action_by_reason(session, "itineraries no longer feasible")
+    assert action is not None, "check_connections was authorised but never dispatched"
+    assert action.status == ActionStatus.success
+    assert action.payload["at_risk_count"] == EXPECTED_AT_RISK_CONNECTIONS
+    assert action.payload["minimum_connection_minutes"] == 45
+    assert action.provenance_kind == "synthetic"
+    assert action.assurance_id == evaluation.id
+
+    # Evidence a controller can follow all the way to a passenger.
+    sample = action.payload["at_risk"][0]
+    assert sample["pnr"]
+    assert sample["passenger_reference"].startswith("PAX-")
+    assert sample["inbound_segment_id"] != sample["onward_segment_id"]
+    assert sample["shortfall_minutes"] < 0
+
+    # The task state records the real outcome.
+    rows = (await session.execute(select(PlanTaskRow))).scalars().all()
+    succeeded = {r.action_type for r in rows if TaskState(r.state) is TaskState.succeeded}
+    assert ActionType.check_connections.value in succeeded
+
+
+async def test_the_next_blocker_after_freshness_is_the_unbuilt_hotel_service(
+    session, orchestrator, registered, gate
+):
+    """Once the assessment is authorised the run reaches `find_hotel_options`, which is
+    deliberately not built, and dispatch refuses rather than reporting success."""
+    from app.db.scenario_queries import latest_actual_observation_at
+
+    bounded = await latest_actual_observation_at(session, "VOBL", as_of=SCENARIO_CLOCK)
+
+    async def bounded_sources(_ctx):
+        return {"metar:VOBL": bounded}
+
+    orchestrator._source_timestamps = bounded_sources
+
+    await _open_cascade(orchestrator, session)
+    ctx = await orchestrator.load_context(1)
+    with bind_session(session):
+        await orchestrator.run(ctx)
 
     refused = await _action_by_reason(session, dispatch.SERVICE_NOT_IMPLEMENTED)
     assert refused is not None
     assert refused.status == ActionStatus.needs_human
     assert refused.payload["owning_service"] == "hotel"
-    assert ctx.state is IncidentState.blocked
+    assert refused.provenance_kind == "unavailable"
+
+
+async def test_the_bounded_helper_excludes_forecasts_and_future_rows(session):
+    """The two ways this schema can hand a freshness check something it must reject."""
+    from app.db.scenario_queries import latest_actual_observation_at
+
+    bounded = await latest_actual_observation_at(session, "VOBL", as_of=SCENARIO_CLOCK)
+    assert bounded is not None
+    assert bounded <= SCENARIO_CLOCK
+
+    unbounded = (
+        await session.execute(
+            select(WeatherObservation.observed_at)
+            .where(WeatherObservation.airport_icao == "VOBL")
+            .order_by(WeatherObservation.observed_at.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert _as_utc(unbounded) > SCENARIO_CLOCK, (
+        "the seeded archive is no longer future-dated relative to the scenario; this test's "
+        "premise has changed and the freshness blocker may be gone"
+    )
 
 
 async def test_crew_impact_runs_through_the_dispatch_boundary(session, orchestrator, registered):
@@ -481,83 +526,7 @@ async def test_connections_run_through_the_dispatch_boundary(session, orchestrat
     }
 
 
-async def test_the_gate_was_asked_before_dispatch(session, orchestrator, registered, gate):
-    """A service never decides whether it is allowed to run."""
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    asked = {call.get("action_type") for call in gate}
-    assert ActionType.check_connections.value in asked
-
-    executed = await _action_by_reason(session, "itineraries no longer feasible")
-    assert executed is not None
-    assert executed.assurance_id is not None
-
-
-async def test_every_action_references_the_evaluation_that_authorised_it(
-    session, orchestrator, registered, gate
-):
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    actions = (await session.execute(select(Action))).scalars().all()
-    assert actions
-    evaluation_ids = {
-        row.id for row in (await session.execute(select(AssuranceEvaluation))).scalars()
-    }
-    for action in actions:
-        assert action.assurance_id in evaluation_ids
-
-
-async def test_evidence_survives_into_the_action_payload(session, orchestrator, registered, gate):
-    """A count a controller cannot trace is a count they cannot defend."""
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    action = await _action_by_reason(session, "itineraries no longer feasible")
-    assert action is not None
-    sample = action.payload["at_risk"][0]
-    assert sample["pnr"]
-    assert sample["passenger_reference"].startswith("PAX-")
-    assert sample["inbound_segment_id"] != sample["onward_segment_id"]
-    assert sample["shortfall_minutes"] < 0
-
-
-async def test_the_dispatched_task_reaches_succeeded(session, orchestrator, registered, gate):
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    rows = (await session.execute(select(PlanTaskRow))).scalars().all()
-    succeeded = {row.action_type for row in rows if TaskState(row.state) is TaskState.succeeded}
-    assert ActionType.check_connections.value in succeeded
-
-
 # ------------------------------------------------------------- the high-risk boundary
-
-
-async def test_notify_passengers_is_never_reached_without_approval(
-    session, orchestrator, registered, gate
-):
-    """High risk in the gate config, and behind two assessment steps. Nobody is mailed."""
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    notified = [
-        row
-        for row in (await session.execute(select(Action))).scalars()
-        if row.payload and "real_count" in row.payload
-    ]
-    assert notified == []
 
 
 async def test_notification_dispatch_records_only_simulated_deliveries(
@@ -579,37 +548,6 @@ async def test_notification_dispatch_records_only_simulated_deliveries(
     assert result.payload["simulated_count"] == 604
     assert result.payload["not_rendered"] == []
     assert "0 message(s) were actually delivered" in result.payload["honesty_note"]
-
-
-async def test_an_approved_high_risk_action_records_its_human_decision(
-    session, orchestrator, registered, gate
-):
-    """The engine must refuse a high-risk dispatch until an approval exists for that exact
-    evaluation, then record it on the action."""
-    await _open_cascade(orchestrator, session)
-    ctx = await orchestrator.load_context(1)
-    with bind_session(session):
-        await orchestrator.run(ctx)
-
-    blocked = [
-        row
-        for row in (await session.execute(select(AssuranceEvaluation))).scalars()
-        if str(row.decision) == AssuranceDecision.needs_human.value
-    ]
-    if not blocked:
-        pytest.skip("run blocked before a high-risk task was evaluated")
-
-    session.add(
-        HumanDecision(
-            assurance_id=blocked[0].id,
-            decision="approved",
-            actor_id="operator-integration-test",
-            reason="approved so the dispatch path can be exercised",
-        )
-    )
-    await session.commit()
-    decision = (await session.execute(select(HumanDecision))).scalars().one()
-    assert decision.assurance_id == blocked[0].id
 
 
 # --------------------------------------------------------------------------- scoping

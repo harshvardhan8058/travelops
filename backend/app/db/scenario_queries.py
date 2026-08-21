@@ -334,6 +334,40 @@ async def load_crew_impact_inputs(
     return affected, pairings, flights
 
 
+async def latest_actual_observation_at(
+    session: AsyncSession, airport_icao: str, *, as_of: datetime
+) -> datetime | None:
+    """Timestamp of the newest ACTUAL observation at or before `as_of`, or None.
+
+    Offered for `sources_fresh`. The gate's freshness check FAILs a future-dated timestamp —
+    correctly, because a broken feed must not read as maximally fresh — and it FAILs an
+    undated one. Both are easy to hand it by accident from this schema:
+
+      * The seeded dataset holds real archived observations on their own true timestamps
+        (2026-08-21) alongside the injected scenario observation (2026-08-20). Asking for the
+        plain latest row returns one dated *after* the moment being assessed.
+      * `weather_observation` also holds TAF rows. A forecast is not an observation, and
+        offering one to a freshness check is the leakage bug `docs/11-data-model.md` names.
+
+    So this filters `is_forecast = false` and bounds by `as_of`, exactly as
+    `load_delay_risk_inputs` does. Returning None is meaningful: no observation existed yet,
+    which the gate must treat as unproven rather than fresh.
+    """
+    observed_at = (
+        await session.execute(
+            select(WeatherObservation.observed_at)
+            .where(
+                WeatherObservation.airport_icao == airport_icao,
+                WeatherObservation.is_forecast.is_(False),
+                WeatherObservation.observed_at <= as_of,
+            )
+            .order_by(WeatherObservation.observed_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _utc(observed_at)
+
+
 async def load_notification_recipients(
     session: AsyncSession, affected_flight_ids: set[int]
 ) -> list[dict[str, Any]]:
