@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Ban,
   Check,
+  Circle,
   CircleDot,
   Clock,
   HelpCircle,
@@ -116,6 +117,18 @@ const STATUS_TONE: Record<string, Tone> = {
 
   pending: 'neutral',
   skipped: 'neutral',
+
+  // Action risk tier. `high` is amber rather than red: the action is not broken, it requires
+  // a human. Red is reserved for something that failed or breached.
+  tier_low: 'neutral',
+  tier_medium: 'info',
+  tier_high: 'warn',
+
+  // Incident severity. Same reasoning: severe conditions are not a failure of the system.
+  low: 'neutral',
+  medium: 'info',
+  high: 'warn',
+  critical: 'crit',
 };
 
 function humanise(value: string): string {
@@ -540,7 +553,12 @@ export function WhyPopover({
         aria-haspopup="dialog"
         aria-controls={open ? panelId : undefined}
         aria-label={`Why: ${derivation.title}`}
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={(event) => {
+          // A popover trigger must not also activate whatever row or card contains it.
+          event.stopPropagation();
+          if (open) close();
+          else setOpen(true);
+        }}
         onKeyDown={(event) => {
           // Defensive: Escape works wherever focus happens to be while the panel is open.
           if (event.key === 'Escape' && open) {
@@ -758,5 +776,61 @@ export function AgeIndicator({ minutes, limit = 60 }: { minutes: number; limit?:
       <Clock size={10} strokeWidth={1.5} aria-hidden />
       {minutes}m
     </span>
+  );
+}
+
+// ---------------------------------------------------------------- StateRail
+/**
+ * The incident state machine, rendered as a rail:
+ * detected → assessing → planning → assuring → executing → resolved.
+ *
+ * Reached states carry a check, the current state carries a filled dot, and unreached states
+ * stay muted — so the position in the workflow survives a projector washing out hue. The
+ * accent marks the current step because that is an active-state cue, not an operational
+ * status; green/amber/red stay reserved for what the operation is actually doing.
+ *
+ * States and their timestamps come from `state_rail` as returned. The rail never assumes the
+ * canonical six: if the API returns a different sequence, that sequence is what renders.
+ */
+export function StateRail({
+  rail,
+  current,
+}: {
+  rail: { state: string; reached_at: string | null }[];
+  current: string;
+}) {
+  return (
+    <ol className="flex flex-wrap items-center gap-1" aria-label="Incident state">
+      {rail.map((step, index) => {
+        const isCurrent = step.state === current;
+        const isReached = step.reached_at !== null;
+        const Icon = isCurrent ? CircleDot : isReached ? Check : Circle;
+
+        return (
+          <li key={step.state} className="flex items-center gap-1">
+            {index > 0 && <span className="h-px w-3 bg-border-default" aria-hidden />}
+            <span
+              {...(isCurrent ? { 'aria-current': 'step' as const } : {})}
+              className={clsx(
+                'inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5',
+                isCurrent
+                  ? 'border-accent-border bg-accent-subtle text-accent'
+                  : isReached
+                    ? 'border-border-subtle bg-inset text-fg-secondary'
+                    : 'border-border-subtle text-fg-muted',
+              )}
+            >
+              <Icon size={11} strokeWidth={1.5} aria-hidden />
+              <span className="text-label uppercase">{step.state.replace(/_/g, ' ')}</span>
+              {step.reached_at && (
+                <MonoValue muted className="text-caption">
+                  {new Date(step.reached_at).toISOString().slice(11, 19)}
+                </MonoValue>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

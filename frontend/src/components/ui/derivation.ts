@@ -24,7 +24,15 @@
  * Owner: Stream D.
  */
 
-import type { AirportConditions, FlightRow, Provenance } from '@/api/types';
+import type {
+  AirportConditions,
+  AssuranceEvaluation,
+  CheckResult,
+  FlightRow,
+  IncidentDetail,
+  Provenance,
+  WeatherObservation,
+} from '@/api/types';
 
 // ---------------------------------------------------------------- contract
 
@@ -190,5 +198,247 @@ export function flightRiskDerivation(flight: FlightRow, origin?: AirportConditio
     evidenceRefs,
     absences,
     caveat: RISK_CAVEAT,
+  };
+}
+
+/**
+ * Risk on the incident workspace. Unlike the flight row, this endpoint DOES return the
+ * contributing factors and the rule version, so the panel can answer "which rule" properly.
+ *
+ * Note what is still declared absent: `evidence.weather` carries `observed_at` but no
+ * observation age, and the age is NOT computed from `now()`. Fixture data is a committed
+ * snapshot, so a browser-computed age would read as hours or days old and be worse than
+ * useless — it would look like a bug in the freshness check.
+ */
+export function incidentRiskDerivation(
+  risk: IncidentDetail['evidence']['risk'],
+  weather: WeatherObservation,
+): Derivation {
+  const inputs: DerivationInput[] = risk.factors.map((factor) => ({
+    label: factor.name.replace(/_/g, ' '),
+    value: [
+      factor.value,
+      factor.threshold ? `threshold ${factor.threshold}` : null,
+      factor.runway ? `runway ${factor.runway}` : null,
+    ]
+      .filter(isPresent)
+      .join(' · '),
+    provenance: weather.provenance,
+  }));
+
+  const absences: DerivationAbsence[] = [];
+  if (weather.observation_age_minutes === undefined) {
+    absences.push({
+      label: 'observation age',
+      detail: 'not recorded on this endpoint — the UI does not compute one from the wall clock',
+    });
+  }
+
+  return {
+    title: `Risk index ${risk.risk_index} · ${risk.risk_level}`,
+    subtitle: weather.airport_icao,
+    inputs,
+    rule: { kind: 'rule', id: 'delay risk rule set', version: risk.rule_version, note: risk.note },
+    when: [{ label: 'observed', at: weather.observed_at }],
+    evidenceRefs: [weather.provenance.source_ref].filter(isPresent),
+    absences,
+    caveat: RISK_CAVEAT,
+  };
+}
+
+/** A count is a derived figure too: it should name what it counted and where. */
+export function entityCountDerivation(
+  label: string,
+  value: number,
+  incident: IncidentDetail,
+): Derivation {
+  return {
+    title: `${label.replace(/_/g, ' ')} · ${value}`,
+    subtitle: incident.reference,
+    inputs: [
+      { label: 'count', value: String(value), provenance: incident.provenance },
+      { label: 'scope', value: `incident ${incident.reference}` },
+    ],
+    rule: {
+      kind: 'config',
+      id: 'affected_entities rollup',
+      note: 'Computed server-side from records. The UI renders the returned total and never sums its own.',
+    },
+    when: [{ label: 'incident opened', at: incident.opened_at }],
+    evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
+    absences: [
+      {
+        label: 'per-entity ids',
+        detail: 'not recorded on this endpoint — only the aggregate count is returned',
+      },
+    ],
+  };
+}
+
+/**
+ * Elapsed time, measured between two RECORDS rather than against the browser clock.
+ *
+ * A wall-clock timer was the obvious implementation and the wrong one. Incident timestamps
+ * are a committed fixture snapshot, so `now() − opened_at` rendered "19h 26m" for a storm the
+ * demo presents as unfolding now: arithmetically correct, and read by any audience as a bug.
+ * Worse, the figure would keep changing for a dataset that cannot change.
+ *
+ * Subtracting the latest recorded timestamp from `opened_at` is both stable and more useful —
+ * it is the workflow's own duration, the same quantity the executive report calls time to
+ * first action. The popover names both endpoints of the subtraction.
+ */
+export function elapsedDerivation(
+  incident: IncidentDetail,
+  latest: { at: string; label: string } | null,
+): Derivation {
+  if (!latest) {
+    return {
+      title: 'Elapsed · not derivable',
+      subtitle: incident.reference,
+      inputs: [{ label: 'opened at', value: incident.opened_at, provenance: incident.provenance }],
+      when: [{ label: 'opened', at: incident.opened_at }],
+      evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
+      absences: [
+        {
+          label: 'latest record',
+          detail:
+            'no state transition or action carries a later timestamp than opened_at, so no duration can be derived from records',
+        },
+      ],
+    };
+  }
+
+  return {
+    title: 'Elapsed between records',
+    subtitle: incident.reference,
+    inputs: [
+      { label: 'from', value: `${incident.opened_at} (opened)`, provenance: incident.provenance },
+      { label: 'to', value: `${latest.at} (${latest.label})`, provenance: incident.provenance },
+    ],
+    rule: {
+      kind: 'formula',
+      formula: 'latest_recorded_timestamp − incident.opened_at',
+      note: 'Derived from records, not from the browser clock. Fixture timestamps are a committed snapshot, so a wall-clock elapsed figure would measure distance from that snapshot rather than the duration of the workflow.',
+    },
+    when: [
+      { label: 'opened', at: incident.opened_at },
+      { label: latest.label, at: latest.at },
+    ],
+    evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
+  };
+}
+
+/** One assurance check: its verdict, the reason code behind it, and the semantics used. */
+export function checkDerivation(check: CheckResult, evaluation: AssuranceEvaluation): Derivation {
+  const inputs: DerivationInput[] = [
+    { label: 'verdict', value: check.state },
+    { label: 'reason code', value: check.reason_code },
+  ];
+  if (check.reason) inputs.push({ label: 'reason', value: check.reason });
+  if (check.tier) inputs.push({ label: 'risk tier', value: check.tier });
+
+  return {
+    title: `${check.name.replace(/_/g, ' ')} · ${check.state}`,
+    subtitle: `${evaluation.action_type} · evaluation ${evaluation.id}`,
+    inputs,
+    rule: {
+      kind: 'config',
+      id: 'decision assurance gate',
+      version: evaluation.config_version,
+      refs: [`hash ${evaluation.config_hash}`],
+      note: 'Freshness limits, risk tiers and warning exceptions come from versioned config. Missing config fails closed.',
+    },
+    when: [{ label: 'evaluated', at: evaluation.evaluated_at }],
+    evidenceRefs: check.evidence_refs ?? [],
+    absences:
+      check.evidence_refs === undefined
+        ? [
+            {
+              label: 'per-check evidence refs',
+              detail: 'not recorded for this check — see the evaluation-level refs below the panel',
+            },
+          ]
+        : undefined,
+  };
+}
+
+/**
+ * The gate decision itself — the most important derivation in the product, because it is
+ * where "all six checks passed but this still blocks" has to be legible.
+ */
+export function decisionDerivation(evaluation: AssuranceEvaluation): Derivation {
+  const failed = evaluation.checks.filter((check) => check.state === 'FAIL');
+  const warned = evaluation.checks.filter((check) => check.state === 'WARN');
+  const inputs: DerivationInput[] = [
+    { label: 'decision', value: evaluation.decision },
+    { label: 'risk tier', value: evaluation.risk_tier },
+    {
+      label: 'checks',
+      value: `${evaluation.checks.filter((c) => c.state === 'PASS').length} pass · ${warned.length} warn · ${failed.length} fail`,
+    },
+    {
+      label: 'blocking',
+      value: evaluation.blocking.length > 0 ? evaluation.blocking.join(', ') : 'none',
+    },
+  ];
+  if (evaluation.warn_permitted_by_config !== undefined) {
+    inputs.push({
+      label: 'warn allowed',
+      value: String(evaluation.warn_permitted_by_config),
+    });
+  }
+
+  return {
+    title: `Gate decision · ${evaluation.decision}`,
+    subtitle: `${evaluation.action_type} · evaluation ${evaluation.id}`,
+    inputs,
+    rule: {
+      kind: 'config',
+      id: 'fail-closed aggregation',
+      version: evaluation.config_version,
+      refs: [`hash ${evaluation.config_hash}`],
+      // The aggregation order is the gate's contract, quoted from docs/18 rather than paraphrased per screen.
+      note: evaluation.note,
+    },
+    when: [{ label: 'evaluated', at: evaluation.evaluated_at }],
+    evidenceRefs: evaluation.evidence_refs,
+    caveat:
+      'A deterministic gate over verifiable facts. No model self-report is used for control flow; high risk blocks even when every check passes.',
+  };
+}
+
+/** An executed side effect: what authorised it, what it cost, and how replay stays safe. */
+export function actionDerivation(
+  action: IncidentDetail['actions'][number],
+  incident: IncidentDetail,
+): Derivation {
+  const inputs: DerivationInput[] = [
+    { label: 'actor', value: action.actor },
+    { label: 'result', value: action.status },
+    { label: 'reason', value: action.reason },
+    {
+      label: 'cost',
+      value: action.cost_inr === null ? 'not applicable' : `INR ${action.cost_inr}`,
+    },
+    { label: 'authorised by', value: `assurance ${action.assurance_id}` },
+    {
+      label: 'human decision',
+      value:
+        action.human_decision_id === null ? 'not required' : `decision ${action.human_decision_id}`,
+    },
+  ];
+
+  return {
+    title: `Action ${action.id} · ${action.status}`,
+    subtitle: `task ${action.plan_task_id} · ${incident.reference}`,
+    inputs,
+    rule: {
+      kind: 'config',
+      id: 'idempotency key',
+      refs: [action.idempotency_key],
+      note: 'Re-running the same task cannot produce a second side effect.',
+    },
+    when: [{ label: 'executed', at: action.executed_at }],
+    evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
   };
 }

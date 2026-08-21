@@ -205,11 +205,81 @@ export interface PlanTaskRow {
   assurance_id: number | null;
 }
 
+/**
+ * The flight summary embedded in an incident. Every field beyond the number is optional
+ * because the UI must render whatever the endpoint actually returns and name what it does
+ * not, rather than assuming a field exists.
+ */
+export interface IncidentFlightSummary {
+  id?: number;
+  flight_number: string;
+  route?: string;
+  scheduled_departure?: string;
+  estimated_departure?: string | null;
+  delay_minutes?: number;
+  block_time_minutes?: number;
+  passengers?: number;
+}
+
+export interface WeatherObservation {
+  airport_icao?: string;
+  observed_at?: string;
+  wind_speed_kt?: number | null;
+  wind_direction_deg?: number | null;
+  visibility_m?: number | null;
+  ceiling_ft?: number | null;
+  precipitation?: string | null;
+  /** Present only when the endpoint records it. The UI never computes an age from now(). */
+  observation_age_minutes?: number;
+  provenance: Provenance;
+}
+
+/** Matched by explainable SQL filtering, not vector similarity. */
+export interface RetrievedPrecedent {
+  incident_reference?: string;
+  matched_on?: string[];
+  outcome?: string;
+  note?: string;
+}
+
+/** A side effect that actually happened, with the authorisation that permitted it. */
+export interface ActionRecord {
+  id: number;
+  plan_task_id: number;
+  assurance_id: number;
+  human_decision_id: number | null;
+  actor: string;
+  status: string;
+  reason: string;
+  cost_inr: number | null;
+  idempotency_key: string;
+  executed_at: string | null;
+  provenance_kind?: ProvenanceKind;
+}
+
+/**
+ * Append-only, unique per evaluation (docs/11-data-model.md). Correcting a decision requires
+ * a new evaluation rather than mutating history, so the UI never edits one of these.
+ */
+export interface HumanDecision {
+  assurance_id: number;
+  decision: 'approved' | 'rejected';
+  actor_id: string;
+  reason: string;
+  decided_at: string;
+  /**
+   * True when the decision exists only in this browser session because fixtures are being
+   * served and no endpoint accepted the write. Rendered explicitly: a demo must never imply
+   * an audit record that does not exist.
+   */
+  persisted: boolean;
+}
+
 export interface IncidentDetail {
   id: number;
   reference: string;
   group_reference: string | null;
-  flight: Record<string, unknown>;
+  flight: IncidentFlightSummary;
   trigger_type: string;
   severity: string;
   state: IncidentState;
@@ -221,10 +291,11 @@ export interface IncidentDetail {
       risk_level: RiskLevel;
       rule_version: string;
       factors: RiskFactor[];
+      note?: string;
     };
-    weather: Record<string, unknown> & { provenance: Provenance };
+    weather: WeatherObservation;
     affected_entities: Record<string, number>;
-    retrieved_precedent?: Record<string, unknown> | null;
+    retrieved_precedent?: RetrievedPrecedent | null;
   };
   plan: {
     id: number;
@@ -233,9 +304,11 @@ export interface IncidentDetail {
     prompt_version: string | null;
     /** Diagnostic metadata only. Never drives a decision. */
     model_self_report: number | null;
+    generated_at?: string;
+    rationale?: string;
     tasks: PlanTaskRow[];
   };
-  actions: Record<string, unknown>[];
+  actions: ActionRecord[];
   provenance: Provenance;
 }
 

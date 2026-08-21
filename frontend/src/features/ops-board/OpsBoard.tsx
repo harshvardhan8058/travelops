@@ -8,6 +8,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate, Link } from 'react-router-dom';
+import { clsx } from 'clsx';
 
 import { api } from '@/api/client';
 import type { AirportConditions, FlightRow } from '@/api/types';
@@ -84,6 +86,7 @@ function FlightBoard({
   network: AirportConditions[];
 }) {
   const originByIcao = new Map(network.map((airport) => [airport.airport_icao, airport]));
+  const navigate = useNavigate();
 
   if (flights.length === 0) {
     return (
@@ -116,10 +119,33 @@ function FlightBoard({
           {flights.map((flight) => (
             <tr
               key={flight.id}
-              className="h-row border-b border-border-subtle transition-colors duration-hover ease-out hover:bg-raised"
+              /*
+               * First leg of the demo path: a row with an open incident opens its recovery
+               * workspace. Mouse convenience only — the flight number and incident cells are
+               * real links, which is what makes the hop keyboard reachable. The WhyPopover
+               * trigger stops its own click, so opening a derivation never navigates.
+               */
+              onClick={
+                flight.incident_reference
+                  ? () => navigate(`/incidents/${flight.incident_reference}`)
+                  : undefined
+              }
+              className={clsx(
+                'h-row border-b border-border-subtle transition-colors duration-hover ease-out hover:bg-raised',
+                flight.incident_reference && 'cursor-pointer',
+              )}
             >
               <td className="px-3">
-                <MonoValue>{flight.flight_number}</MonoValue>
+                {flight.incident_reference ? (
+                  <Link
+                    to={`/incidents/${flight.incident_reference}`}
+                    className="rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    <MonoValue className="text-accent">{flight.flight_number}</MonoValue>
+                  </Link>
+                ) : (
+                  <MonoValue>{flight.flight_number}</MonoValue>
+                )}
               </td>
               <td className="px-3">
                 <MonoValue muted>
@@ -167,7 +193,12 @@ function FlightBoard({
               </td>
               <td className="px-3">
                 {flight.incident_reference ? (
-                  <MonoValue className="text-accent">{flight.incident_reference}</MonoValue>
+                  <Link
+                    to={`/incidents/${flight.incident_reference}`}
+                    className="rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    <MonoValue className="text-accent">{flight.incident_reference}</MonoValue>
+                  </Link>
                 ) : (
                   <MonoValue muted>—</MonoValue>
                 )}
