@@ -4,9 +4,12 @@
  * Rules enforced here so they cannot drift:
  *   - every status renders through StateBadge (icon + label + colour, never colour alone)
  *   - every operational number renders through MonoValue with tabular figures
+ *   - every derived number explains itself through WhyPopover
  *   - no component contains a colour literal; all colour comes from tokens
  *
- * Owner: Stream E. Stream F imports these and must not duplicate them.
+ * Owner: Stream D, which owns all of frontend/. Features import these and must not
+ * duplicate them: a local variant is how two screens end up disagreeing about what amber
+ * means.
  */
 
 import {
@@ -16,14 +19,20 @@ import {
   CircleDot,
   Clock,
   HelpCircle,
+  Info,
   Loader2,
+  MinusCircle,
   Pause,
   X,
 } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 
 import type { CheckState, ProvenanceKind, RiskLevel } from '@/api/types';
+import type { Derivation, DerivationRule, DerivationTime } from './derivation';
+import { useAnchoredPosition } from './useAnchoredPosition';
 
 // ---------------------------------------------------------------- MonoValue
 /**
@@ -88,6 +97,7 @@ const STATUS_TONE: Record<string, Tone> = {
   execute_flagged: 'warn',
   WARN: 'warn',
   degraded: 'warn',
+  stale: 'warn',
 
   cancelled: 'crit',
   failed: 'crit',
@@ -241,23 +251,399 @@ export function ProvenanceDot({
 }
 
 // ---------------------------------------------------------------- WhyPopover
+/** Never silently drops an API value: an unparseable timestamp is shown as returned. */
+function formatUtc(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  const text = parsed.toISOString();
+  return `${text.slice(0, 10)} ${text.slice(11, 19)}Z`;
+}
+
 /**
- * The highest-trust, cheapest feature in the design: every derived number can explain
- * where it came from. Wave 0 ships the accessible title-based version; Stream E upgrades
- * it to a positioned popover.
+ * An absence, stated. Rendering this instead of hiding the section is what turns a
+ * data-contract gap into a visible request to the stream that owns the endpoint.
  */
-export function WhyPopover({ children, derivation }: { children: ReactNode; derivation: string }) {
+function NotRecorded({ children = 'not recorded' }: { children?: ReactNode }) {
   return (
-    <span
-      className="inline-flex items-center gap-1 border-b border-dashed border-border-strong"
-      title={derivation}
-      tabIndex={0}
-      role="note"
-      aria-label={`Derivation: ${derivation}`}
-    >
-      {children}
-      <HelpCircle size={11} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
+    <span className="inline-flex items-start gap-1 text-caption text-fg-muted">
+      <MinusCircle size={11} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
+      <span>{children}</span>
     </span>
+  );
+}
+
+function DerivationSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="border-t border-border-subtle px-3 py-2 first:border-t-0">
+      <h3 className="mb-1 text-label uppercase text-fg-muted">{label}</h3>
+      {children}
+    </div>
+  );
+}
+
+function DerivationRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 py-0.5">
+      <span className="w-[86px] shrink-0 text-caption uppercase text-fg-muted">{label}</span>
+      <span className="min-w-0 flex-1 text-body text-fg">{children}</span>
+    </div>
+  );
+}
+
+function RuleSection({ rule }: { rule?: DerivationRule }) {
+  const hasBody = rule && (rule.id || rule.formula || rule.version || rule.refs?.length);
+
+  return (
+    <DerivationSection label="Rule or formula">
+      {!rule || !hasBody ? (
+        <NotRecorded />
+      ) : (
+        <>
+          <DerivationRow label="kind">{rule.kind}</DerivationRow>
+          {rule.id && (
+            <DerivationRow label="id">
+              <MonoValue className="break-all">{rule.id}</MonoValue>
+            </DerivationRow>
+          )}
+          {rule.version && (
+            <DerivationRow label="version">
+              <MonoValue className="break-all">{rule.version}</MonoValue>
+            </DerivationRow>
+          )}
+          {/* The arithmetic actually applied, verbatim. A judge can check it by hand. */}
+          {rule.formula && (
+            <DerivationRow label="formula">
+              <MonoValue className="break-all">{rule.formula}</MonoValue>
+            </DerivationRow>
+          )}
+          {rule.refs && rule.refs.length > 0 && (
+            <DerivationRow label="refs">
+              <span className="flex flex-col gap-0.5">
+                {rule.refs.map((ref) => (
+                  <MonoValue key={ref} muted className="break-all">
+                    {ref}
+                  </MonoValue>
+                ))}
+              </span>
+            </DerivationRow>
+          )}
+          {rule.note && <p className="mt-1 text-caption text-fg-muted">{rule.note}</p>}
+        </>
+      )}
+    </DerivationSection>
+  );
+}
+
+function TimeSection({ when }: { when?: DerivationTime[] }) {
+  return (
+    <DerivationSection label="When">
+      {!when || when.length === 0 ? (
+        <NotRecorded />
+      ) : (
+        when.map((entry) => (
+          <DerivationRow key={entry.label} label={entry.label}>
+            <span className="flex flex-wrap items-center gap-1.5">
+              {formatUtc(entry.at) ? (
+                <MonoValue muted>{formatUtc(entry.at)}</MonoValue>
+              ) : (
+                <NotRecorded />
+              )}
+              {typeof entry.ageMinutes === 'number' && <AgeIndicator minutes={entry.ageMinutes} />}
+              {/* Icon + word + colour: the API's own freshness verdict, never recomputed. */}
+              {entry.isStale && <StateBadge status="stale" label="stale" />}
+            </span>
+          </DerivationRow>
+        ))
+      )}
+    </DerivationSection>
+  );
+}
+
+function DerivationBody({ derivation }: { derivation: Derivation }) {
+  const { inputs, rule, when, evidenceRefs, absences, caveat } = derivation;
+
+  return (
+    <>
+      <DerivationSection label="Inputs">
+        {!inputs || inputs.length === 0 ? (
+          <NotRecorded />
+        ) : (
+          inputs.map((input) => (
+            <DerivationRow key={input.label} label={input.label}>
+              <span className="flex flex-wrap items-center gap-1.5">
+                <MonoValue className="break-all">{input.value}</MonoValue>
+                {input.provenance && (
+                  <>
+                    <ProvenanceDot
+                      kind={input.provenance.kind}
+                      provider={input.provenance.provider}
+                      sourceRef={input.provenance.source_ref}
+                      isStale={input.provenance.is_stale}
+                    />
+                    <span className="text-caption text-fg-muted">
+                      {input.provenance.kind} · {input.provenance.provider}
+                    </span>
+                  </>
+                )}
+              </span>
+            </DerivationRow>
+          ))
+        )}
+      </DerivationSection>
+
+      <RuleSection rule={rule} />
+      <TimeSection when={when} />
+
+      <DerivationSection label="Evidence">
+        {!evidenceRefs || evidenceRefs.length === 0 ? (
+          <NotRecorded>no evidence refs returned</NotRecorded>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {evidenceRefs.map((ref) => (
+              <li key={ref}>
+                <MonoValue muted className="break-all">
+                  {ref}
+                </MonoValue>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DerivationSection>
+
+      {/* Named gaps in the endpoint's contract. Visible, so nobody fills one in by guessing. */}
+      {absences && absences.length > 0 && (
+        <DerivationSection label="Not recorded">
+          <ul className="flex flex-col gap-1">
+            {absences.map((absence) => (
+              <li key={absence.label}>
+                <NotRecorded>
+                  <MonoValue muted>{absence.label}</MonoValue> — {absence.detail}
+                </NotRecorded>
+              </li>
+            ))}
+          </ul>
+        </DerivationSection>
+      )}
+
+      {caveat && (
+        <div className="flex items-start gap-1.5 border-t border-border-subtle bg-inset px-3 py-2">
+          <Info size={12} strokeWidth={1.5} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden />
+          <p className="text-caption text-fg-muted">{caveat}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+const TABBABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function tabbablesIn(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(TABBABLE)).filter(
+    (element) => !element.hasAttribute('disabled') && element.getClientRects().length > 0,
+  );
+}
+
+/**
+ * "Why?" on every number — the highest-trust, cheapest feature in the design.
+ *
+ * Answers the three questions docs/27 requires of every figure: where the input came from,
+ * which rule or formula produced it, and when. Content comes from an adapter in
+ * derivation.ts, never from prose written at the call site.
+ *
+ * Interaction model:
+ *   - the trigger is a real <button>, so it is keyboard reachable and announces its state.
+ *     Children must therefore be PRESENTATIONAL — passing an interactive element would nest
+ *     buttons, which is invalid HTML and breaks tab order. RiskChip goes in without onClick.
+ *   - no `title` attribute: a native tooltip alongside a popover renders the same content
+ *     twice, in two places, with different styling.
+ *   - Esc closes and returns focus to the trigger; outside click and tabbing out also close.
+ *   - the panel is portalled and fixed-positioned so table and rail scroll containers cannot
+ *     clip it. Elevation is a 1px border, not a shadow, and there is no backdrop blur — the
+ *     command palette is the only blurred layer in the product.
+ */
+export function WhyPopover({
+  children,
+  derivation,
+  className,
+}: {
+  children: ReactNode;
+  derivation: Derivation;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [entered, setEntered] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+  const position = useAnchoredPosition({ anchorRef: triggerRef, floatingRef: panelRef, open });
+
+  const hasFocusedRef = useRef(false);
+
+  const close = useCallback((returnFocus = true) => {
+    setOpen(false);
+    setEntered(false);
+    if (returnFocus) triggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!open) hasFocusedRef.current = false;
+  }, [open]);
+
+  /*
+   * Move focus into the panel so Tab reaches its content and Esc has a home.
+   *
+   * This waits for `position`, and that is not incidental. Before measurement the panel is
+   * `visibility: hidden`, and focusing a hidden element is a silent no-op — the browser
+   * leaves focus on the trigger. React can flush this passive effect before the layout
+   * effect's measurement has committed, so focusing on `open` alone loses the focus move
+   * and, with it, Escape. Verified headlessly: without the `position` gate,
+   * `document.activeElement` stayed on the trigger and Escape did nothing.
+   *
+   * The ref keeps it to once per open: `position` also changes on scroll and resize, and
+   * refocusing then would yank focus off whatever the user had tabbed to.
+   */
+  useEffect(() => {
+    if (!open || !position || hasFocusedRef.current) return;
+    hasFocusedRef.current = true;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [open, position]);
+
+  // One frame late, so the transition has a start state to move from. prefers-reduced-motion
+  // is honoured globally in tokens.css by collapsing transition-duration, so this becomes an
+  // instant appearance rather than a special case here.
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      // Do not pull focus back to the trigger: the user is clicking somewhere else.
+      close(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [open, close]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={open ? panelId : undefined}
+        aria-label={`Why: ${derivation.title}`}
+        onClick={() => (open ? close() : setOpen(true))}
+        onKeyDown={(event) => {
+          // Defensive: Escape works wherever focus happens to be while the panel is open.
+          if (event.key === 'Escape' && open) {
+            event.stopPropagation();
+            close();
+          }
+        }}
+        className={clsx(
+          'inline-flex items-center gap-1 border-b border-dashed border-border-strong text-left',
+          'transition-colors duration-hover ease-out hover:border-accent-border',
+          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+          open && 'border-accent-border',
+          className,
+        )}
+      >
+        {children}
+        <HelpCircle
+          size={11}
+          strokeWidth={1.5}
+          className={clsx('shrink-0', open ? 'text-accent' : 'text-fg-muted')}
+          aria-hidden
+        />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            id={panelId}
+            role="dialog"
+            aria-label={`Derivation: ${derivation.title}`}
+            tabIndex={-1}
+            style={
+              position
+                ? { top: position.top, left: position.left, maxHeight: position.maxHeight }
+                : // Measured in a layout effect before paint, so this is never visible.
+                  { top: 0, left: 0, visibility: 'hidden' }
+            }
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                close();
+                return;
+              }
+              if (event.key !== 'Tab') return;
+
+              const panel = panelRef.current;
+              if (!panel) return;
+              const stops = tabbablesIn(panel);
+              const active = document.activeElement;
+              const leavingForward = !event.shiftKey && active === stops[stops.length - 1];
+              const leavingBackward = event.shiftKey && (active === panel || active === stops[0]);
+
+              if (stops.length === 0 || leavingForward || leavingBackward) {
+                /*
+                 * The panel is portalled to the end of <body>, so the browser's next tab
+                 * stop is outside the document. Hand focus back to the trigger instead: the
+                 * next Tab continues from the row the user was on, and focus never leaves
+                 * the page.
+                 */
+                event.preventDefault();
+                close();
+              }
+            }}
+            onBlur={(event) => {
+              const next = event.relatedTarget as Node | null;
+              // A null relatedTarget means the window lost focus, not that the user left the
+              // popover — closing then would fight with alt-tab.
+              if (!next) return;
+              if (panelRef.current?.contains(next) || triggerRef.current?.contains(next)) return;
+              close(false);
+            }}
+            className={clsx(
+              'fixed z-50 w-[340px] overflow-y-auto rounded border border-border bg-raised outline-none',
+              'transition-[opacity,transform] duration-panel ease-out',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+              entered ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0',
+            )}
+          >
+            <header className="flex items-start gap-2 border-b border-border-subtle bg-inset px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-body text-fg">{derivation.title}</p>
+                {derivation.subtitle && (
+                  <MonoValue muted className="break-all">
+                    {derivation.subtitle}
+                  </MonoValue>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => close()}
+                aria-label="Close derivation"
+                className="shrink-0 rounded-sm border border-border-subtle p-0.5 text-fg-muted transition-colors duration-hover ease-out hover:border-accent-border hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                <X size={12} strokeWidth={1.5} aria-hidden />
+              </button>
+            </header>
+
+            <DerivationBody derivation={derivation} />
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
