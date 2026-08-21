@@ -1,0 +1,9 @@
+{
+  "status": "ready",
+  "dependencies": {
+    "database": { "status": "up" },
+    "redis": { "status": "up" }
+  },
+  "assurance": { "config_present": true, "workflow_executable": true },
+  "degradations": []
+}

@@ -1,0 +1,110 @@
+{
+  "generated_by": "wave0-fixture",
+  "note": "Figures come from the MoCA Passenger Charter (Feb 2019) pack. Stream B replaces the source, not the shape.",
+  "policy_mode": "charter",
+  "pack": {
+    "id": "in-moca-charter-2019",
+    "version": "2019.02",
+    "status": "official_guidance_dated",
+    "verified_mode_eligible": false,
+    "ui_label": "MoCA PASSENGER CHARTER · FEB 2019 · PENDING CAR VERIFICATION",
+    "authority": "Ministry of Civil Aviation, Government of India",
+    "document": "Passenger Charter — Know your rights when you fly",
+    "pack_hash": "c41a7e9b28d5f603",
+    "source_hash": "PENDING_ARCHIVAL"
+  },
+  "applicability": [
+    {
+      "pack_id": "in-moca-charter-2019",
+      "pack_version": "2019.02",
+      "status": "applicable",
+      "basis": { "departure_country": "IN", "carrier_country": "IN" },
+      "required_facts": ["itinerary", "operating_carrier", "event", "notice", "cause_evidence"],
+      "missing_facts": [],
+      "resolver_version": "resolver-v1"
+    }
+  ],
+  "event": {
+    "type": "delay",
+    "delay_minutes": 420,
+    "notice_minutes": 1500,
+    "block_time_minutes": 165,
+    "scheduled_departure_local": "21:10",
+    "is_domestic": true
+  },
+  "entitlements": [
+    {
+      "type": "cash",
+      "amount_inr": 0,
+      "currency": "INR",
+      "outcome": "not_owed",
+      "reason_codes": ["NO_DELAY_COMPENSATION_PROVISION", "BEYOND_CARRIER_CONTROL"],
+      "explanation": "This instrument provides no monetary compensation for delay. Cash arises only for cancellation and denied boarding. The beyond-carrier-control exemption applies independently on the evidence.",
+      "rules_fired": ["delay.no_cash_compensation", "exemption.atc_weather_security_delay"],
+      "source_clause_refs": ["charter:p2:flight-delays", "charter:p9:force-majeure:B"]
+    },
+    {
+      "type": "meals_refreshments",
+      "outcome": "owed",
+      "cash": false,
+      "explanation": "Block time 165 minutes falls in the over-2½-to-5-hour band, so the three-hour threshold applies and the 420-minute delay exceeds it.",
+      "rules_fired": ["delay.care.meals.block_150_to_300"],
+      "source_clause_refs": ["charter:p2:flight-delays:scenario-1-B"],
+      "input_facts": { "block_time_minutes": 165, "delay_minutes": 420, "threshold_minutes": 180 }
+    },
+    {
+      "type": "hotel_accommodation",
+      "outcome": "owed",
+      "cash": false,
+      "explanation": "Delay communicated more than 24 hours ahead, exceeds six hours, and the 21:10 scheduled departure falls inside the 20:00–03:00 window.",
+      "rules_fired": ["delay.care.hotel.night_window"],
+      "source_clause_refs": ["charter:p2:flight-delays:scenario-3"],
+      "input_facts": {
+        "delay_minutes": 420,
+        "notice_minutes": 1500,
+        "scheduled_departure_local": "21:10",
+        "night_window": "20:00-03:00"
+      }
+    },
+    {
+      "type": "passenger_choice",
+      "outcome": "owed",
+      "cash": false,
+      "options": ["alternate_flight_within_6h", "full_refund"],
+      "explanation": "Domestic flight expected to be delayed beyond six hours.",
+      "rules_fired": ["delay.domestic.over_6h.alternate_or_refund"],
+      "source_clause_refs": ["charter:p2:flight-delays:scenario-2-B"]
+    }
+  ],
+  "cause_assessment": {
+    "operational_cause": "meteorological",
+    "clearly_attributable": true,
+    "external_to_carrier": true,
+    "unavoidable_despite_reasonable_measures": true,
+    "evidence_refs": ["fixture:bengaluru_storm:weather:VOBL", "ops_event:VOBL:2026-08-20"],
+    "note": "trigger_type is operational context, never a legal verdict. These facts are required."
+  },
+  "cause_comparison": {
+    "enabled": true,
+    "description": "Same incident recomputed as a cancellation caused by crew rostering.",
+    "alternative": {
+      "event_type": "cancellation",
+      "operational_cause": "crew_rostering",
+      "external_to_carrier": false,
+      "cash_inr": 5000,
+      "formula_used": "least_of(cap 7500, basic_fare 4200 + fuel 800) = 5000",
+      "rules_fired": ["cancellation.compensation.block_60_to_120"],
+      "source_clause_refs": ["charter:p3:flight-cancellation:scenario-2-B"],
+      "note": "Internal cause, so no exemption applies and cash becomes payable."
+    }
+  },
+  "excluded_rules": [
+    {
+      "rule_key": "booking.free_cancel_or_amend_within_24h",
+      "status": "superseded_suspected",
+      "reason": "Reported February 2026 amendment to CAR Series M Part II moved the window from 24 to 48 hours.",
+      "evaluated": false
+    }
+  ],
+  "disclaimer": "Figures are from an official but dated publication and are not confirmed against the current CAR revision. Verified mode is blocked until the primary source and SME sign-off exist."
+}

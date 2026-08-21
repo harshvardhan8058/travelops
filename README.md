@@ -12,7 +12,7 @@ AI** (Registration ID 201) for the Coforge TechCon 2026 Hackathon.
 | Team | SkyForge AI |
 | Industry | Travel Transport Hospitality (TTH) → Airlines Operations |
 | Theme | Engineering the Autonomous Enterprise |
-| Current repository status | Design, implementation contracts and one encoded policy pack; application code not started |
+| Current repository status | Wave 0 bootstrap complete: runnable scaffold, schema, contracts, fixtures and UI shell |
 | Submitted deck | Frozen; see [`docs/17-presentation-prompt.md`](docs/17-presentation-prompt.md) |
 | Next build target | Stage 2 working deterministic vertical slice |
 
@@ -57,6 +57,37 @@ Bengaluru storm fixture
 These are fixed-seed fixture targets, not production statistics. Weather can be live; flight status,
 passengers, hotels, crew, transport and bulk notifications are simulated or synthetic and visibly
 labelled.
+
+## Run it
+
+```bash
+make doctor          # check the toolchain and required files first
+make env             # create .env from .env.example
+make up              # build and start api + postgres + redis + web
+make migrate         # apply the schema
+```
+
+Then open <http://127.0.0.1:8000/docs> for the API and <http://127.0.0.1:5173> for the console.
+
+Ports bind to `127.0.0.1` only. PostgreSQL and Redis are not published to the host at all —
+use `make db-shell`.
+
+**The frontend runs with no backend.** `VITE_USE_FIXTURES=true` serves the committed fixtures in
+`fixtures/api/`, so UI work never waits on an endpoint:
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+Useful checks:
+
+| Command | Purpose |
+| --- | --- |
+| `make test` | Backend unit and contract tests |
+| `make lint` | Ruff and ESLint |
+| `make openapi` | Regenerate `docs/openapi.json` |
+| `make verify-docs` | Confirm every relative doc link resolves |
+| `cd frontend && npm run tokens:check` | Fail the build on a colour literal or banned hue |
 
 ## Start here
 

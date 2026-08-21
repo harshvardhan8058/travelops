@@ -1,0 +1,54 @@
+{
+  "generated_by": "wave0-fixture",
+  "incident_reference": "INC-2026-0820-VOBL-01",
+  "entries": [
+    {
+      "id": 1, "occurred_at": "2026-08-20T15:36:00Z", "stage": "ingest", "actor": "provider",
+      "actor_kind": "provider", "event_type": "WEATHER_OBSERVED",
+      "summary": "VOBL: wind 24kt, visibility 800m, ceiling 900ft",
+      "detail": { "provenance": { "kind": "fixture", "source_ref": "fixture:bengaluru_storm:weather:VOBL" } }
+    },
+    {
+      "id": 2, "occurred_at": "2026-08-20T15:36:08Z", "stage": "predict", "actor": "delay_risk_service",
+      "actor_kind": "service", "event_type": "HIGH_RISK_DELAY",
+      "summary": "Risk index 87 (severe) crossed threshold 75",
+      "detail": { "rule_version": "delay-risk-v1", "factors": ["visibility_below_threshold", "crosswind_elevated"] }
+    },
+    {
+      "id": 3, "occurred_at": "2026-08-20T15:36:12Z", "stage": "detect", "actor": "orchestrator",
+      "actor_kind": "orchestrator", "event_type": "INCIDENT_OPENED",
+      "summary": "Opened INC-2026-0820-VOBL-01 for 6E 2134",
+      "detail": { "deduplicated": true, "note": "Partial unique index prevents a second active incident" }
+    },
+    {
+      "id": 4, "occurred_at": "2026-08-20T15:36:44Z", "stage": "plan", "actor": "orchestrator",
+      "actor_kind": "orchestrator", "event_type": "PLAN_PROPOSED",
+      "summary": "5 tasks proposed by the deterministic playbook",
+      "detail": { "generator": "fallback-playbook", "model_self_report": null }
+    },
+    {
+      "id": 5, "occurred_at": "2026-08-20T15:37:02Z", "stage": "assure", "actor": "assurance_gate",
+      "actor_kind": "orchestrator", "event_type": "ASSURANCE_EVALUATED",
+      "summary": "check_connections → execute (all six checks passed)",
+      "detail": { "evaluation_id": 101, "config_version": "assurance-v1", "config_hash": "9f2c4b71d3e85a06" }
+    },
+    {
+      "id": 6, "occurred_at": "2026-08-20T15:37:04Z", "stage": "assure", "actor": "assurance_gate",
+      "actor_kind": "orchestrator", "event_type": "ASSURANCE_EVALUATED",
+      "summary": "find_hotel_options → execute_flagged (stale source warning permitted by config)",
+      "detail": { "evaluation_id": 102, "warn": "sources_fresh: METAR VABB 71m old" }
+    },
+    {
+      "id": 7, "occurred_at": "2026-08-20T15:37:09Z", "stage": "assure", "actor": "assurance_gate",
+      "actor_kind": "orchestrator", "event_type": "ASSURANCE_EVALUATED",
+      "summary": "notify_passengers → needs_human (high risk, bulk external effect)",
+      "detail": { "evaluation_id": 103, "blocking": ["action_risk"] }
+    },
+    {
+      "id": 8, "occurred_at": "2026-08-20T15:37:11Z", "stage": "assure", "actor": "assurance_gate",
+      "actor_kind": "orchestrator", "event_type": "ASSURANCE_EVALUATED",
+      "summary": "evaluate_entitlements → needs_human (missing reasonable-measures evidence)",
+      "detail": { "evaluation_id": 104, "blocking": ["evidence_complete", "action_risk"] }
+    }
+  ]
+}

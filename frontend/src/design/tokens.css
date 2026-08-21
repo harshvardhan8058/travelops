@@ -1,0 +1,110 @@
+/* TravelOps AI — design tokens.
+ *
+ * The single source of colour, radius and motion. No component may contain a colour
+ * literal: one grep for "#" under src/ should return only this file.
+ *
+ * Direction: an airline operations console, not an AI landing page. Near-monochrome
+ * graphite, one non-status accent, and green/amber/red reserved EXCLUSIVELY for
+ * operational state.
+ *
+ * Banned outright: purple, violet, indigo, gradient text, glows, aurora blobs,
+ * glassmorphism on cards, emoji icons. That palette is the default AI-demo look and reads
+ * as a template.
+ *
+ * Why the accent sits outside the status ramp: if the brand colour were amber, an amber
+ * button would be indistinguishable from an amber warning. Colour must carry meaning.
+ *
+ * Owner: Stream E. Streams F and beyond consume these variables.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- base */
+  --bg-base: #0b0f14; /* app background */
+  --bg-surface: #111821; /* cards, panels */
+  --bg-raised: #18212c; /* popovers, hovered rows */
+  --bg-inset: #080b0f; /* wells, table headers, code */
+
+  --border-subtle: #1e2833;
+  --border-default: #283542;
+  --border-strong: #38485a;
+
+  --fg-primary: #e7edf4;
+  --fg-secondary: #9aa8b6;
+  --fg-muted: #66757f; /* 4.6:1 on --bg-base. This is the contrast floor. */
+  --fg-inverse: #0b0f14;
+
+  /* ------------------------------------------------- accent: instrument cyan */
+  /* Brand, focus and active only. NEVER used to indicate status. */
+  --accent: #3fc9de;
+  --accent-hover: #5cd8ea;
+  --accent-pressed: #2aafc4;
+  --accent-subtle: rgba(63, 201, 222, 0.12);
+  --accent-border: rgba(63, 201, 222, 0.32);
+
+  /* ------------------------------------------- semantic: operational state ONLY */
+  --state-ok: #3dd68c; /* on time, resolved, executed, PASS */
+  --state-warn: #f5a623; /* at risk, degraded, awaiting approval, WARN */
+  --state-crit: #f2555a; /* disrupted, breached, failed, FAIL */
+  --state-info: #5b9df9; /* informational, scheduled, simulated */
+  --state-neutral: #66757f; /* cancelled, n/a, skipped */
+
+  --state-ok-bg: rgba(61, 214, 140, 0.12);
+  --state-warn-bg: rgba(245, 166, 35, 0.12);
+  --state-crit-bg: rgba(242, 85, 90, 0.12);
+  --state-info-bg: rgba(91, 157, 249, 0.12);
+  --state-neutral-bg: rgba(102, 117, 127, 0.12);
+
+  --focus-ring: #3fc9de;
+
+  /* ---------------------------------------------------------------- geometry */
+  --radius: 6px; /* ops UI is precise, not pillowy */
+  --radius-sm: 4px;
+  --rail-width: 56px;
+  --topbar-height: 52px;
+  --timeline-width: 380px;
+  --row-height: 34px; /* dense: controllers scan hundreds of rows */
+
+  /* ---------------------------------------------------------------- motion */
+  /* Confidence is calm. No bouncy springs, nothing loops, nothing pulses. */
+  --motion-hover: 100ms;
+  --motion-panel: 180ms;
+  --motion-enter: 220ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Honour reduced-motion by dropping to opacity only. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------- shadcn bridge
+ * shadcn/ui reads these HSL triples. We OVERRIDE them rather than accepting defaults,
+ * because a copied snippet or component default is exactly how violet creeps back in.
+ */
+:root {
+  --background: 210 26% 6%;
+  --foreground: 210 33% 93%;
+  --card: 210 30% 10%;
+  --card-foreground: 210 33% 93%;
+  --popover: 210 27% 13%;
+  --popover-foreground: 210 33% 93%;
+  --primary: 187 71% 56%;
+  --primary-foreground: 210 26% 6%;
+  --secondary: 210 25% 16%;
+  --secondary-foreground: 210 33% 93%;
+  --muted: 210 25% 16%;
+  --muted-foreground: 206 10% 51%;
+  --accent-hsl: 187 71% 56%;
+  --accent-foreground: 210 26% 6%;
+  --destructive: 358 85% 64%;
+  --destructive-foreground: 210 33% 93%;
+  --border: 210 27% 16%;
+  --input: 210 27% 16%;
+  --ring: 187 71% 56%;
+}

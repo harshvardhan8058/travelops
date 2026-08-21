@@ -1,0 +1,112 @@
+{
+  "generated_by": "wave0-fixture",
+  "note": "Stream B replaces the source. The shape, the six check names and their fixed order are contractual.",
+  "config_version": "assurance-v1",
+  "config_hash": "9f2c4b71d3e85a06",
+  "evaluations": [
+    {
+      "id": 101,
+      "plan_task_id": 1,
+      "action_type": "check_connections",
+      "decision": "execute",
+      "risk_tier": "low",
+      "evaluated_at": "2026-08-20T15:37:02Z",
+      "checks": [
+        { "name": "evidence_complete", "state": "PASS", "reason_code": "OK" },
+        { "name": "sources_fresh", "state": "PASS", "reason_code": "OK" },
+        { "name": "entities_valid", "state": "PASS", "reason_code": "OK" },
+        { "name": "policy_compliant", "state": "PASS", "reason_code": "OK" },
+        { "name": "no_conflicts", "state": "PASS", "reason_code": "OK" },
+        { "name": "action_risk", "state": "PASS", "reason_code": "OK", "tier": "low" }
+      ],
+      "blocking": [],
+      "evidence_refs": ["fixture:bengaluru_storm:weather:VOBL", "flight:1"],
+      "config_version": "assurance-v1",
+      "config_hash": "9f2c4b71d3e85a06"
+    },
+    {
+      "id": 102,
+      "plan_task_id": 2,
+      "action_type": "find_hotel_options",
+      "decision": "execute_flagged",
+      "risk_tier": "low",
+      "evaluated_at": "2026-08-20T15:37:04Z",
+      "checks": [
+        { "name": "evidence_complete", "state": "PASS", "reason_code": "OK" },
+        {
+          "name": "sources_fresh",
+          "state": "WARN",
+          "reason_code": "SOURCE_STALE",
+          "reason": "METAR VABB 71m old, max 60m",
+          "evidence_refs": ["fixture:bengaluru_storm:weather:VABB"]
+        },
+        { "name": "entities_valid", "state": "PASS", "reason_code": "OK" },
+        { "name": "policy_compliant", "state": "PASS", "reason_code": "OK" },
+        { "name": "no_conflicts", "state": "PASS", "reason_code": "OK" },
+        { "name": "action_risk", "state": "PASS", "reason_code": "OK", "tier": "low" }
+      ],
+      "blocking": [],
+      "warn_permitted_by_config": true,
+      "evidence_refs": ["fixture:bengaluru_storm:weather:VABB"],
+      "config_version": "assurance-v1",
+      "config_hash": "9f2c4b71d3e85a06"
+    },
+    {
+      "id": 103,
+      "plan_task_id": 4,
+      "action_type": "notify_passengers",
+      "decision": "needs_human",
+      "risk_tier": "high",
+      "evaluated_at": "2026-08-20T15:37:09Z",
+      "checks": [
+        { "name": "evidence_complete", "state": "PASS", "reason_code": "OK" },
+        { "name": "sources_fresh", "state": "PASS", "reason_code": "OK" },
+        { "name": "entities_valid", "state": "PASS", "reason_code": "OK" },
+        { "name": "policy_compliant", "state": "PASS", "reason_code": "OK" },
+        { "name": "no_conflicts", "state": "PASS", "reason_code": "OK" },
+        {
+          "name": "action_risk",
+          "state": "PASS",
+          "reason_code": "HUMAN_APPROVAL_REQUIRED",
+          "reason": "bulk external effect, 174 recipients, cannot be retracted once sent",
+          "tier": "high"
+        }
+      ],
+      "blocking": ["action_risk"],
+      "note": "Every check passed. High risk still requires a human, which is the point.",
+      "evidence_refs": ["flight:1", "incident:INC-2026-0820-VOBL-01"],
+      "config_version": "assurance-v1",
+      "config_hash": "9f2c4b71d3e85a06",
+      "human_decision": null
+    },
+    {
+      "id": 104,
+      "plan_task_id": 5,
+      "action_type": "evaluate_entitlements",
+      "decision": "needs_human",
+      "risk_tier": "high",
+      "evaluated_at": "2026-08-20T15:37:11Z",
+      "checks": [
+        {
+          "name": "evidence_complete",
+          "state": "FAIL",
+          "reason_code": "MISSING_REQUIRED_FACT",
+          "reason": "cause_evidence.unavoidable_despite_reasonable_measures is absent",
+          "evidence_refs": []
+        },
+        { "name": "sources_fresh", "state": "PASS", "reason_code": "OK" },
+        { "name": "entities_valid", "state": "PASS", "reason_code": "OK" },
+        { "name": "policy_compliant", "state": "PASS", "reason_code": "OK" },
+        { "name": "no_conflicts", "state": "PASS", "reason_code": "OK" },
+        { "name": "action_risk", "state": "PASS", "reason_code": "OK", "tier": "high" }
+      ],
+      "blocking": ["evidence_complete", "action_risk"],
+      "note": "A weather trigger alone never exempts. Missing evidence blocks rather than guesses.",
+      "evidence_refs": ["incident:INC-2026-0820-VOBL-01"],
+      "config_version": "assurance-v1",
+      "config_hash": "9f2c4b71d3e85a06",
+      "human_decision": null
+    }
+  ],
+  "awaiting_approval_count": 2
+}

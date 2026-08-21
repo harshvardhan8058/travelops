@@ -1,0 +1,121 @@
+/**
+ * Typed API client.
+ *
+ * `VITE_USE_FIXTURES=true` serves the committed fixtures instead of calling the backend,
+ * so Streams E and F can build the entire UI before a single endpoint is real. Switching
+ * to live data is a change of one environment variable, not a rewrite.
+ *
+ * Owner: Stream E.
+ */
+
+import type {
+  AssuranceResponse,
+  FlightsResponse,
+  IncidentDetail,
+  IncidentGroupDetail,
+  PolicyResponse,
+  ReadyStatus,
+  SystemMode,
+  TimelineResponse,
+} from './types';
+
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000/api/v1';
+const USE_FIXTURES = import.meta.env.VITE_USE_FIXTURES === 'true';
+
+/** Thrown with the server's stable error code so the UI can branch on it. */
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly correlationId: string | null,
+    readonly status: number,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** Fixture files live under public/fixtures/ so Vite serves them statically. */
+const FIXTURE_MAP: Record<string, string> = {
+  '/flights': 'flights',
+  '/sources': 'sources',
+  '/incident-groups': 'incident_groups',
+  '/incident-groups/current': 'incident_group_detail',
+  '/system/mode': 'system_mode',
+  '/health/ready': 'health_ready',
+};
+
+function fixtureNameFor(path: string): string | null {
+  if (FIXTURE_MAP[path]) return FIXTURE_MAP[path];
+  if (/^\/incidents\/[^/]+$/.test(path)) return 'incident_detail';
+  if (/^\/incidents\/[^/]+\/timeline$/.test(path)) return 'timeline';
+  if (/^\/incidents\/[^/]+\/assurance$/.test(path)) return 'assurance';
+  if (/^\/incidents\/[^/]+\/policy$/.test(path)) return 'policy';
+  if (/^\/incident-groups\/[^/]+$/.test(path)) return 'incident_group_detail';
+  if (/^\/reports\/[^/]+$/.test(path)) return 'report';
+  return null;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (USE_FIXTURES) {
+    const name = fixtureNameFor(path);
+    if (!name) {
+      throw new ApiError('ENTITY_NOT_FOUND', `No fixture mapped for ${path}`, null, 404);
+    }
+    const response = await fetch(`/fixtures/${name}.json`);
+    if (!response.ok) {
+      throw new ApiError('ENTITY_NOT_FOUND', `Fixture ${name}.json missing`, null, 404);
+    }
+    return (await response.json()) as T;
+  }
+
+  const response = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  });
+
+  if (!response.ok) {
+    let code = 'INTERNAL_ERROR';
+    let message = response.statusText;
+    let correlationId = response.headers.get('X-Correlation-Id');
+    let details: Record<string, unknown> = {};
+    try {
+      const body = await response.json();
+      if (body?.error) {
+        code = body.error.code ?? code;
+        message = body.error.message ?? message;
+        correlationId = body.error.correlation_id ?? correlationId;
+        details = body.error.details ?? {};
+      }
+    } catch {
+      // Non-JSON error body; keep the status text.
+    }
+    throw new ApiError(code, message, correlationId, response.status, details);
+  }
+
+  return (await response.json()) as T;
+}
+
+export const api = {
+  usingFixtures: USE_FIXTURES,
+
+  systemMode: () => request<SystemMode>('/system/mode'),
+  ready: () => request<ReadyStatus>('/health/ready'),
+  flights: () => request<FlightsResponse>('/flights'),
+  sources: () => request<unknown>('/sources'),
+
+  incident: (id: string) => request<IncidentDetail>(`/incidents/${id}`),
+  timeline: (id: string) => request<TimelineResponse>(`/incidents/${id}/timeline`),
+  assurance: (id: string) => request<AssuranceResponse>(`/incidents/${id}/assurance`),
+  policy: (id: string) => request<PolicyResponse>(`/incidents/${id}/policy`),
+  incidentGroup: (id: string) => request<IncidentGroupDetail>(`/incident-groups/${id}`),
+  report: (id: string) => request<unknown>(`/reports/${id}`),
+
+  /** Stream F: POST /assurance/{id}/decision with a mandatory reason. */
+  submitDecision: (assuranceId: number, decision: 'approved' | 'rejected', reason: string) =>
+    request<unknown>(`/assurance/${assuranceId}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, reason }),
+    }),
+};
