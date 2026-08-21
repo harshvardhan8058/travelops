@@ -67,16 +67,28 @@ specified rather than demonstrated.
 
 ## Action 2 — Run the stack once on the demo laptop
 
-### Why it is needed
+### Status: API confirmed running on Windows + Docker Desktop 29.x (WSL2), 21 August
 
-**This is the only item with no fallback.** I could never execute containers in the build
-sandbox, so `docker compose up` has never run end to end anywhere. Nobody has proven the stack
-starts on real hardware. That makes it the single highest-risk unknown in the project — and the
-worst possible time to discover it is during a checkpoint.
+`docker compose up --build -d` builds and starts the stack, and `/docs` serves all 12
+endpoints. That closes the project's highest-risk unknown: until this point the stack had
+never been executed anywhere, because the build sandbox blocks containers.
 
-Do this on the **exact laptop that will present**, on the network you will present from.
+Still to confirm on the same machine:
 
-### Exactly what to do
+- [ ] `docker compose ps` shows postgres and redis **healthy**
+- [ ] `alembic upgrade head` prints `Running upgrade -> 0001_initial_schema` with no traceback
+- [ ] <http://127.0.0.1:5173> renders the console: graphite background, network tiles, flight
+      rows, timeline rail on the right
+- [ ] Projector legibility from three metres
+- [ ] A video plays with Wi-Fi disabled
+
+### Why it matters
+
+Do this on the **exact laptop that will present**, on the network you will present from. A
+stack that runs on one developer's machine and not on the demo machine is the classic way a
+checkpoint is lost, and the worst possible time to discover it is on the day.
+
+### Exactly what to do — macOS or Linux
 
 ```bash
 git clone https://github.com/harshvardhan8058/travelops.git
@@ -88,7 +100,48 @@ make up         # 3. builds and starts api, postgres, redis, web
 make migrate    # 4. applies the schema
 ```
 
-Then open both of these in the browser:
+### Exactly what to do — Windows PowerShell
+
+**`make` does not exist on Windows and `&&` is not a PowerShell separator.** Run the same four
+steps directly. Verified working on Docker Desktop 29.x with the WSL2 backend.
+
+```powershell
+git clone https://github.com/harshvardhan8058/travelops.git
+cd travelops          # the repo is a SUBFOLDER - compose lives here, not in the parent
+
+docker --version      # 1. confirm Docker is installed and the daemon responds
+docker info
+
+Copy-Item .env.example .env        # 2. equivalent of `make env`
+
+docker compose up --build -d       # 3. equivalent of `make up`
+docker compose ps                  #    wait until postgres and redis show healthy
+
+docker compose run --rm api alembic upgrade head   # 4. equivalent of `make migrate`
+```
+
+If `Copy-Item` reports `Cannot find path ...\.env.example` or compose reports
+`no configuration file provided: not found`, you are one directory too high. `cd travelops`
+and try again — that is the single most common mistake here.
+
+PowerShell equivalents for the remaining targets:
+
+| Makefile target | PowerShell |
+| --- | --- |
+| `make up` | `docker compose up --build -d` |
+| `make down` | `docker compose down` |
+| `make logs` | `docker compose logs -f api` |
+| `make ps` | `docker compose ps` |
+| `make migrate` | `docker compose run --rm api alembic upgrade head` |
+| `make seed` | `docker compose run --rm api python -m app.cli seed` |
+| `make demo` | `docker compose run --rm api python -m app.cli inject --scenario bengaluru_storm` |
+| `make db-shell` | `docker compose exec postgres psql -U travelops -d travelops` |
+
+`make doctor` has no direct equivalent; `docker --version` plus `docker info` covers the part
+that matters. WSL2 is an alternative if you prefer the Make targets: `wsl --install`, then work
+from `/mnt/c/...`.
+
+### Then open both of these in the browser
 
 - <http://127.0.0.1:8000/docs> — the API documentation
 - <http://127.0.0.1:5173> — the operations console
@@ -210,7 +263,7 @@ That is a defensible position. Claiming verification we do not have is not.
 | # | Action | Deadline | Blocks | Fallback |
 | --- | --- | --- | --- | --- |
 | 1 | Groq key in `backend/.env`; send limits only | Before Stage 3 | Live reasoning | `fixture` and `off` both work |
-| 2 | `make doctor && make up && make migrate` on the demo laptop | **Now** | Confidence the stack runs | **None** |
+| 2 | Run the stack on the demo laptop — API ✅ 21 Aug; console + migration pending | **Now** | Confidence the stack runs | **None** |
 | 3 | SME completes `review.yaml` | Before Stage 3 | `POLICY_MODE=verified` | `charter` mode, dated badge |
 
 Nothing else is required from the team. The full not-needed list — paid APIs, real passenger

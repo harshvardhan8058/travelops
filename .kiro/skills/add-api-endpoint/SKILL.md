@@ -21,10 +21,21 @@ same PR, and tell the frontend streams. Never change it quietly.
 ## Replacing a fixture endpoint
 
 1. Implement it in your own router module under `app/api/`.
-2. Register that router in `app/api/__init__.py`.
-3. **Delete the endpoint from `fixtures_router.py`** so there is one implementation, not two.
-4. Confirm `tests/contract/test_api_shapes.py` still passes unchanged. If you had to edit that
+2. **Declare a Pydantic response model.** The Wave 0 fixture endpoints return `Any`, which makes
+   OpenAPI render their schema as `"string"` — useless for a generated client. Every endpoint you
+   make real must be typed:
+
+   ```python
+   @router.get("/flights", response_model=FlightsResponse)
+   async def list_flights(...) -> FlightsResponse: ...
+   ```
+
+3. Register that router in `app/api/__init__.py`.
+4. **Delete the endpoint from `fixtures_router.py`** so there is one implementation, not two.
+5. Confirm `tests/contract/test_api_shapes.py` still passes unchanged. If you had to edit that
    test to make it pass, you changed the contract.
+6. Run `make openapi` (or `docker compose run --rm api python -m app.cli openapi`) so
+   `docs/openapi.json` reflects the new schema.
 
 ## Every response carrying external or seeded data includes provenance
 
