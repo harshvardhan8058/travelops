@@ -1,6 +1,429 @@
 {
   "components": {
     "schemas": {
+      "ActionSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "assurance_id": {
+            "title": "Assurance Id",
+            "type": "integer"
+          },
+          "cost_inr": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Inr"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          },
+          "human_decision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Decision Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "plan_task_id": {
+            "title": "Plan Task Id",
+            "type": "integer"
+          },
+          "provenance_kind": {
+            "title": "Provenance Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "plan_task_id",
+          "action_type",
+          "assurance_id",
+          "actor",
+          "status",
+          "reason",
+          "provenance_kind",
+          "idempotency_key"
+        ],
+        "title": "ActionSummary",
+        "type": "object"
+      },
+      "AssuranceDecision": {
+        "enum": [
+          "execute",
+          "execute_flagged",
+          "needs_human"
+        ],
+        "title": "AssuranceDecision",
+        "type": "string"
+      },
+      "AssuranceEvaluationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "blocking": {
+            "items": {
+              "$ref": "#/components/schemas/CheckName"
+            },
+            "title": "Blocking",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/CheckResultOut"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "config_version": {
+            "title": "Config Version",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/AssuranceDecision"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "human_decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HumanDecisionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "plan_task_id": {
+            "title": "Plan Task Id",
+            "type": "integer"
+          },
+          "risk_tier": {
+            "$ref": "#/components/schemas/RiskTier"
+          },
+          "warn_permitted_by_config": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn Permitted By Config"
+          }
+        },
+        "required": [
+          "id",
+          "plan_task_id",
+          "action_type",
+          "decision",
+          "risk_tier",
+          "evaluated_at",
+          "config_version",
+          "config_hash"
+        ],
+        "title": "AssuranceEvaluationOut",
+        "type": "object"
+      },
+      "AssuranceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "awaiting_approval_count": {
+            "default": 0,
+            "title": "Awaiting Approval Count",
+            "type": "integer"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "config_version": {
+            "title": "Config Version",
+            "type": "string"
+          },
+          "evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/AssuranceEvaluationOut"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incident_reference",
+          "config_version",
+          "config_hash"
+        ],
+        "title": "AssuranceResponse",
+        "type": "object"
+      },
+      "CheckName": {
+        "enum": [
+          "evidence_complete",
+          "sources_fresh",
+          "entities_valid",
+          "policy_compliant",
+          "no_conflicts",
+          "action_risk"
+        ],
+        "title": "CheckName",
+        "type": "string"
+      },
+      "CheckResultOut": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "name": {
+            "$ref": "#/components/schemas/CheckName"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/ReasonCode"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CheckState"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RiskTier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "state",
+          "reason_code"
+        ],
+        "title": "CheckResultOut",
+        "type": "object"
+      },
+      "CheckState": {
+        "description": "Three states, deliberately. A WARN must never collapse into a boolean.",
+        "enum": [
+          "PASS",
+          "WARN",
+          "FAIL"
+        ],
+        "title": "CheckState",
+        "type": "string"
+      },
+      "DecisionRequest": {
+        "additionalProperties": false,
+        "description": "An operator approving or rejecting one evaluation.",
+        "properties": {
+          "actor_id": {
+            "default": "operator-1",
+            "maxLength": 64,
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/HumanDecisionType"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ],
+        "title": "DecisionRequest",
+        "type": "object"
+      },
+      "DecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "assurance_id": {
+            "title": "Assurance Id",
+            "type": "integer"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/HumanDecisionType"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "assurance_id",
+          "decision",
+          "actor_id",
+          "reason",
+          "decided_at"
+        ],
+        "title": "DecisionResponse",
+        "type": "object"
+      },
+      "FlightSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "block_time_minutes": {
+            "title": "Block Time Minutes",
+            "type": "integer"
+          },
+          "delay_minutes": {
+            "title": "Delay Minutes",
+            "type": "integer"
+          },
+          "estimated_departure": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Departure"
+          },
+          "flight_number": {
+            "title": "Flight Number",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "passengers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passengers"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          },
+          "scheduled_departure": {
+            "format": "date-time",
+            "title": "Scheduled Departure",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "flight_number",
+          "route",
+          "scheduled_departure",
+          "delay_minutes",
+          "block_time_minutes"
+        ],
+        "title": "FlightSummary",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -12,6 +435,701 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HumanDecisionOut": {
+        "additionalProperties": false,
+        "description": "An immutable operator response, keyed to exactly one evaluation.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/HumanDecisionType"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "decision",
+          "actor_id",
+          "reason",
+          "decided_at"
+        ],
+        "title": "HumanDecisionOut",
+        "type": "object"
+      },
+      "HumanDecisionType": {
+        "enum": [
+          "approved",
+          "rejected"
+        ],
+        "title": "HumanDecisionType",
+        "type": "string"
+      },
+      "IncidentDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionSummary"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/IncidentEvidence"
+          },
+          "flight": {
+            "$ref": "#/components/schemas/FlightSummary"
+          },
+          "group_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Reference"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/Provenance"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          },
+          "state_rail": {
+            "items": {
+              "$ref": "#/components/schemas/StateRailEntry"
+            },
+            "title": "State Rail",
+            "type": "array"
+          },
+          "trigger_type": {
+            "title": "Trigger Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "flight",
+          "trigger_type",
+          "severity",
+          "state",
+          "opened_at",
+          "evidence",
+          "provenance"
+        ],
+        "title": "IncidentDetailResponse",
+        "type": "object"
+      },
+      "IncidentEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_entities": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Affected Entities",
+            "type": "object"
+          },
+          "retrieved_precedent": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved Precedent"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RiskEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weather": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "IncidentEvidence",
+        "type": "object"
+      },
+      "IncidentState": {
+        "description": "Canonical incident lifecycle (docs/26-implementation-contracts.md).\n\ndetected -> assessing -> planning -> assuring\n                                 -> awaiting_approval\n                                 -> executing -> resolved\n                                 -> blocked\nany active state -> failed",
+        "enum": [
+          "detected",
+          "assessing",
+          "planning",
+          "assuring",
+          "awaiting_approval",
+          "executing",
+          "resolved",
+          "blocked",
+          "failed"
+        ],
+        "title": "IncidentState",
+        "type": "string"
+      },
+      "PlanSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "generator": {
+            "title": "Generator",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model_self_report": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Self Report"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/PlanTaskSummary"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "generator",
+          "generated_at"
+        ],
+        "title": "PlanSummary",
+        "type": "object"
+      },
+      "PlanTaskSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "assurance_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assurance Id"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskState"
+          },
+          "task_order": {
+            "title": "Task Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "task_order",
+          "action_type",
+          "state"
+        ],
+        "title": "PlanTaskSummary",
+        "type": "object"
+      },
+      "Provenance": {
+        "properties": {
+          "is_stale": {
+            "default": false,
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProvenanceKind"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "provider": {
+            "description": "awc | ourairports | aikosh | local-simulator | generator",
+            "title": "Provider",
+            "type": "string"
+          },
+          "retrieved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved At"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
+          }
+        },
+        "required": [
+          "kind",
+          "provider"
+        ],
+        "title": "Provenance",
+        "type": "object"
+      },
+      "ProvenanceKind": {
+        "enum": [
+          "real",
+          "simulated",
+          "synthetic",
+          "fixture",
+          "unavailable"
+        ],
+        "title": "ProvenanceKind",
+        "type": "string"
+      },
+      "ReasonCode": {
+        "description": "Stable codes. The UI maps these to copy; it never parses free text.",
+        "enum": [
+          "OK",
+          "MISSING_EVIDENCE",
+          "SOURCE_STALE",
+          "SOURCE_MISSING_TIMESTAMP",
+          "ENTITY_NOT_FOUND",
+          "ENTITY_STATE_MISMATCH",
+          "POLICY_CONSTRAINT_BREACH",
+          "POLICY_PACK_UNAVAILABLE",
+          "DUPLICATE_ACTION",
+          "CAPACITY_UNAVAILABLE",
+          "HUMAN_APPROVAL_REQUIRED",
+          "UNKNOWN_ACTION_TYPE",
+          "UNKNOWN_RULE_OPERATOR",
+          "CONFIG_MISSING",
+          "MISSING_REQUIRED_FACT"
+        ],
+        "title": "ReasonCode",
+        "type": "string"
+      },
+      "RiskEvidence": {
+        "additionalProperties": false,
+        "description": "A deterministic index and band. Never a calibrated probability.",
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/RiskFactor"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "risk_index": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Risk Index",
+            "type": "integer"
+          },
+          "risk_level": {
+            "$ref": "#/components/schemas/RiskLevel"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "risk_index",
+          "risk_level",
+          "rule_version"
+        ],
+        "title": "RiskEvidence",
+        "type": "object"
+      },
+      "RiskFactor": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "runway": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runway"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "RiskFactor",
+        "type": "object"
+      },
+      "RiskLevel": {
+        "description": "Band for the deterministic risk index. Not a calibrated probability.",
+        "enum": [
+          "low",
+          "elevated",
+          "high",
+          "severe"
+        ],
+        "title": "RiskLevel",
+        "type": "string"
+      },
+      "RiskTier": {
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "RiskTier",
+        "type": "string"
+      },
+      "RunResponse": {
+        "additionalProperties": false,
+        "description": "Result of driving the workflow forward.\n\n`replayed` is true when the Idempotency-Key had already been used, in which case the\nrecorded result is returned and the workflow was not advanced again.",
+        "properties": {
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "is_terminal": {
+            "title": "Is Terminal",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "previous_state": {
+            "$ref": "#/components/schemas/IncidentState"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          },
+          "steps_taken": {
+            "title": "Steps Taken",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "incident_reference",
+          "state",
+          "previous_state",
+          "steps_taken",
+          "is_terminal"
+        ],
+        "title": "RunResponse",
+        "type": "object"
+      },
+      "StateRailEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "reached_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reached At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "StateRailEntry",
+        "type": "object"
+      },
+      "TaskState": {
+        "enum": [
+          "pending",
+          "proposed",
+          "assured",
+          "needs_human",
+          "rejected",
+          "executing",
+          "succeeded",
+          "failed",
+          "skipped"
+        ],
+        "title": "TaskState",
+        "type": "string"
+      },
+      "TimelineEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "stage",
+          "actor",
+          "actor_kind",
+          "event_type",
+          "summary"
+        ],
+        "title": "TimelineEntry",
+        "type": "object"
+      },
+      "TimelineResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incident_reference"
+        ],
+        "title": "TimelineResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -53,6 +1171,85 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "WeatherEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "airport_icao": {
+            "title": "Airport Icao",
+            "type": "string"
+          },
+          "ceiling_ft": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ceiling Ft"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "precipitation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precipitation"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/Provenance"
+          },
+          "visibility_m": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility M"
+          },
+          "wind_direction_deg": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wind Direction Deg"
+          },
+          "wind_speed_kt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wind Speed Kt"
+          }
+        },
+        "required": [
+          "airport_icao",
+          "observed_at",
+          "provenance"
+        ],
+        "title": "WeatherEvidence",
+        "type": "object"
       }
     }
   },
@@ -63,6 +1260,77 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/assurance/{assurance_id}/decision": {
+      "post": {
+        "description": "Record an immutable operator response for one evaluation.\n\nIdempotency here comes from the schema rather than a cache: `human_decision.assurance_id`\nis unique, so one evaluation can only ever carry one decision. Re-posting the same\ndecision returns the original; posting a different one is a conflict, because an\noperator response is a record of what someone decided and not a mutable setting.",
+        "operationId": "record_decision_api_v1_assurance__assurance_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assurance_id",
+            "required": true,
+            "schema": {
+              "title": "Assurance Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "A replay returns the original decision.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A replay returns the original decision.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operator approve or reject, with a reason",
+        "tags": [
+          "assurance"
+        ]
+      }
+    },
     "/api/v1/flights": {
       "get": {
         "operationId": "list_flights_api_v1_flights_get",
@@ -214,7 +1482,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Incident Api V1 Incidents  Incident Id  Get"
+                  "$ref": "#/components/schemas/IncidentDetailResponse"
                 }
               }
             },
@@ -231,9 +1499,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Incident detail [fixture]",
+        "summary": "Incident state, plan, tasks and recorded evidence",
         "tags": [
-          "fixtures"
+          "incidents"
         ]
       }
     },
@@ -256,7 +1524,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Assurance Api V1 Incidents  Incident Id  Assurance Get"
+                  "$ref": "#/components/schemas/AssuranceResponse"
                 }
               }
             },
@@ -273,9 +1541,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Assurance evaluations [fixture]",
+        "summary": "Gate evaluations and their failed checks",
         "tags": [
-          "fixtures"
+          "assurance"
         ]
       }
     },
@@ -321,6 +1589,67 @@
         ]
       }
     },
+    "/api/v1/incidents/{incident_id}/run": {
+      "post": {
+        "description": "Drive the incident forward.\n\nStopping short of a terminal state is a normal outcome: `awaiting_approval` means the\ngate asked for a person, and `note` says so. An illegal transition raises\n`409 INVALID_STATE_TRANSITION` from the state machine rather than being silently ignored.\n\nReplay protection uses `decision_log` as the ledger. A `WORKFLOW_RUN_REQUESTED` entry\nrecords the key alongside the result it produced, so a repeated key returns that result\nwithout advancing again. The alternative \u2014 a dedicated idempotency table \u2014 would need a\nmigration, and `backend/migrations/` is Stream C's.",
+        "operationId": "run_incident_api_v1_incidents__incident_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replaying a key returns the original result instead of acting twice.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Replaying a key returns the original result instead of acting twice.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Continue the workflow from its current legal state",
+        "tags": [
+          "incidents"
+        ]
+      }
+    },
     "/api/v1/incidents/{incident_id}/timeline": {
       "get": {
         "operationId": "get_timeline_api_v1_incidents__incident_id__timeline_get",
@@ -340,7 +1669,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Timeline Api V1 Incidents  Incident Id  Timeline Get"
+                  "$ref": "#/components/schemas/TimelineResponse"
                 }
               }
             },
@@ -357,9 +1686,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Decision timeline [fixture]",
+        "summary": "Ordered immutable event and action records",
         "tags": [
-          "fixtures"
+          "incidents"
         ]
       }
     },

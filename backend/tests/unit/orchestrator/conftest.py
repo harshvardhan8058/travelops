@@ -171,6 +171,20 @@ def needs_human_result(*, check=CHECK_ORDER[-1]) -> AssuranceResult:
 
 
 @pytest.fixture
+def no_gate(monkeypatch):
+    """Remove the gate entry point.
+
+    Stream B has landed `evaluate`, so absence is no longer the default and the fail-closed
+    path has to be provoked deliberately. That is the point: the guarantee must be asserted,
+    not inherited from the gate happening to be missing.
+    """
+    from app.assurance import gate
+
+    monkeypatch.delattr(gate, "evaluate", raising=False)
+    return gate
+
+
+@pytest.fixture
 def stub_gate(monkeypatch):
     """Install a fake `gate.evaluate` without editing Stream B's module.
 
@@ -189,7 +203,9 @@ def stub_gate(monkeypatch):
             return result_for if result_for is not None else passing_result()
 
         monkeypatch.setattr(gate, "evaluate", evaluate, raising=False)
-        monkeypatch.setattr(gate, "load_config", lambda path: None, raising=False)
+        # `load_config_with_digest` is left alone so the committed config/assurance.v1.yaml
+        # is loaded for real. Stubbing it to None would push every test down the refusal
+        # path instead of the decision actually under test.
         return calls
 
     install.calls = calls  # type: ignore[attr-defined]

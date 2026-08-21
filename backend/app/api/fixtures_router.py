@@ -65,25 +65,13 @@ async def get_incident_group(group_id: str) -> Any:
     return payload
 
 
-@router.get("/incidents/{incident_id}", summary="Incident detail [fixture]")
-async def get_incident(incident_id: str) -> Any:
-    payload = _load("incident_detail")
-    return {**payload, "requested_id": incident_id}
-
-
-@router.get("/incidents/{incident_id}/timeline", summary="Decision timeline [fixture]")
-async def get_timeline(incident_id: str) -> Any:
-    payload = _load("timeline")
-    return {**payload, "incident_id": incident_id}
+# /incidents/{id}, /incidents/{id}/timeline and /incidents/{id}/assurance were served from
+# here in Wave 0. They are now real, in app/api/incidents.py and app/api/assurance_router.py,
+# and their fixture routes were deleted in the same commit so there is never a period where
+# two implementations of one path exist.
 
 
 # ---------------------------------------------------------------- Stream B
-@router.get("/incidents/{incident_id}/assurance", summary="Assurance evaluations [fixture]")
-async def get_assurance(incident_id: str) -> Any:
-    payload = _load("assurance")
-    return {**payload, "incident_id": incident_id}
-
-
 @router.get("/incidents/{incident_id}/policy", summary="Policy evaluation [fixture]")
 async def get_policy(incident_id: str) -> Any:
     payload = _load("policy")

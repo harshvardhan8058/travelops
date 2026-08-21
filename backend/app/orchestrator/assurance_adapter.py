@@ -1,27 +1,30 @@
-"""Fail-closed adapter onto the Decision Assurance Gate — STREAM A.
+"""Adapter onto the Decision Assurance Gate — STREAM A.
 
 Execution is authorised by the gate and by nothing else. Stream B owns the six checks and
 their aggregation; Stream A only asks. This module is the single place where that ask
 happens, so there is exactly one code path to audit.
 
-Stream B's `app/assurance/gate.py` currently exposes `aggregate()` and `load_config()` but
-no single entry point that gathers the six checks and returns a decision. **The requested
-interface is `gate.evaluate(...) -> AssuranceResult`** (see REQUESTED_ENTRY_POINT). Until
-it lands, every call here refuses.
+Stream B has now landed the canonical entry point, so this wires straight to it:
 
-Refusing means `needs_human`, never `execute`. An unimplemented gate is a *hard block*:
+    gate.evaluate(*, inputs: GateInputs, config, config_hash=None, now=None) -> AssuranceResult
 
-* the symbol is missing            -> refuse
-* it raises NotImplementedError    -> refuse
-* its signature does not match     -> refuse, naming the mismatch
-* the config is absent or unloadable -> refuse
-* it returns something that is not an AssuranceResult -> refuse
+The fail-closed wrapper stays, because "the gate is present" and "the gate answered" are
+different claims. Every one of these is a refusal, never a pass:
 
-Note what this module does NOT do. It does not evaluate a check, classify a risk tier,
-read a policy pack or decide what a warning means. Reimplementing any of that here would
-put the safety boundary in two places and guarantee they drift. A refusal record is not an
-evaluation, and it is labelled as such: every check comes back FAIL with
-`CONFIG_MISSING` and a reason saying the gate did not run.
+* the symbol is missing                     -> refuse
+* it raises NotImplementedError              -> refuse
+* its signature no longer matches            -> refuse, naming the mismatch
+* the config is absent or will not parse      -> refuse
+* it returns something other than an AssuranceResult -> refuse
+
+Note what this module does NOT do. It does not evaluate a check, classify a risk tier, read
+a policy pack or decide what a warning means. Reimplementing any of that here would put the
+safety boundary in two places and guarantee they drift. Assembling `GateInputs` is the
+caller's job by Stream B's own contract — "everything the six checks need, gathered by the
+caller" — and gathering facts is not the same as judging them.
+
+A refusal record is not an evaluation, and it is labelled as such: every check comes back
+FAIL with `CONFIG_MISSING` and a reason saying the gate did not run.
 
 Owner: Stream A. Interface owner: Stream B.
 """
@@ -29,6 +32,7 @@ Owner: Stream A. Interface owner: Stream B.
 from __future__ import annotations
 
 import inspect
+from datetime import datetime
 from typing import Any
 
 from app.assurance.contract import (
@@ -42,21 +46,8 @@ from app.observability.logging import get_logger
 
 log = get_logger(__name__)
 
-#: The interface requested from Stream B. Keyword-only so adding a parameter later is not
-#: a breaking change.
-#:
-#:     async def evaluate(
-#:         *,
-#:         action_type: str,
-#:         target_refs: list[str],
-#:         inputs: dict,
-#:         evidence_refs: list[str],
-#:         incident_state: str,
-#:         config: AssuranceConfig | None = None,
-#:     ) -> AssuranceResult
-#:
-#: May be sync or async; this adapter awaits it either way.
-REQUESTED_ENTRY_POINT = "app.assurance.gate.evaluate"
+#: Stream B's canonical entry point.
+GATE_ENTRY_POINT = "app.assurance.gate.evaluate"
 
 UNAVAILABLE = "unavailable"
 
@@ -105,76 +96,30 @@ def refusal(
     )
 
 
-async def evaluate(
-    *,
-    action_type: str,
-    target_refs: list[str],
-    inputs: dict[str, Any],
-    evidence_refs: list[str],
-    incident_state: str,
-    config: Any | None = None,
-) -> AssuranceResult:
-    """Ask the gate. Raise GateUnavailable if it cannot answer.
+def load_config() -> tuple[Any | None, str | None]:
+    """Load the versioned gate config and the digest of the bytes it came from.
 
-    The caller turns that into a refusal record and blocks. This function never returns an
-    executable result it did not receive from the gate itself.
-    """
-    from app.assurance import gate
+    Returns `(None, None)` when the config is unavailable. The caller must treat that as a
+    block: `docs/26-implementation-contracts.md` says missing assurance config refuses
+    workflow execution, and `ResolvedModes.workflow_executable` already encodes it.
 
-    entry = getattr(gate, "evaluate", None)
-    if entry is None:
-        raise GateUnavailableError(
-            f"{REQUESTED_ENTRY_POINT} is not implemented yet",
-            detail="Stream B owns the gate entry point; Stream A must not substitute one",
-        )
-
-    try:
-        result = entry(
-            action_type=action_type,
-            target_refs=target_refs,
-            inputs=inputs,
-            evidence_refs=evidence_refs,
-            incident_state=incident_state,
-            config=config,
-        )
-        if inspect.isawaitable(result):
-            result = await result
-    except NotImplementedError as exc:
-        raise GateUnavailableError(
-            f"{REQUESTED_ENTRY_POINT} is still a stub",
-            detail=str(exc) or None,
-        ) from exc
-    except TypeError as exc:
-        # Signature drift. Loud, and still a refusal — never a silent pass.
-        raise GateUnavailableError(
-            f"{REQUESTED_ENTRY_POINT} signature does not match the requested interface",
-            detail=str(exc),
-        ) from exc
-
-    if not isinstance(result, AssuranceResult):
-        raise GateUnavailableError(
-            f"{REQUESTED_ENTRY_POINT} returned {type(result).__name__}, not AssuranceResult",
-        )
-    return result
-
-
-def load_config() -> Any | None:
-    """Load the versioned gate config through Stream B's loader.
-
-    Returns None when the config is unavailable. The caller must treat that as a block:
-    `docs/26-implementation-contracts.md` says missing assurance config refuses workflow
-    execution, and `Settings.workflow_executable` already encodes it.
+    The digest comes from Stream B's loader rather than being recomputed here, so the value
+    stored on an evaluation is the same one `GET /system/mode` reports.
     """
     from app.assurance import gate
     from app.config import get_settings, resolve_repo_path
 
     path = resolve_repo_path(get_settings().assurance_config_path)
     if not path.is_file():
-        return None
+        return None, None
     try:
-        return gate.load_config(str(path))
+        with_digest = getattr(gate, "load_config_with_digest", None)
+        if with_digest is not None:
+            config, digest = with_digest(str(path))
+            return config, digest
+        return gate.load_config(str(path)), None
     except NotImplementedError:
-        return None
+        return None, None
     except Exception as exc:
         # A config that will not parse is indistinguishable from no config, safety-wise.
         log.error(
@@ -183,4 +128,89 @@ def load_config() -> Any | None:
             path=str(path),
             detail=type(exc).__name__,
         )
-        return None
+        return None, None
+
+
+async def evaluate(
+    *,
+    action_type: str,
+    target_refs: list[str],
+    referenced_refs: list[str],
+    resolved_entities: dict[str, Any],
+    payload: dict[str, Any],
+    pending_or_executed: list[dict[str, Any]],
+    sources: dict[str, datetime | None],
+    required_facts: list[str],
+    provided_facts: dict[str, Any],
+    constraints: list[dict[str, Any]],
+    extra_evidence_refs: list[str],
+    config: Any | None,
+    config_hash: str | None = None,
+    now: datetime | None = None,
+) -> AssuranceResult:
+    """Ask the gate. Raise GateUnavailableError if it cannot answer.
+
+    The caller turns that into a refusal record and blocks. This function never returns an
+    executable result it did not receive from the gate itself.
+
+    `now` is passed through explicitly so an evaluation is reproducible, which is what makes
+    a replay meaningful.
+    """
+    from app.assurance import gate
+
+    entry = getattr(gate, "evaluate", None)
+    if entry is None:
+        raise GateUnavailableError(
+            f"{GATE_ENTRY_POINT} is not implemented",
+            detail="Stream B owns the gate entry point; Stream A must not substitute one",
+        )
+    if config is None:
+        raise GateUnavailableError(
+            "assurance config is unavailable, so no action can be authorised",
+        )
+
+    inputs_model = getattr(gate, "GateInputs", None)
+    if inputs_model is None:
+        raise GateUnavailableError(f"{GATE_ENTRY_POINT} exists but GateInputs does not")
+
+    try:
+        inputs = inputs_model(
+            action_type=action_type,
+            required_facts=required_facts,
+            provided_facts=provided_facts,
+            sources=sources,
+            referenced_refs=referenced_refs,
+            resolved_entities=resolved_entities,
+            payload=payload,
+            constraints=constraints,
+            target_refs=target_refs,
+            pending_or_executed=pending_or_executed,
+            extra_evidence_refs=extra_evidence_refs,
+        )
+    except Exception as exc:
+        # The inputs contract moved. Loud, and still a refusal.
+        raise GateUnavailableError(
+            "GateInputs no longer accepts the fields the orchestrator gathers",
+            detail=f"{type(exc).__name__}: {exc}",
+        ) from exc
+
+    try:
+        result = entry(inputs=inputs, config=config, config_hash=config_hash, now=now)
+        if inspect.isawaitable(result):
+            result = await result
+    except NotImplementedError as exc:
+        raise GateUnavailableError(
+            f"{GATE_ENTRY_POINT} is still a stub",
+            detail=str(exc) or None,
+        ) from exc
+    except TypeError as exc:
+        raise GateUnavailableError(
+            f"{GATE_ENTRY_POINT} signature does not match the expected interface",
+            detail=str(exc),
+        ) from exc
+
+    if not isinstance(result, AssuranceResult):
+        raise GateUnavailableError(
+            f"{GATE_ENTRY_POINT} returned {type(result).__name__}, not AssuranceResult",
+        )
+    return result
