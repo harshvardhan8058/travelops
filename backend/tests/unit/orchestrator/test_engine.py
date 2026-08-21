@@ -498,8 +498,10 @@ class TestIdempotency:
 
 
 class TestAssuranceInvocation:
-    async def test_no_gate_means_no_execution(self, session, flight, settings):
-        """Stream B's gate is not implemented: the run must block, never proceed."""
+    async def test_a_missing_gate_entry_point_blocks_execution(
+        self, session, flight, settings, no_gate
+    ):
+        """The fail-closed guarantee, provoked deliberately now that B's gate exists."""
         engine = build(session, settings=settings)
         ctx = await engine.open_incident(flight.id, "weather")
         await engine.run(ctx)
@@ -507,7 +509,9 @@ class TestAssuranceInvocation:
         assert ctx.state is IncidentState.blocked
         assert await _count(session, Action) == 0
 
-    async def test_an_unavailable_gate_is_never_executable(self, session, flight, settings):
+    async def test_an_unavailable_gate_is_never_executable(
+        self, session, flight, settings, no_gate
+    ):
         engine = build(session, settings=settings)
         ctx = await engine.open_incident(flight.id, "weather")
         from app.agents.contract import PlanTask
@@ -519,8 +523,38 @@ class TestAssuranceInvocation:
         assert result.decision is AssuranceDecision.needs_human
         assert len(result.blocking) == 6
 
+    async def test_a_stubbed_out_gate_is_never_executable(
+        self, session, flight, settings, monkeypatch
+    ):
+        """A gate that still raises NotImplementedError must refuse, not crash the run."""
+        from app.assurance import gate
+
+        def not_yet(**_kwargs):
+            raise NotImplementedError("Stream B")
+
+        monkeypatch.setattr(gate, "evaluate", not_yet, raising=False)
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        await engine.run(ctx)
+
+        assert ctx.state is IncidentState.blocked
+        assert await _count(session, Action) == 0
+
+    async def test_a_gate_returning_the_wrong_type_is_never_executable(
+        self, session, flight, settings, monkeypatch
+    ):
+        from app.assurance import gate
+
+        monkeypatch.setattr(gate, "evaluate", lambda **_k: {"decision": "execute"}, raising=False)
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        await engine.run(ctx)
+
+        assert ctx.state is IncidentState.blocked
+        assert await _count(session, Action) == 0
+
     async def test_a_refusal_is_labelled_as_one_not_as_a_real_evaluation(
-        self, session, flight, settings
+        self, session, flight, settings, no_gate
     ):
         engine = build(session, settings=settings)
         ctx = await engine.open_incident(flight.id, "weather")
@@ -600,8 +634,150 @@ class TestAssuranceInvocation:
         await engine.run(ctx)
 
         assert calls, "the engine must consult the gate, not decide for itself"
-        assert calls[0]["action_type"] == "check_connections"
-        assert "confidence" not in calls[0]
+        inputs = calls[0]["inputs"]
+        assert inputs.action_type == "check_connections"
+        assert "confidence" not in inputs.model_dump()
+        # The config hash the gate is given is the one recorded on the evaluation.
+        assert calls[0]["config_hash"]
+        # `now` is passed explicitly so a replay is reproducible.
+        assert calls[0]["now"] == FIXED_NOW
+
+    async def test_the_real_gate_authorises_low_risk_and_holds_high_risk(
+        self, session, flight, settings
+    ):
+        """No stub. Stream B's gate against the committed config/assurance.v1.yaml.
+
+        The config tiers `check_connections` low and `notify_passengers` high, and
+        `high_risk_requires_human` is true. The recorded decisions must reflect that, which
+        is also the story the committed incident_detail fixture tells.
+        """
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        from app.agents.contract import PlanTask
+
+        low = await engine.assure(
+            ctx,
+            PlanTask(
+                action=ActionType.check_connections,
+                target_refs=[f"incident:{ctx.incident_reference}", f"flight:{flight.id}"],
+            ),
+        )
+        high = await engine.assure(
+            ctx,
+            PlanTask(
+                action=ActionType.notify_passengers,
+                target_refs=[f"incident:{ctx.incident_reference}", f"flight:{flight.id}"],
+            ),
+        )
+
+        assert low.executable is True
+        assert low.risk_tier.value == "low"
+        assert high.executable is False
+        assert high.decision is AssuranceDecision.needs_human
+        assert high.risk_tier.value == "high"
+
+    async def test_an_unresolvable_entity_is_refused_by_the_real_gate(
+        self, session, flight, settings
+    ):
+        """`entities_valid` only bites if the orchestrator gathers real resolutions.
+
+        A reference the database cannot resolve is omitted from `resolved_entities` rather
+        than recorded as empty, which is what lets the check fail a hallucinated entity.
+        """
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        from app.agents.contract import PlanTask
+
+        result = await engine.assure(
+            ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:999999"])
+        )
+        assert result.executable is False
+
+    async def test_gathered_inputs_include_prior_actions_for_conflict_detection(
+        self, session, flight, settings, working_gate
+    ):
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        await engine.run(ctx)
+
+        from app.agents.contract import PlanTask
+
+        gathered = await engine._gate_inputs(
+            ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
+        )
+        assert gathered["pending_or_executed"], "the gate must be able to see prior actions"
+        assert gathered["pending_or_executed"][0]["action_type"] == "check_connections"
+
+    async def test_freshness_is_never_manufactured(self, session, flight, settings):
+        """No weather row means no source, not a source stamped `now`."""
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        from app.agents.contract import PlanTask
+
+        gathered = await engine._gate_inputs(
+            ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
+        )
+        assert gathered["sources"] == {}
+
+    async def test_a_recorded_observation_is_offered_to_the_freshness_check(
+        self, session, flight, settings
+    ):
+        from app.models.enums import ProvenanceKind
+        from app.models.reference import WeatherObservation
+
+        session.add(
+            WeatherObservation(
+                airport_icao="VOBL",
+                observed_at=FIXED_NOW,
+                wind_speed_kt=24,
+                visibility_m=800,
+                ceiling_ft=900,
+                provenance_kind=ProvenanceKind.fixture,
+                provenance_provider="fixture",
+                source_ref="fixture:bengaluru_storm:weather:VOBL",
+            )
+        )
+        await session.commit()
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        from app.agents.contract import PlanTask
+
+        gathered = await engine._gate_inputs(
+            ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
+        )
+        assert gathered["sources"] == {"metar:VOBL": FIXED_NOW}
+
+    async def test_the_orchestrator_computes_no_check_outcome_itself(self):
+        """Stream A gathers facts; Stream B judges them. Assert the boundary in code.
+
+        The engine must not import a check function or the aggregator. If it did, the safety
+        boundary would exist in two places and they would drift.
+        """
+        import ast
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[3] / "app" / "orchestrator"
+        forbidden = {
+            "aggregate",
+            "evidence_complete",
+            "sources_fresh",
+            "entities_valid",
+            "policy_compliant",
+            "no_conflicts",
+            "action_risk",
+        }
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+                    ("app.assurance.checks", "app.policy")
+                ):
+                    names = {alias.name for alias in node.names}
+                    assert not names & forbidden, (
+                        f"{path.name} imports {names & forbidden}: assurance logic must stay "
+                        "in Stream B"
+                    )
 
     async def test_assurance_evaluated_event_carries_the_config_hash(
         self, session, flight, settings, stub_gate

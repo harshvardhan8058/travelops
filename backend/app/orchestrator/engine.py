@@ -57,7 +57,7 @@ from app.models.enums import (
     TaskState,
     TriggerType,
 )
-from app.models.reference import Flight
+from app.models.reference import Flight, WeatherObservation
 from app.models.workflow import (
     Action,
     AssuranceEvaluation,
@@ -470,6 +470,119 @@ class Orchestrator:
         """
         return (await self._assure(ctx, task)).result
 
+    async def _gate_inputs(self, ctx: WorkflowContext, task: PlanTask) -> dict[str, Any]:
+        """Gather everything the six checks need.
+
+        Stream B's checks are pure functions — "no check reaches back for a database row, a
+        provider response or the clock" — so the orchestrator, which owns the context, is
+        where those facts are collected. Gathering a fact is not judging it: nothing here
+        decides a check outcome.
+
+        Three fields are deliberately left empty rather than guessed, and each is a real
+        integration gap rather than an oversight:
+
+        * `required_facts` and `constraints` are declared by the policy rule selected for an
+          action. That selection lives in Stream B's resolver, so inventing a list here
+          would be Stream A writing policy.
+        * `provided_facts` follows from `required_facts`; supplying facts nobody asked for
+          would not make the evidence check meaningful.
+
+        Everything the orchestrator genuinely knows is supplied for real, so
+        `entities_valid` and `no_conflicts` are doing actual work today.
+        """
+        referenced = list(task.target_refs)
+        return {
+            "action_type": task.action.value,
+            "target_refs": referenced,
+            "referenced_refs": referenced,
+            "resolved_entities": await self._resolve_entities(referenced),
+            "payload": dict(task.inputs),
+            "pending_or_executed": await self._prior_actions(ctx),
+            "sources": await self._source_timestamps(ctx),
+            "required_facts": [],
+            "provided_facts": {},
+            "constraints": [],
+            "extra_evidence_refs": list(ctx.evidence_refs),
+        }
+
+    async def _resolve_entities(self, refs: Sequence[str]) -> dict[str, Any]:
+        """Resolve each `kind:id` reference against the database.
+
+        An unresolvable reference is **omitted**, not recorded as empty. That is what lets
+        `entities_valid` fail on a hallucinated or stale entity instead of waving it through.
+        """
+        resolved: dict[str, Any] = {}
+        for ref in refs:
+            kind, _, identifier = ref.partition(":")
+            if kind == "flight" and identifier.isdigit():
+                flight = await self._session.get(Flight, int(identifier))
+                if flight is not None:
+                    resolved[ref] = {
+                        "id": flight.id,
+                        "flight_number": flight.flight_number,
+                        "status": flight.status,
+                        "origin_icao": flight.origin_icao,
+                        "destination_icao": flight.destination_icao,
+                    }
+            elif kind == "incident":
+                stmt = select(Incident).where(Incident.reference == identifier).limit(1)
+                incident = (await self._session.execute(stmt)).scalars().first()
+                if incident is not None:
+                    resolved[ref] = {
+                        "id": incident.id,
+                        "reference": incident.reference,
+                        "state": str(incident.state),
+                    }
+        return resolved
+
+    async def _prior_actions(self, ctx: WorkflowContext) -> list[dict[str, Any]]:
+        """Actions already recorded for this incident, so `no_conflicts` can see them.
+
+        This is what lets the gate catch a duplicate booking or a second notification for
+        the same passengers, rather than relying on the idempotency key alone.
+        """
+        stmt = (
+            select(Action, PlanTaskRow)
+            .join(PlanTaskRow, Action.plan_task_id == PlanTaskRow.id)
+            .join(Plan, PlanTaskRow.plan_id == Plan.id)
+            .where(Plan.incident_id == ctx.incident_id)
+            .order_by(Action.id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            {
+                "action_type": task_row.action_type,
+                "target_refs": list(task_row.target_refs or []),
+                "status": str(action.status),
+                "plan_task_id": task_row.id,
+            }
+            for action, task_row in rows
+        ]
+
+    async def _source_timestamps(self, ctx: WorkflowContext) -> dict[str, datetime | None]:
+        """Observation timestamps for `sources_fresh`, keyed `<kind>:<identifier>`.
+
+        Only sources that actually exist are reported. A source is never invented with
+        `now` as its timestamp, because that would manufacture freshness — precisely the
+        thing this check exists to detect.
+        """
+        sources: dict[str, datetime | None] = {}
+        if ctx.flight_id is None:
+            return sources
+        flight = await self._session.get(Flight, ctx.flight_id)
+        if flight is None:
+            return sources
+        stmt = (
+            select(WeatherObservation)
+            .where(WeatherObservation.airport_icao == flight.origin_icao)
+            .order_by(WeatherObservation.observed_at.desc())
+            .limit(1)
+        )
+        observation = (await self._session.execute(stmt)).scalars().first()
+        if observation is not None:
+            sources[f"metar:{flight.origin_icao}"] = _as_utc(observation.observed_at)
+        return sources
+
     async def _assure(self, ctx: WorkflowContext, task: PlanTask) -> _AssuranceOutcome:
         evidence = list(ctx.evidence_refs)
 
@@ -483,14 +596,14 @@ class Orchestrator:
                 unavailable_reason=reason,
             )
 
+        config, config_hash = assurance_adapter.load_config()
         try:
             result = await assurance_adapter.evaluate(
-                action_type=task.action.value,
-                target_refs=list(task.target_refs),
-                inputs=dict(task.inputs),
-                evidence_refs=evidence,
-                incident_state=ctx.state.value,
-                config=assurance_adapter.load_config(),
+                **await self._gate_inputs(ctx, task),
+                config=config,
+                config_hash=config_hash or self.modes.assurance_config_hash,
+                # Explicit, so the evaluation is reproducible on replay.
+                now=self._now(),
             )
         except assurance_adapter.GateUnavailableError as exc:
             log.error(
@@ -1302,6 +1415,20 @@ def _new_correlation_id() -> str:
     import uuid
 
     return uuid.uuid4().hex
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Attach UTC to a naive timestamp read back from the database.
+
+    Storage is always UTC in this system — local time is a display concern only — so this
+    labels a value rather than converting one. It matters because `sources_fresh` compares
+    an observation against an aware `now`, and mixing naive and aware datetimes raises
+    TypeError. Postgres returns aware values; SQLite does not, and a driver difference must
+    not change whether the freshness check can run.
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
 
 
 def _coerce_trigger(trigger_type: str) -> TriggerType:
