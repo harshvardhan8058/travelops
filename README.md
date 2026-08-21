@@ -89,6 +89,11 @@ Useful checks:
 | `make verify-docs` | Confirm every relative doc link resolves |
 | `cd frontend && npm run tokens:check` | Fail the build on a colour literal or banned hue |
 
+## Project status
+
+**[`docs/30-project-status.md`](docs/30-project-status.md)** is the single source of truth for what is
+built, what remains, and the complete list of what the team needs to supply. Read it first.
+
 ## Start here
 
 1. [`docs/DECISIONS.md`](docs/DECISIONS.md) — canonical decisions and event dates
