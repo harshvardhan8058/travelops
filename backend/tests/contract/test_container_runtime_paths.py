@@ -100,3 +100,59 @@ def test_datastores_are_not_published_to_the_host(compose: dict):
             assert mapping.startswith("127.0.0.1:"), (
                 f"{service} publishes {mapping} beyond loopback"
             )
+
+
+# --------------------------------------------------------------------------- data/ mount
+#
+# Added after `make seed` failed inside Docker while passing on the host. Same root cause as
+# the fixtures mount above, in a second place.
+
+#: Where `app.config.REPO_ROOT` points inside the image, because the package is at /app/app.
+CONTAINER_REPO_ROOT = "/"
+
+
+def test_repo_root_data_is_mounted_where_repo_root_resolves():
+    """`data/` must be importable as a package from REPO_ROOT inside the container.
+
+    `app/db/seed.py` puts `app.config.REPO_ROOT` on `sys.path` and imports
+    `data.generators.cascade_spec`. On the host REPO_ROOT is the repository root, so this
+    works. Inside the image `app/config.py` is `/app/app/config.py`, so `parents[2]` is `/`
+    and the package must be at `/data`.
+
+    Mounting it at `/app/data` instead fails with `ModuleNotFoundError: data` from
+    `make seed`, which reads as a broken seed rather than a broken mount.
+    """
+    compose_doc = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    mounts = compose_doc["services"]["api"].get("volumes", [])
+
+    data_mounts = [m for m in mounts if m.startswith("./data:")]
+    assert data_mounts, "service 'api' does not mount ./data at all; `make seed` cannot run"
+
+    target = data_mounts[0].split(":")[1]
+    assert target == "/data", (
+        f"./data is mounted at '{target}', but app.config.REPO_ROOT resolves to "
+        f"'{CONTAINER_REPO_ROOT}' inside the image, so seed.py imports `data.*` from "
+        "'/data'. Move the mount or change REPO_ROOT — they must agree."
+    )
+
+
+def test_repo_root_derivation_still_matches_the_data_mount():
+    """If REPO_ROOT is refactored, the data mount must move with it."""
+    source = (REPO_ROOT / "backend/app/config.py").read_text(encoding="utf-8")
+    match = re.search(r"REPO_ROOT\s*=\s*Path\(__file__\)\.resolve\(\)\.parents\[(\d+)\]", source)
+    assert match, "REPO_ROOT definition changed; re-check the ./data compose mount"
+
+    # /app/app/config.py -> parents[2] is /
+    parents_index = int(match.group(1))
+    assert parents_index == 2, (
+        f"REPO_ROOT now uses parents[{parents_index}]; inside the container that no longer "
+        "resolves to '/', so ./data:/data in docker-compose.yml is wrong. Update both."
+    )
+
+
+def test_data_is_an_importable_package_at_the_repository_root():
+    """The mount is only useful if `data` is a real package with the modules seed imports."""
+    assert (REPO_ROOT / "data" / "__init__.py").is_file()
+    assert (REPO_ROOT / "data" / "generators" / "__init__.py").is_file()
+    assert (REPO_ROOT / "data" / "generators" / "cascade_spec.py").is_file()
+    assert (REPO_ROOT / "data" / "loaders" / "__init__.py").is_file()

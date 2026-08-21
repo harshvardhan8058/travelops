@@ -804,7 +804,7 @@ class TestAssuranceInvocation:
 
         from app.agents.contract import PlanTask
 
-        gathered = await engine._gate_inputs(
+        gathered, _requirements = await engine._gate_inputs(
             ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
         )
         assert gathered["pending_or_executed"], "the gate must be able to see prior actions"
@@ -816,10 +816,72 @@ class TestAssuranceInvocation:
         ctx = await engine.open_incident(flight.id, "weather")
         from app.agents.contract import PlanTask
 
-        gathered = await engine._gate_inputs(
+        gathered, _requirements = await engine._gate_inputs(
             ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
         )
         assert gathered["sources"] == {}
+
+    async def test_the_source_offered_to_the_gate_is_bounded_and_not_a_forecast(
+        self, session, flight, settings
+    ):
+        """Re-homed from a Stream C contract test that was deleted when its file was replaced.
+
+        Their tripwire asserted this on `Orchestrator._source_timestamps` directly, because
+        two things in this schema are easy to hand a freshness check by accident:
+
+          * The archive holds real observations on their own later timestamps, so the plain
+            newest row is dated *after* the moment being assessed. The gate FAILs a
+            future-dated source, correctly — a broken feed must not read as maximally fresh.
+          * `weather_observation` also holds TAF rows, and a forecast is not an observation.
+
+        Both are seeded here so the query has something to get wrong, and the assertion is
+        that it picks the bounded actual report rather than either trap.
+        """
+        from datetime import timedelta
+
+        from app.agents.contract import PlanTask
+        from app.models.enums import ProvenanceKind
+        from app.models.reference import WeatherObservation
+
+        def observation(*, observed_at, is_forecast, visibility):
+            return WeatherObservation(
+                airport_icao="VOBL",
+                observed_at=observed_at,
+                wind_speed_kt=24,
+                visibility_m=visibility,
+                is_forecast=is_forecast,
+                provenance_kind=ProvenanceKind.fixture,
+                provenance_provider="fixture",
+                source_ref=f"fixture:test:{observed_at.isoformat()}:{is_forecast}",
+            )
+
+        in_force = FIXED_NOW - timedelta(minutes=6)
+        session.add_all(
+            [
+                observation(observed_at=in_force, is_forecast=False, visibility=800),
+                # Dated after the incident: a later archive row.
+                observation(
+                    observed_at=FIXED_NOW + timedelta(hours=18),
+                    is_forecast=False,
+                    visibility=8000,
+                ),
+                # A forecast, at or before the clock, which must still not be chosen.
+                observation(
+                    observed_at=FIXED_NOW - timedelta(minutes=1),
+                    is_forecast=True,
+                    visibility=9999,
+                ),
+            ]
+        )
+        await session.commit()
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+        gathered, _requirements = await engine._gate_inputs(
+            ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
+        )
+
+        assert gathered["sources"] == {"metar:VOBL": in_force}
 
     async def test_a_recorded_observation_is_offered_to_the_freshness_check(
         self, session, flight, settings
@@ -845,28 +907,24 @@ class TestAssuranceInvocation:
         ctx = await engine.open_incident(flight.id, "weather")
         from app.agents.contract import PlanTask
 
-        gathered = await engine._gate_inputs(
+        gathered, _requirements = await engine._gate_inputs(
             ctx, PlanTask(action=ActionType.check_connections, target_refs=["flight:1"])
         )
         assert gathered["sources"] == {"metar:VOBL": FIXED_NOW}
 
-    async def test_policy_inputs_are_absent_and_that_absence_is_recorded(
+    async def test_policy_requirements_come_from_stream_b(
         self, session, flight, settings, working_gate
     ):
-        """Tripwire for the one integration still outstanding.
+        """The tripwire this test used to be has fired, and the wiring is done.
 
-        `required_facts` and `constraints` come from Stream B's policy layer, which is
-        trip-scoped rather than action-scoped: there is no `required_facts_for(action_type)`
-        and nothing in the repository authors a gate-shaped constraint. Stream A must not
-        invent either, so `evidence_complete` and `policy_compliant` currently pass with
-        nothing to check.
+        `required_facts` and `constraints` are asked for, never assembled here. For an action
+        the pack has nothing to say about, Stream B answers `policy_bearing=False` with empty
+        lists — an authoritative answer, where this stream previously had a guess.
 
-        That is only acceptable while it is *visible*. This asserts both halves — the inputs
-        are empty, and the record says so. When Stream B exposes the contract, this test
-        fails, which is the point: it is the reminder to wire it rather than a rule that it
-        stay unwired.
+        The record still names it, because two empty checks passing must read as "nothing
+        applicable to check" rather than "policy verified".
         """
-        from app.orchestrator.engine import POLICY_INPUTS_PENDING
+        from app.orchestrator.engine import POLICY_NOT_APPLICABLE
 
         engine = build(session, settings=settings)
         ctx = await engine.open_incident(flight.id, "weather")
@@ -878,10 +936,57 @@ class TestAssuranceInvocation:
 
         for entry in recorded:
             coverage = entry.detail["gate_inputs"]
-            assert coverage["required_facts"] == 0
-            assert coverage["constraints"] == 0
-            assert coverage["notice"] == POLICY_INPUTS_PENDING
-            assert coverage["vacuous_checks"] == ["evidence_complete", "policy_compliant"]
+            assert coverage["policy_bearing"] is False
+            assert coverage["notice"] == POLICY_NOT_APPLICABLE
+            assert coverage["not_applicable_checks"] == ["evidence_complete", "policy_compliant"]
+            assert coverage["policy_mode"] == "charter"
+
+    async def test_a_policy_bearing_action_demands_real_facts(self, session, flight, settings):
+        """`evaluate_entitlements` is the one action the pack speaks to.
+
+        With no trip context supplied, Stream B's requirements fail closed, so the gate has
+        something to refuse. An entitlement decided on facts nobody supplied would be an
+        unreviewed legal claim, which is the outcome this prevents.
+        """
+        from app.agents.contract import PlanTask
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+
+        gathered, requirements = await engine._gate_inputs(
+            ctx,
+            PlanTask(action=ActionType.evaluate_entitlements, target_refs=[f"flight:{flight.id}"]),
+        )
+
+        assert requirements.policy_bearing is True
+        # Something real to check, rather than two vacuous passes.
+        assert gathered["required_facts"] or gathered["constraints"]
+
+    async def test_the_orchestrator_supplies_no_fact_it_was_not_given(
+        self, session, flight, settings
+    ):
+        """A fact invented to satisfy `evidence_complete` defeats the check entirely."""
+        from app.agents.contract import PlanTask
+
+        engine = build(session, settings=settings)
+        ctx = await engine.open_incident(flight.id, "weather")
+
+        gathered, _requirements = await engine._gate_inputs(
+            ctx,
+            PlanTask(action=ActionType.evaluate_entitlements, target_refs=[f"flight:{flight.id}"]),
+        )
+        assert gathered["provided_facts"] == {}
+
+        # Only what a caller explicitly passed comes through.
+        gathered, _requirements = await engine._gate_inputs(
+            ctx,
+            PlanTask(
+                action=ActionType.evaluate_entitlements,
+                target_refs=[f"flight:{flight.id}"],
+                inputs={"facts": {"event": {"kind": "delay"}}},
+            ),
+        )
+        assert gathered["provided_facts"] == {"event": {"kind": "delay"}}
 
     async def test_the_inputs_the_orchestrator_does_own_are_populated(
         self, session, flight, settings, working_gate
