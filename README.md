@@ -12,9 +12,9 @@ AI** (Registration ID 201) for the Coforge TechCon 2026 Hackathon.
 | Team | SkyForge AI |
 | Industry | Travel Transport Hospitality (TTH) → Airlines Operations |
 | Theme | Engineering the Autonomous Enterprise |
-| Current repository status | Wave 0 bootstrap complete: runnable scaffold, schema, contracts, fixtures and UI shell |
+| Current repository status | Stage 2 deterministic slice runs end to end: inject → risk → plan → gate → approval → execute → resolved, with `LLM_MODE=off` |
 | Submitted deck | Frozen; see [`docs/17-presentation-prompt.md`](docs/17-presentation-prompt.md) |
-| Next build target | Stage 2 working deterministic vertical slice |
+| Next build target | Stage 3 bounded reasoning: the three agents behind the same typed contracts |
 
 ## Architecture in one view
 
@@ -65,12 +65,78 @@ make doctor          # check the toolchain and required files first
 make env             # create .env from .env.example
 make up              # build and start api + postgres + redis + web
 make migrate         # apply the schema
+make seed            # load the fixed-seed dataset: 2083 rows, digest 70fbdf8947c638e5
+make demo            # inject bengaluru_storm -> one incident, risk 80 (severe)
 ```
+
+`make seed` and `make demo` are not optional. Without them the database is empty, there is no
+incident, and every incident endpoint correctly returns `ENTITY_NOT_FOUND`.
 
 Then open <http://127.0.0.1:8000/docs> for the API and <http://127.0.0.1:5173> for the console.
 
 Ports bind to `127.0.0.1` only. PostgreSQL and Redis are not published to the host at all —
 use `make db-shell`.
+
+### The recovery, end to end
+
+`make demo` opens the incident in `detected`. The workflow then advances on request, which is
+what makes the gate visible: it stops and waits rather than running to completion on its own.
+
+```bash
+REF=INC-2026-0820-VOBL-01
+API=http://127.0.0.1:8000/api/v1
+
+# 1. advance until the gate needs a person
+curl -sS -X POST $API/incidents/$REF/run                     # -> awaiting_approval
+
+# 2. see why it stopped
+curl -sS $API/incidents/$REF/assurance                       # notify_passengers: needs_human, high
+
+# 3. approve the one evaluation waiting on a decision
+ID=$(curl -sS $API/incidents/$REF/assurance \
+     | python3 -c 'import json,sys; print(next(e["id"] for e in json.load(sys.stdin)["evaluations"] if e["decision"]=="needs_human"))')
+curl -sS -X POST $API/assurance/$ID/decision \
+  -H 'Content-Type: application/json' \
+  -d '{"decision":"approved","reason":"confirmed against the ops board"}'
+
+# 4. finish
+curl -sS -X POST $API/incidents/$REF/run                     # -> resolved
+```
+
+The evaluation ID is derived rather than hardcoded, because it depends on how many tasks have
+already been assured.
+
+What that produces, all of it computed from seeded records:
+
+| | |
+| --- | --- |
+| Risk | index 80, band `severe`, six named factors with observed values |
+| `check_connections` | 8 of 10 connecting itineraries no longer feasible |
+| `assess_crew_impact` | 2 crew rotations at risk for this flight |
+| `notify_passengers` | held by the gate on `action_risk` alone, then 0 real and 174 simulated |
+| Timeline | An ordered, append-only record per step, every action referencing its assurance evaluation |
+
+The run stops at `awaiting_approval` because `notify_passengers` is a high-risk bulk external
+effect and `high_risk_requires_human` is set. Every check passes; the gate holds it for what
+the action *does*. That pause is the product, not a limitation.
+
+`make demo-reset` returns to a clean injected state and is safe to run repeatedly.
+
+### What has been verified, and where
+
+Being precise about this matters more than a green tick.
+
+| Verified | How |
+| --- | --- |
+| `alembic upgrade head`, `make seed`, `make demo` | Inside the built API image, against PostgreSQL 16 |
+| The recovery journey above, to `resolved` | The real Uvicorn process over HTTP, against PostgreSQL 16, with Redis deliberately unreachable |
+| Backend suite | 1068 passing; 1084 with `TRAVELOPS_TEST_DATABASE_URL` set, including 16/16 real-app PostgreSQL tests |
+| Determinism | Seed digest `70fbdf8947c638e5` reproduced across runs |
+
+**Not yet confirmed by anyone:** `docker compose up` orchestrating all four services together on
+a real machine, and the console at `:5173`. That is team action 2 in
+[`docs/31-team-actions.md`](docs/31-team-actions.md) and it is the one gap that needs a human with
+Docker Desktop.
 
 **The frontend runs with no backend.** `VITE_USE_FIXTURES=true` serves the committed fixtures in
 `fixtures/api/`, so UI work never waits on an endpoint:

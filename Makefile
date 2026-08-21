@@ -49,9 +49,8 @@ revision: ## Autogenerate a migration. STREAM C ONLY. usage: make revision m="ad
 seed: ## Seed the fixed-seed demo dataset
 	$(COMPOSE) run --rm api python -m app.cli seed
 
-reset: ## Drop and recreate schema, then re-seed
+reset: ## Remove demo-owned rows and re-seed. Leaves the schema in place
 	$(COMPOSE) run --rm api python -m app.cli reset
-	$(MAKE) migrate
 	$(MAKE) seed
 
 db-shell: ## psql into the database (not host-published; goes through the container)

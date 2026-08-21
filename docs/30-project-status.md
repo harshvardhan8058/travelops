@@ -2,8 +2,10 @@
 
 The definitive answer to "what is done, what is left, and what do you need from us."
 
-Verified against `main` at commit `2dd3833ad68e5b502bb7a8b199399230e121e3b1` (21 August 2026).
-Every repository fact below was re-checked against that commit rather than carried forward.
+Sections 3 and 4 were re-counted against `main` at commit `c6ff1ee` (21 August 2026, after
+PR #31) rather than carried forward. Sections 1, 2, 5 and 6 — what the team must supply, the UI
+assessment, the definition of done and the guidance for agents — are unchanged and still stand.
+
 Re-verify with:
 
 ```bash
@@ -161,36 +163,45 @@ kickoff prompts.
 
 ## 4. What is NOT done — the honest list
 
-Eighteen files contain `NotImplementedError`. That is deliberate: Wave 0 built the contracts
-and left each stream's logic to its owner, with required behaviour in the docstring.
+Re-counted on `main`, 21 August 2026: **ten** files contain `NotImplementedError`, down from
+eighteen at Wave 0. Six of them are the deferred services, one is Stage 3 retrieval, and three
+are deliberate refusal paths rather than gaps.
 
-The work is allocated across **four** Kiro accounts, not six. Ownership rationale and the
-token-load ranking: [`28-parallel-workstreams.md`](28-parallel-workstreams.md). Paste-ready
-prompts: [`kickoff/`](kickoff/README.md).
+| Remaining `NotImplementedError` | Why |
+| --- | --- |
+| `services/{hotel,transport,resource,flight_recovery,compensation,analytics_learning}.py` | The six deferred services. Their actions stay unregistered, so dispatch refuses them explicitly and the planner leaves them out of the plan and records the omission |
+| `memory/retrieval.py` | Stage 3 precedent retrieval. Not on the Stage 2 path |
+| `orchestrator/{dispatch,assurance_adapter,service_registry}.py` | Not gaps. These *raise or catch* it as the fail-closed path when a service or the gate is unavailable |
 
-| Stream | Files to implement | First slice | Token load |
-| --- | --- | --- | --- |
-| **A · Core & API** | `orchestrator/engine.py`, `events/bus.py` (new), `cli.py`, 9 endpoints out of `fixtures_router.py`, `agents/`, `observability/` | Event bus, then the engine run loop | Medium |
-| **B · Assurance & Policy** | `assurance/checks.py`, `assurance/gate.py`, `policy/{loader,resolver,engine}.py` | Six checks as pure functions | **Lowest** |
-| **C · Data, Providers & Services** | `providers/*` implementations, `data/loaders/`, `data/generators/`, 10 service `execute()` bodies, `memory/retrieval.py` | Airport loader, then the pairing generator | **Second highest** |
-| **D · Frontend** | `WhyPopover` upgrade, recovery workspace, assurance panel, approval queue, policy citation, cascade, report, sources, replay, command palette | Positioned popover, then the workspace layout | **Highest** |
+Ownership rationale and the token-load ranking:
+[`28-parallel-workstreams.md`](28-parallel-workstreams.md). Paste-ready prompts:
+[`kickoff/`](kickoff/README.md).
 
-Streams C and D each carry more than a sprint, so both prompts front-load the Stage 2 demo and
-mark the rest deferrable. C does Delay Risk, Connection, Crew Impact and Communication before
-the other six services. D does the recovery workspace and assurance panel before the other
-screens. Hitting a quota ceiling then costs a screen or a deferred service, never the demo.
+| Stream | State on `main` | What is left |
+| --- | --- | --- |
+| **A · Core & API** | Engine, event bus, five real endpoints, CLI, observability all landed | The three reasoning agents and their prompt files (Stage 3) |
+| **B · Assurance & Policy** | Six checks, fail-closed aggregation, pack loader, resolver, rules engine, `gate_requirements()` all landed | `POLICY_MODE=verified`, which is blocked on the primary source and SME sign-off, not on code |
+| **C · Data, Providers & Services** | Loaders, generators, seed, weather provider, four Stage 2 services, cascade rollup all landed | The six deferred services, `compensation` first because it makes the policy screen live |
+| **D · Frontend** | Recovery workspace, assurance panel, real contracts, risk factor fields all landed | Cascade graph, policy citation, executive report, provenance ledger, replay, command palette |
+
+Streams C and D each front-loaded the Stage 2 demo, so a quota ceiling now costs a screen or a
+deferred service, never the demo.
 
 ### Not verified, and I will not claim otherwise
 
-- **`docker compose up` now confirmed working** on Windows with Docker Desktop 29.x (WSL2) on
-  21 August: the stack builds, starts, and `/docs` serves all 12 endpoints. Still unconfirmed on
-  that machine: postgres/redis health, `alembic upgrade head`, and the console at `:5173`.
+- **`docker compose up` partly confirmed** on Windows with Docker Desktop 29.x (WSL2) on
+  21 August: the stack builds, starts, and `/docs` serves. Still unconfirmed on that machine:
+  postgres/redis health, `alembic upgrade head`, `make seed`, `make demo`, the recovery calls,
+  and the console at `:5173`. This is the only open Stage 2 readiness box — see
+  [`25-evaluation-readiness.md`](25-evaluation-readiness.md).
 - **The `make` targets do not run on Windows.** PowerShell equivalents are in
   [`31-team-actions.md`](31-team-actions.md).
-- **Fixture endpoints have no response models.** They return `Any`, so OpenAPI renders their
-  schema as `"string"`. Harmless now — Stream D hand-wrote its types — but Stream A must add a
-  Pydantic response model to each endpoint it makes real, otherwise a generated client would be
-  useless. The `add-api-endpoint` skill now requires this.
+- **The remaining fixture endpoints have no response models.** `/flights`, `/sources`,
+  `/incident-groups`, `/incidents/{id}/policy` and `/reports/{id}` still return `Any`, so
+  OpenAPI renders their schema as `"string"`. The five endpoints that are real —
+  incident detail, timeline, assurance, run and decision — each declare one, and the
+  `add-api-endpoint` skill requires it for any further replacement.
+- No live Groq call has been made, and no reasoning agent exists yet.
 - No live Groq call has been made.
 - No live METAR fetch has been made.
 - No real email has been sent.
