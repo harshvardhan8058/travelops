@@ -304,7 +304,7 @@ def entities_valid(*, referenced_refs: list[str], resolved: dict[str, Any]) -> C
 
 #: Generic comparison operators. Jurisdiction vocabulary lives in packs, never here.
 _COMPARISONS: Final[frozenset[str]] = frozenset({"eq", "ne", "lt", "lte", "gt", "gte"})
-_MEMBERSHIPS: Final[frozenset[str]] = frozenset({"in", "not_in"})
+_MEMBERSHIPS: Final[frozenset[str]] = frozenset({"in", "not_in", "disjoint_from"})
 _PRESENCE: Final[frozenset[str]] = frozenset({"required", "forbidden"})
 _AGGREGATES: Final[frozenset[str]] = frozenset({"max_total"})
 
@@ -314,8 +314,9 @@ CONSTRAINT_OPERATORS: Final[frozenset[str]] = _COMPARISONS | _MEMBERSHIPS | _PRE
 _RANK_SOFT_BREACH: Final = 1
 _RANK_BREACH: Final = 2
 _RANK_MISSING_FACT: Final = 3
-_RANK_PACK_UNAVAILABLE: Final = 4
-_RANK_UNKNOWN_OPERATOR: Final = 5
+_RANK_UNSATISFIABLE: Final = 4
+_RANK_PACK_UNAVAILABLE: Final = 5
+_RANK_UNKNOWN_OPERATOR: Final = 6
 
 
 def _compare(op: str, left: Any, right: Any) -> bool | None:
@@ -337,6 +338,11 @@ def _compare(op: str, left: Any, right: Any) -> bool | None:
             return left in right
         if op == "not_in":
             return left not in right
+        if op == "disjoint_from":
+            # Neither collection may contain anything the other does. Used to forbid a payload
+            # citing a rule the pack excluded from evaluation.
+            items = left if isinstance(left, list | tuple | set) else [left]
+            return not (set(items) & set(right))
         if op == "max_total":
             total = sum(left) if isinstance(left, list | tuple) else left
             return bool(total <= right)
@@ -354,8 +360,13 @@ def policy_compliant(
     optional `applies_to_actions` (a list scoping it to specific action types), `soft`
     (breach yields WARN rather than FAIL) and `id` (echoed into the reason).
 
-    A constraint entry carrying `pack_unavailable: true` fails with POLICY_PACK_UNAVAILABLE
-    — a selected rule whose pack could not be loaded must never read as compliant.
+    Two entries carry no field and cannot be satisfied by any payload, because they report a
+    determination already made upstream:
+
+      * `pack_unavailable: true` fails with POLICY_PACK_UNAVAILABLE — a selected rule whose
+        pack could not be loaded must never read as compliant.
+      * `unsatisfiable: true` fails with POLICY_CONSTRAINT_BREACH and the supplied `reason`,
+        for a policy block that is not shaped like a missing fact.
 
     An operator outside CONSTRAINT_OPERATORS is UNKNOWN_RULE_OPERATOR. This is the first
     condition in the gate's aggregation order: an unparseable constraint fails closed rather
@@ -373,6 +384,18 @@ def policy_compliant(
             continue
 
         label = str(constraint.get("id") or constraint.get("field") or "constraint")
+
+        if constraint.get("unsatisfiable"):
+            # The policy layer already determined this cannot proceed for a reason that is not
+            # shaped like a missing fact — an unresolved conflict between two entitlements, or
+            # a deferral to another jurisdiction. It is carried as a constraint that cannot be
+            # met, so the gate reaches the same conclusion through its normal path rather than
+            # needing a special case.
+            detail = str(constraint.get("reason") or "policy evaluation could not proceed")
+            problems.append(
+                (_RANK_UNSATISFIABLE, ReasonCode.POLICY_CONSTRAINT_BREACH, f"{label}: {detail}")
+            )
+            continue
 
         if constraint.get("pack_unavailable"):
             detail = str(constraint.get("reason") or "policy pack could not be loaded")

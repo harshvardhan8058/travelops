@@ -25,6 +25,7 @@ an evaluation and the mode endpoint must never disagree about which config was i
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -75,6 +76,32 @@ _SEVERITY: Final[dict[CheckState, int]] = {
 
 _KNOWN_ACTION_TYPES: Final[frozenset[str]] = frozenset(member.value for member in ActionType)
 
+#: Actions whose payload asserts a legal entitlement, and which therefore may not be
+#: authorised without policy-derived requirements. For these, empty `required_facts` and empty
+#: `constraints` are a defect rather than a clean sheet: both policy checks would pass without
+#: verifying anything, and the record would show two green ticks that mean nothing.
+#:
+#: Requirements come from `app.policy.requirements.gate_requirements`. Adding an action here is
+#: a reviewed change, because it makes that call mandatory for the action.
+POLICY_BEARING_ACTIONS: Final[frozenset[str]] = frozenset({ActionType.evaluate_entitlements.value})
+
+#: Keys of `GateInputs` a caller may supply as a plain mapping. Anything else in that mapping
+#: is treated as the proposed action's payload, which is what an unrecognised planner key is.
+_GATE_INPUT_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "required_facts",
+        "provided_facts",
+        "sources",
+        "referenced_refs",
+        "resolved_entities",
+        "payload",
+        "constraints",
+        "target_refs",
+        "pending_or_executed",
+        "extra_evidence_refs",
+    }
+)
+
 
 class GateInputs(BaseModel):
     """Everything the six checks need, gathered by the caller.
@@ -108,6 +135,36 @@ class GateInputs(BaseModel):
 
     # Recorded on the evaluation for audit; not consumed by any check.
     extra_evidence_refs: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_task(
+        cls,
+        *,
+        action_type: str,
+        inputs: Mapping[str, Any] | None = None,
+        target_refs: list[str] | None = None,
+        evidence_refs: list[str] | None = None,
+    ) -> GateInputs:
+        """Build inputs from an orchestrator task.
+
+        Recognised keys are read as the corresponding gate input; every other key becomes part
+        of the proposed action's `payload`, because that is what an unrecognised planner key is.
+        Doing the split here keeps `extra="forbid"` meaningful — a caller still cannot invent a
+        gate input — while not requiring the planner to know the gate's field names.
+        """
+        supplied = dict(inputs or {})
+        known = {key: value for key, value in supplied.items() if key in _GATE_INPUT_KEYS}
+        remainder = {key: value for key, value in supplied.items() if key not in _GATE_INPUT_KEYS}
+
+        payload = {**(known.pop("payload", None) or {}), **remainder}
+
+        return cls(
+            action_type=action_type,
+            payload=payload,
+            target_refs=known.pop("target_refs", None) or list(target_refs or []),
+            extra_evidence_refs=known.pop("extra_evidence_refs", None) or list(evidence_refs or []),
+            **known,
+        )
 
 
 def _coerce(check: CheckResult) -> CheckResult:
@@ -273,17 +330,83 @@ def _collect_refs(checks: list[CheckResult]) -> list[str]:
     return dedupe([ref for check in checks for ref in check.evidence_refs])
 
 
+_VACUITY_GUARDED: Final[dict[CheckName, tuple[str, ReasonCode]]] = {
+    CheckName.evidence_complete: ("required_facts", ReasonCode.MISSING_REQUIRED_FACT),
+    CheckName.policy_compliant: ("constraints", ReasonCode.POLICY_CONSTRAINT_BREACH),
+}
+
+_DERIVE_REQUIREMENTS_HINT: Final = (
+    "call app.policy.requirements.gate_requirements() and pass its required_facts and constraints"
+)
+
+
+def _refuse_vacuous(checks: list[CheckResult], inputs: GateInputs) -> list[CheckResult]:
+    """Refuse a policy-bearing action whose policy checks verified nothing.
+
+    `evidence_complete` with no required facts and `policy_compliant` with no constraints both
+    return PASS. For most actions that is honest — a hotel reservation has no statutory facts to
+    check. For an action that asserts a legal entitlement it is a defect: the requirements were
+    never derived, and the record would show two green ticks that mean nothing.
+
+    A check that already failed on its own merits is left exactly as it is. Overwriting it would
+    replace a precise diagnosis, such as POLICY_PACK_UNAVAILABLE, with a generic one.
+    """
+    if inputs.action_type not in POLICY_BEARING_ACTIONS:
+        return checks
+
+    refused: list[CheckResult] = []
+    for check in checks:
+        guarded = _VACUITY_GUARDED.get(check.name)
+        if guarded is None or check.state is not CheckState.passed:
+            refused.append(check)
+            continue
+
+        field, code = guarded
+        if getattr(inputs, field):
+            refused.append(check)
+            continue
+
+        refused.append(
+            CheckResult(
+                name=check.name,
+                state=CheckState.failed,
+                reason_code=code,
+                reason=(
+                    f"no {field} supplied for '{inputs.action_type}', so this check verified "
+                    f"nothing; {_DERIVE_REQUIREMENTS_HINT}"
+                ),
+            )
+        )
+    return refused
+
+
 def evaluate(
     *,
-    inputs: GateInputs,
     config: AssuranceConfig | None,
+    inputs: GateInputs | Mapping[str, Any] | None = None,
     config_hash: str | None = None,
     now: datetime | None = None,
+    action_type: str | None = None,
+    target_refs: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
+    incident_state: str | None = None,
 ) -> AssuranceResult:
     """Run the Decision Assurance Gate. The canonical entry point for authorisation.
 
     Runs the six checks in CHECK_ORDER against `inputs`, then applies the fail-closed
     aggregation order. Callers must not assemble or interpret the checks themselves.
+
+    Two call shapes, the same evaluation:
+
+        evaluate(inputs=GateInputs(...), config=config, config_hash=digest, now=moment)
+
+        evaluate(action_type=..., target_refs=[...], inputs={...},
+                 evidence_refs=[...], incident_state=..., config=config)
+
+    The second is the orchestrator adapter's interface, where `inputs` is the planner's task
+    dictionary; recognised keys become gate inputs and the rest becomes the action payload.
+    `incident_state` is accepted for interface compatibility and is not consumed: the gate
+    authorises an action on evidence, and the state machine is the orchestrator's to enforce.
 
     Pass `now` explicitly to keep an evaluation reproducible; it defaults to the current UTC
     time for convenience. `config_hash` should be the digest from `load_config_with_digest`
@@ -292,11 +415,24 @@ def evaluate(
     A `config` of None yields needs_human with all six checks FAIL: the gate cannot authorise
     anything it has no configuration for.
     """
-    if config is None:
-        return aggregate(
-            checks=[], action_type=inputs.action_type, config=None, config_hash=config_hash
+    if isinstance(inputs, GateInputs):
+        resolved = inputs
+    else:
+        if action_type is None:
+            raise TypeError("evaluate() requires either inputs=GateInputs(...) or action_type=")
+        resolved = GateInputs.from_task(
+            action_type=action_type,
+            inputs=inputs,
+            target_refs=target_refs,
+            evidence_refs=evidence_refs,
         )
 
+    if config is None:
+        return aggregate(
+            checks=[], action_type=resolved.action_type, config=None, config_hash=config_hash
+        )
+
+    inputs = resolved
     moment = now or datetime.now(UTC)
 
     checks = [
@@ -317,6 +453,8 @@ def evaluate(
         ),
         action_risk(action_type=inputs.action_type, config=config),
     ]
+
+    checks = _refuse_vacuous(checks, inputs)
 
     result = aggregate(
         checks=checks,
