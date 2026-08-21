@@ -57,9 +57,11 @@ Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
 ## Parallel work
 
 Six Kiro accounts run against this repo. **Stay inside your stream's owned paths** — see
-`docs/28-parallel-workstreams.md`. Never edit `migrations/`, `models/`, the generated API client,
-`policy_packs/`, compose/Makefile, or this steering file unless your stream owns it. Request the change
-from the owning stream instead.
+`docs/28-parallel-workstreams.md` for ownership and `docs/29-kickoff-prompts.md` for per-stream scope.
+Never edit `migrations/`, `models/`, the generated API client, `policy_packs/`, compose/Makefile, or this
+steering file unless your stream owns it. Request the change from the owning stream instead.
+
+`migrations/` is **Stream C only**. Two streams generating migrations produces unorderable heads.
 
 ## UI rules — read `docs/21-design-system.md` and `docs/27-ui-specification.md` before writing any component
 
