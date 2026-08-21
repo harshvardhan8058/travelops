@@ -21,7 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PlayCircle } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
-import type { HumanDecision, IncidentDetail } from '@/api/types';
+import type { AssuranceEvaluation, HumanDecision, IncidentDetail, RunResponse } from '@/api/types';
 import {
   ErrorState,
   LoadingState,
@@ -86,10 +86,23 @@ function latestRecord(incident: IncidentDetail): { at: string; label: string } |
   return stamps[stamps.length - 1] ?? null;
 }
 
-function Header({ incident }: { incident: IncidentDetail }) {
+function Header({
+  incident,
+  onRun,
+  isRunning,
+  runError,
+}: {
+  incident: IncidentDetail;
+  onRun: () => void;
+  isRunning: boolean;
+  runError?: string | null;
+}) {
   const { flight } = incident;
   const latest = latestRecord(incident);
-  const isResumable = incident.state !== 'resolved' && incident.state !== 'failed';
+  // Terminal states cannot advance: the backend returns a note saying so rather than erroring,
+  // but there is no reason to offer the control.
+  const isTerminal =
+    incident.state === 'resolved' || incident.state === 'blocked' || incident.state === 'failed';
 
   return (
     <Panel>
@@ -131,25 +144,38 @@ function Header({ incident }: { incident: IncidentDetail }) {
 
         <div className="ml-auto flex items-center gap-2">
           {/*
-           * Rendered, disabled, and honest about why. A button that silently does nothing is
-           * worse in a demo than one that names the endpoint it is waiting for.
+           * The real POST /incidents/{id}/run. Disabled for two honest reasons rather than one
+           * vague one: a terminal incident cannot advance, and fixture mode has no endpoint to
+           * call. Both say which applies.
            */}
           <button
             type="button"
-            disabled
-            aria-disabled
-            className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle px-2 py-1 text-label uppercase text-fg-muted opacity-60"
+            onClick={onRun}
+            disabled={isRunning || isTerminal || !api.canWrite}
+            aria-disabled={isRunning || isTerminal || !api.canWrite}
+            className="inline-flex items-center gap-1.5 rounded-sm border border-accent-border bg-accent-subtle px-2 py-1 text-label uppercase text-accent transition-colors duration-hover ease-out hover:bg-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:border-border-subtle disabled:bg-inset disabled:text-fg-muted"
           >
             <PlayCircle size={14} strokeWidth={1.5} aria-hidden />
-            Continue workflow
+            {isRunning ? 'Running…' : 'Run workflow'}
           </button>
-          <span className="text-caption text-fg-muted">
-            {isResumable
-              ? 'awaiting POST /incidents/{id}/continue from Stream A'
-              : 'incident is not resumable'}
+          <span className="max-w-[280px] text-caption text-fg-muted">
+            {!api.canWrite
+              ? 'fixtures are being served — point the UI at the live API to run'
+              : isTerminal
+                ? `incident is terminal in ${incident.state}`
+                : 'advances the workflow one run'}
           </span>
         </div>
       </div>
+
+      {runError && (
+        <p
+          role="alert"
+          className="border-t border-state-crit/30 bg-state-crit-bg px-3 py-1.5 text-caption text-state-crit"
+        >
+          {runError}
+        </p>
+      )}
 
       <div className="border-t border-border-subtle px-3 py-2">
         <StateRail rail={incident.state_rail} current={incident.state} />
@@ -158,11 +184,36 @@ function Header({ incident }: { incident: IncidentDetail }) {
   );
 }
 
+/** Pseudonymous, and the backend's own default. Never a name or an email address. */
+const ACTOR_ID = 'operator-1';
+
+/**
+ * The persisted decision embedded on an evaluation, normalised to the UI's shape.
+ *
+ * This is what makes a reload truthful: once the API has the record, the panel reads it from the
+ * API rather than from whatever this browser session happens to remember.
+ */
+function persistedDecision(evaluation: AssuranceEvaluation): HumanDecision | undefined {
+  const record = evaluation.human_decision;
+  if (!record) return undefined;
+  return {
+    id: record.id,
+    assurance_id: evaluation.id,
+    decision: record.decision,
+    actor_id: record.actor_id,
+    reason: record.reason,
+    decided_at: record.decided_at,
+    persisted: true,
+  };
+}
+
 export function RecoveryWorkspace() {
   const { incidentId = '' } = useParams();
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [decisions, setDecisions] = useState<Record<number, HumanDecision>>({});
+  const [lastRun, setLastRun] = useState<RunResponse | null>(null);
+  const [runToken, setRunToken] = useState(() => crypto.randomUUID());
 
   const incidentQuery = useQuery({
     queryKey: ['incident', incidentId],
@@ -181,12 +232,14 @@ export function RecoveryWorkspace() {
 
   /*
    * Land on the blocked task. An operator opening this screen mid-disruption wants the thing
-   * waiting for them, not task 1 which already succeeded.
+   * waiting for them, not task 1 which already succeeded. `plan` is null until the orchestrator
+   * proposes one, so there is nothing to select on a freshly detected incident.
    */
   useEffect(() => {
-    if (!incident || selectedTaskId !== null) return;
-    const blocked = incident.plan.tasks.find((task) => task.state === 'needs_human');
-    setSelectedTaskId(blocked?.id ?? incident.plan.tasks[0]?.id ?? null);
+    if (!incident?.plan || selectedTaskId !== null) return;
+    const tasks = incident.plan.tasks;
+    const blocked = tasks.find((task) => task.state === 'needs_human');
+    setSelectedTaskId(blocked?.id ?? tasks[0]?.id ?? null);
   }, [incident, selectedTaskId]);
 
   const decisionMutation = useMutation({
@@ -195,30 +248,42 @@ export function RecoveryWorkspace() {
       decision: 'approved' | 'rejected';
       reason: string;
     }): Promise<HumanDecision> => {
-      const record: Omit<HumanDecision, 'persisted'> = {
+      /*
+       * The real endpoint exists now: POST /assurance/{id}/decision, verified against the live
+       * API including its replay behaviour and its 409 on a conflicting decision. The
+       * session-only branch remains for fixture mode, because the demo path must run with no
+       * backend — and it is labelled as unpersisted on screen rather than passing for an audit
+       * record.
+       */
+      if (api.canWrite) {
+        const written = await api.submitDecision(
+          input.assuranceId,
+          input.decision,
+          input.reason,
+          ACTOR_ID,
+        );
+        return {
+          assurance_id: written.assurance_id,
+          decision: written.decision,
+          actor_id: written.actor_id,
+          reason: written.reason,
+          decided_at: written.decided_at,
+          persisted: true,
+        };
+      }
+
+      return {
         assurance_id: input.assuranceId,
         decision: input.decision,
-        // The backend sets the real pseudonymous operator ID from the session. This is the
-        // client's placeholder and is labelled as local wherever it appears.
-        actor_id: 'demo-operator',
+        actor_id: ACTOR_ID,
         reason: input.reason,
         decided_at: new Date().toISOString(),
+        persisted: false,
       };
-
-      /*
-       * POST /assurance/{id}/decision is listed in docs/26 but is not in docs/openapi.json
-       * and no fixture serves it. Rather than invent a response shape, the decision is kept
-       * in session state and rendered as explicitly unpersisted. When the endpoint exists,
-       * `usingFixtures` is false and this posts for real with no other change.
-       */
-      if (api.usingFixtures) return { ...record, persisted: false };
-
-      await api.submitDecision(input.assuranceId, input.decision, input.reason);
-      return { ...record, persisted: true };
     },
     onSuccess: (record) => {
       setDecisions((previous) => ({ ...previous, [record.assurance_id]: record }));
-      // The gate record and the timeline both change once a decision is persisted.
+      // The gate record, the plan and the timeline all move once a decision is persisted.
       if (record.persisted) {
         void queryClient.invalidateQueries({ queryKey: ['assurance', incidentId] });
         void queryClient.invalidateQueries({ queryKey: ['incident', incidentId] });
@@ -227,8 +292,33 @@ export function RecoveryWorkspace() {
     },
   });
 
+  /**
+   * Advance the workflow. This is the real `POST /incidents/{id}/run`.
+   *
+   * Two behaviours worth knowing at the call site: stopping at `awaiting_approval` is a SUCCESS
+   * response with `is_terminal: false` and a `note`, not an error; and an `Idempotency-Key`
+   * makes a double click replay the recorded result instead of taking another step.
+   */
+  const runMutation = useMutation({
+    mutationFn: () => api.runIncident(incidentId, `run:${incidentId}:${runToken}`),
+    onSuccess: (result) => {
+      setLastRun(result);
+      // A fresh key so the next deliberate click is a new run rather than a replay.
+      setRunToken(crypto.randomUUID());
+      void queryClient.invalidateQueries({ queryKey: ['incident', incidentId] });
+      void queryClient.invalidateQueries({ queryKey: ['assurance', incidentId] });
+      void queryClient.invalidateQueries({ queryKey: ['timeline', incidentId] });
+    },
+  });
+
   const selectedTask = useMemo(
-    () => incident?.plan.tasks.find((task) => task.id === selectedTaskId),
+    () => incident?.plan?.tasks.find((task) => task.id === selectedTaskId),
+    [incident, selectedTaskId],
+  );
+
+  /** The action for the selected task, which is what explains a refusal the gate did not cause. */
+  const selectedAction = useMemo(
+    () => incident?.actions.find((action) => action.plan_task_id === selectedTaskId),
     [incident, selectedTaskId],
   );
 
@@ -269,7 +359,48 @@ export function RecoveryWorkspace() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      <Header incident={incident} />
+      <Header
+        incident={incident}
+        onRun={() => runMutation.mutate()}
+        isRunning={runMutation.isPending}
+        runError={
+          runMutation.error instanceof ApiError
+            ? `${runMutation.error.code}: ${runMutation.error.message}`
+            : runMutation.error
+              ? 'Could not advance the workflow.'
+              : null
+        }
+      />
+
+      {/*
+       * The run result, verbatim. `note` carries the backend's own explanation of why a run
+       * stopped — including a refusal such as SERVICE_NOT_IMPLEMENTED — and paraphrasing it
+       * would be the moment this UI started editorialising over the audit trail.
+       */}
+      {lastRun && (
+        <Panel>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
+            <span className="text-label uppercase text-fg-muted">Last run</span>
+            <span className="flex items-center gap-1.5">
+              <StateBadge status={lastRun.previous_state} />
+              <span className="text-fg-muted">→</span>
+              <StateBadge status={lastRun.state} />
+            </span>
+            <span className="text-caption uppercase text-fg-muted">
+              steps <MonoValue>{lastRun.steps_taken}</MonoValue>
+            </span>
+            <span className="text-caption uppercase text-fg-muted">
+              terminal <MonoValue>{String(lastRun.is_terminal)}</MonoValue>
+            </span>
+            {lastRun.replayed && <StateBadge status="skipped" label="replayed" />}
+          </div>
+          {lastRun.note && (
+            <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-secondary">
+              {lastRun.note}
+            </p>
+          )}
+        </Panel>
+      )}
 
       {/*
        * Fixed left and right columns with a flexible centre: the evidence list and the
@@ -308,7 +439,19 @@ export function RecoveryWorkspace() {
               evaluation={selectedEvaluation}
               configVersion={assuranceQuery.data?.config_version}
               configHash={assuranceQuery.data?.config_hash}
-              decision={selectedEvaluation ? decisions[selectedEvaluation.id] : undefined}
+              scopeReference={assuranceQuery.data?.incident_reference}
+              incidentReference={incident.reference}
+              action={selectedAction}
+              canWrite={api.canWrite}
+              /*
+               * The API's own record wins. A session-only copy is a fixture-mode fallback, never
+               * an override of what the audit trail says.
+               */
+              decision={
+                selectedEvaluation
+                  ? (persistedDecision(selectedEvaluation) ?? decisions[selectedEvaluation.id])
+                  : undefined
+              }
               isSubmitting={decisionMutation.isPending}
               submitError={
                 decisionMutation.error instanceof ApiError

@@ -10,11 +10,13 @@
 
 import type {
   AssuranceResponse,
+  DecisionResponse,
   FlightsResponse,
   IncidentDetail,
   IncidentGroupDetail,
   PolicyResponse,
   ReadyStatus,
+  RunResponse,
   SystemMode,
   TimelineResponse,
 } from './types';
@@ -100,6 +102,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   usingFixtures: USE_FIXTURES,
 
+  /**
+   * Writes need the live API. There is no fixture for a POST, and synthesising a plausible
+   * response would put a state transition on screen that never happened — the one thing an
+   * audit-trail product must not do. The UI disables write affordances and says why instead.
+   */
+  canWrite: !USE_FIXTURES,
+
   systemMode: () => request<SystemMode>('/system/mode'),
   ready: () => request<ReadyStatus>('/health/ready'),
   flights: () => request<FlightsResponse>('/flights'),
@@ -112,10 +121,33 @@ export const api = {
   incidentGroup: (id: string) => request<IncidentGroupDetail>(`/incident-groups/${id}`),
   report: (id: string) => request<unknown>(`/reports/${id}`),
 
-  /** Stream F: POST /assurance/{id}/decision with a mandatory reason. */
-  submitDecision: (assuranceId: number, decision: 'approved' | 'rejected', reason: string) =>
-    request<unknown>(`/assurance/${assuranceId}/decision`, {
+  /**
+   * Advance the workflow. Stopping at `awaiting_approval` is a SUCCESS response with
+   * `is_terminal: false` and a `note` — not an error — so callers must read the body rather
+   * than just the status.
+   *
+   * An `Idempotency-Key` makes a repeat return the recorded result with `replayed: true`
+   * instead of taking another step, which is what makes a double-clicked button safe.
+   */
+  runIncident: (id: string, idempotencyKey?: string) =>
+    request<RunResponse>(`/incidents/${id}/run`, {
       method: 'POST',
-      body: JSON.stringify({ decision, reason }),
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+    }),
+
+  /**
+   * Operator approve/reject. `reason` is mandatory server-side (1..2000 chars) and `actor_id`
+   * is pseudonymous. A second, matching decision replays; a CONFLICTING one is refused with
+   * 409 INVALID_STATE_TRANSITION, because the record is immutable.
+   */
+  submitDecision: (
+    assuranceId: number,
+    decision: 'approved' | 'rejected',
+    reason: string,
+    actorId = 'operator-1',
+  ) =>
+    request<DecisionResponse>(`/assurance/${assuranceId}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, reason, actor_id: actorId }),
     }),
 };

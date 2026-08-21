@@ -18,16 +18,19 @@ import { ChevronDown, ChevronRight, Cpu, Workflow } from 'lucide-react';
 import { useState } from 'react';
 import { clsx } from 'clsx';
 
-import type { ActionRecord, IncidentDetail, PlanTaskRow } from '@/api/types';
-import { MonoValue, Panel, StateBadge, WhyPopover } from '@/components/ui/primitives';
+import type { ActionRecord, IncidentDetail, PlanSummary, PlanTaskRow } from '@/api/types';
+import { EmptyState, MonoValue, Panel, StateBadge, WhyPopover } from '@/components/ui/primitives';
 import { actionDerivation } from '@/components/ui/derivation';
+import { refusalFor } from './refusal';
 
 /**
  * A plan is either model-proposed or deterministic. There is no third state, and no "maybe":
  * `LLM_MODE=off` must still complete a recovery, so the fallback is a first-class path rather
  * than an error condition.
  */
-function GeneratorChip({ plan }: { plan: IncidentDetail['plan'] }) {
+function GeneratorChip({ plan }: { plan: PlanSummary }) {
+  // Classifies on the token, not the prose: the real API returns 'fallback-playbook' while the
+  // committed fixture returns 'fallback-playbook · deterministic'.
   const isDeterministic = /fallback|playbook|deterministic/i.test(plan.generator);
   const Icon = isDeterministic ? Workflow : Cpu;
 
@@ -160,14 +163,26 @@ function TaskRow({
             <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">action</dt>
             <dd className="min-w-0 flex-1">
               {action ? (
-                <WhyPopover derivation={actionDerivation(action, incident)}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <StateBadge
-                      status={action.status === 'success' ? 'succeeded' : action.status}
-                    />
-                    <MonoValue muted>{action.actor}</MonoValue>
-                  </span>
-                </WhyPopover>
+                <>
+                  <WhyPopover derivation={actionDerivation(action, incident)}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <StateBadge
+                        status={action.status === 'success' ? 'succeeded' : action.status}
+                      />
+                      <MonoValue muted>{action.actor}</MonoValue>
+                    </span>
+                  </WhyPopover>
+                  {/* A refused action gets designed copy keyed off its stable reason code. */}
+                  <p
+                    className={
+                      refusalFor(action.reason)
+                        ? 'mt-1 text-caption text-state-warn'
+                        : 'mt-1 text-caption text-fg-muted'
+                    }
+                  >
+                    {refusalFor(action.reason)?.headline ?? action.reason}
+                  </p>
+                </>
               ) : (
                 <span className="text-caption text-fg-muted">
                   nothing executed — no action record references this task
@@ -212,6 +227,26 @@ export function PlanColumn({
 }) {
   const { plan, actions } = incident;
   const actionByTask = new Map(actions.map((action) => [action.plan_task_id, action]));
+
+  /*
+   * `plan` is null until the orchestrator proposes one — the normal state of a freshly opened
+   * incident, confirmed against the live API. Designed copy rather than an empty panel, which
+   * would read as a failed fetch during a demo.
+   */
+  if (!plan) {
+    return (
+      <Panel title="Plan" className="flex min-h-0 flex-col overflow-hidden">
+        <EmptyState
+          title="No plan proposed yet"
+          description={
+            incident.state === 'detected' || incident.state === 'assessing'
+              ? 'The orchestrator proposes a plan during the planning stage. Run the workflow to advance this incident.'
+              : `The endpoint returned no plan for this incident while it is in ${incident.state}. Nothing is inferred from the task list, because there is no task list.`
+          }
+        />
+      </Panel>
+    );
+  }
 
   return (
     <Panel title="Plan" className="flex min-h-0 flex-col overflow-hidden">

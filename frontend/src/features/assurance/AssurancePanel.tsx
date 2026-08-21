@@ -30,12 +30,14 @@ import { AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 import { CHECK_ORDER } from '@/api/types';
 import type {
+  ActionRecord,
   AssuranceEvaluation,
   CheckName,
   CheckResult,
   HumanDecision,
   PlanTaskRow,
 } from '@/api/types';
+import { refusalFor } from '@/features/incident/refusal';
 import {
   CheckStateBadge,
   EmptyState,
@@ -161,12 +163,14 @@ function ApprovalPanel({
   onSubmit,
   isSubmitting,
   submitError,
+  canWrite,
 }: {
   evaluation: AssuranceEvaluation;
   decision?: HumanDecision;
   onSubmit: (decision: 'approved' | 'rejected', reason: string) => void;
   isSubmitting: boolean;
   submitError?: string | null;
+  canWrite: boolean;
 }) {
   const [reason, setReason] = useState('');
   const [reasonMissing, setReasonMissing] = useState(false);
@@ -293,6 +297,18 @@ function ApprovalPanel({
         {isSubmitting && <span className="text-caption text-fg-muted">submitting…</span>}
       </div>
 
+      {/*
+       * Fixture mode still lets an operator go through the motions, because the demo path must
+       * work with no backend — but it says up front that the record will not be persisted,
+       * rather than letting someone discover that after the fact.
+       */}
+      {!canWrite && (
+        <p className="mt-1.5 text-caption text-fg-muted">
+          Fixtures are being served, so this decision will be held in this browser session only.
+          Point the UI at the live API to write an audit record.
+        </p>
+      )}
+
       {submitError && (
         <p role="alert" className="mt-1.5 text-caption text-state-crit">
           {submitError}
@@ -307,15 +323,25 @@ export function AssurancePanel({
   evaluation,
   configVersion,
   configHash,
+  scopeReference,
+  incidentReference,
+  action,
   decision,
   onSubmitDecision,
   isSubmitting,
   submitError,
+  canWrite,
 }: {
   task?: PlanTaskRow;
   evaluation?: AssuranceEvaluation;
   configVersion?: string;
   configHash?: string;
+  /** `AssuranceResponse.incident_reference` — which incident these gate records belong to. */
+  scopeReference?: string;
+  /** The incident actually on screen, for the mismatch check. */
+  incidentReference?: string;
+  /** This task's action, when one exists. Explains a refusal the gate did not cause. */
+  action?: ActionRecord;
   decision?: HumanDecision;
   onSubmitDecision: (
     assuranceId: number,
@@ -324,7 +350,32 @@ export function AssurancePanel({
   ) => void;
   isSubmitting: boolean;
   submitError?: string | null;
+  /** False while fixtures are served: no endpoint can take a decision. */
+  canWrite: boolean;
 }) {
+  /*
+   * `incident_reference` is consumed, not decorated. If the assurance payload ever describes a
+   * different incident from the one on screen, an operator could approve an action belonging to
+   * another flight — so it is stated loudly rather than rendered quietly.
+   */
+  const scopeMismatch =
+    Boolean(scopeReference) && Boolean(incidentReference) && scopeReference !== incidentReference;
+
+  const scopeBanner = scopeMismatch ? (
+    <p
+      role="alert"
+      className="flex items-start gap-1.5 border-b border-state-crit/30 bg-state-crit-bg px-3 py-2 text-caption text-state-crit"
+    >
+      <ShieldAlert size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
+      <span>
+        These gate records are scoped to{' '}
+        <MonoValue className="text-state-crit">{scopeReference}</MonoValue>, but this screen is
+        showing <MonoValue className="text-state-crit">{incidentReference}</MonoValue>. Do not act
+        on them.
+      </span>
+    </p>
+  ) : null;
+
   if (!task) {
     return (
       <Panel title="Assurance">
@@ -336,17 +387,36 @@ export function AssurancePanel({
     );
   }
 
+  /*
+   * Honest when there is no gate record. Three distinct situations, and collapsing them into one
+   * "nothing here" message would hide the only one that is a defect:
+   *
+   *   assurance_id null                  -> not evaluated yet. Normal.
+   *   assurance_id set, evaluation absent -> the endpoint owes us a record. A gap, not a pass.
+   *   task needs_human with no record     -> an approval UI would be a trap: there is nothing
+   *                                          to approve, so it is deliberately not offered.
+   */
   if (!evaluation) {
+    const refusal = refusalFor(action?.reason);
     return (
       <Panel title="Assurance">
+        {scopeBanner}
         <EmptyState
-          title="No evaluation returned"
+          title={task.assurance_id === null ? 'Not evaluated yet' : 'No evaluation returned'}
           description={
             task.assurance_id === null
-              ? `Task ${task.task_order} (${task.action_type}) has not been evaluated yet, so no gate record exists.`
+              ? `Task ${task.task_order} (${task.action_type}) has not reached the gate, so no record exists. Nothing may execute without one.`
               : `Task ${task.task_order} references evaluation ${task.assurance_id}, but the assurance endpoint did not return it. Nothing may execute without its gate record, so this is a gap rather than a pass.`
           }
         />
+        {task.state === 'needs_human' && (
+          <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
+            This task reads <MonoValue muted>needs_human</MonoValue>, but no gate record is
+            available, so no approve or reject control is offered — approving something the gate has
+            not evaluated is exactly what the gate exists to prevent.
+            {refusal ? ` ${refusal.detail}` : ''}
+          </p>
+        )}
       </Panel>
     );
   }
@@ -368,6 +438,7 @@ export function AssurancePanel({
         </span>
       }
     >
+      {scopeBanner}
       <div className="border-b border-border-subtle bg-inset px-3 py-1.5">
         <MonoValue>{evaluation.action_type}</MonoValue>
         {/* Always visible: a replay must prove which semantics applied. */}
@@ -441,12 +512,51 @@ export function AssurancePanel({
         </div>
       )}
 
+      {/*
+       * The gate authorised this, but the task is still waiting — because EXECUTION refused, not
+       * because a human is needed. Without this the panel looks self-contradictory: an
+       * `execute_flagged` decision beside a `needs_human` task. No approval control is offered,
+       * because approving it would change nothing.
+       */}
+      {evaluation.decision !== 'needs_human' &&
+        task.state === 'needs_human' &&
+        (() => {
+          const refusal = refusalFor(action?.reason);
+          return (
+            <div className="border-b border-border-subtle bg-state-warn-bg px-3 py-2">
+              <p className="flex items-start gap-1.5 text-caption text-state-warn">
+                <AlertTriangle
+                  size={12}
+                  strokeWidth={1.5}
+                  className="mt-0.5 shrink-0"
+                  aria-hidden
+                />
+                <span>
+                  The gate returned{' '}
+                  <MonoValue className="text-state-warn">{evaluation.decision}</MonoValue>, so this
+                  task was authorised. It is waiting because execution did not complete.
+                </span>
+              </p>
+              {refusal ? (
+                <p className="mt-1.5 text-caption text-fg-secondary">
+                  <MonoValue muted>{refusal.code}</MonoValue> — {refusal.detail}
+                </p>
+              ) : (
+                action?.reason && (
+                  <p className="mt-1.5 text-caption text-fg-secondary">{action.reason}</p>
+                )
+              )}
+            </div>
+          );
+        })()}
+
       {evaluation.decision === 'needs_human' && (
         <ApprovalPanel
           evaluation={evaluation}
           decision={decision}
           isSubmitting={isSubmitting}
           submitError={submitError}
+          canWrite={canWrite}
           onSubmit={(verdict, reason) => onSubmitDecision(evaluation.id, verdict, reason)}
         />
       )}

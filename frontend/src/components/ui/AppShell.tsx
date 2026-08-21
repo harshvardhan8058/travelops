@@ -177,8 +177,8 @@ export function AppShell({
           <div className="flex shrink-0 items-center gap-2 border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5">
             <StateBadge status="needs_human" label="awaiting approval" />
             <span className="text-body text-state-warn">
-              <MonoValue className="text-state-warn">{blockedCount}</MonoValue> action
-              {blockedCount === 1 ? '' : 's'} require an operator decision
+              <MonoValue className="text-state-warn">{blockedCount}</MonoValue>{' '}
+              {blockedCount === 1 ? 'action requires' : 'actions require'} an operator decision
             </span>
             <NavLink
               to="/assurance"

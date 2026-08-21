@@ -31,6 +31,7 @@ import type {
   FlightRow,
   IncidentDetail,
   Provenance,
+  RiskEvidence,
   WeatherObservation,
 } from '@/api/types';
 
@@ -211,8 +212,8 @@ export function flightRiskDerivation(flight: FlightRow, origin?: AirportConditio
  * useless — it would look like a bug in the freshness check.
  */
 export function incidentRiskDerivation(
-  risk: IncidentDetail['evidence']['risk'],
-  weather: WeatherObservation,
+  risk: RiskEvidence,
+  weather: WeatherObservation | null,
 ): Derivation {
   const inputs: DerivationInput[] = risk.factors.map((factor) => ({
     label: factor.name.replace(/_/g, ' '),
@@ -223,11 +224,22 @@ export function incidentRiskDerivation(
     ]
       .filter(isPresent)
       .join(' · '),
-    provenance: weather.provenance,
+    provenance: weather?.provenance,
   }));
 
   const absences: DerivationAbsence[] = [];
-  if (weather.observation_age_minutes === undefined) {
+  if (risk.factors.length === 0) {
+    absences.push({
+      label: 'factors',
+      detail: 'the endpoint returned an index and a band with no contributing factors',
+    });
+  }
+  if (!weather) {
+    absences.push({
+      label: 'weather observation',
+      detail: 'null on this incident — no observation is recorded for the origin airport',
+    });
+  } else if (weather.observation_age_minutes === undefined) {
     absences.push({
       label: 'observation age',
       detail: 'not recorded on this endpoint — the UI does not compute one from the wall clock',
@@ -236,11 +248,11 @@ export function incidentRiskDerivation(
 
   return {
     title: `Risk index ${risk.risk_index} · ${risk.risk_level}`,
-    subtitle: weather.airport_icao,
+    subtitle: weather?.airport_icao,
     inputs,
     rule: { kind: 'rule', id: 'delay risk rule set', version: risk.rule_version, note: risk.note },
-    when: [{ label: 'observed', at: weather.observed_at }],
-    evidenceRefs: [weather.provenance.source_ref].filter(isPresent),
+    when: weather ? [{ label: 'observed', at: weather.observed_at }] : [],
+    evidenceRefs: [...(risk.evidence_refs ?? []), weather?.provenance.source_ref].filter(isPresent),
     absences,
     caveat: RISK_CAVEAT,
   };
@@ -426,11 +438,12 @@ export function actionDerivation(
       value:
         action.human_decision_id === null ? 'not required' : `decision ${action.human_decision_id}`,
     },
+    { label: 'provenance', value: action.provenance_kind ?? 'not recorded' },
   ];
 
   return {
     title: `Action ${action.id} · ${action.status}`,
-    subtitle: `task ${action.plan_task_id} · ${incident.reference}`,
+    subtitle: `${action.action_type ?? `task ${action.plan_task_id}`} · ${incident.reference}`,
     inputs,
     rule: {
       kind: 'config',
