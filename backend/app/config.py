@@ -1,0 +1,289 @@
+"""Typed settings and fail-closed runtime mode resolution.
+
+Two rules govern this module:
+
+1. An unknown mode, or missing safety configuration, refuses startup. Guessing is worse
+   than not starting.
+2. A degradation (live -> fixture, gmail -> console) is permitted only when explicitly
+   allowed, and is always reported. The system never silently pretends to be healthier
+   than it is.
+
+Owner: Stream A. Other streams read settings; they do not add validation here.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from enum import StrEnum
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ConfigurationError(RuntimeError):
+    """Raised when configuration is unsafe or incoherent. Always fatal at startup."""
+
+
+class AppEnv(StrEnum):
+    development = "development"
+    demo = "demo"
+    test = "test"
+
+
+class LLMMode(StrEnum):
+    live = "live"
+    fixture = "fixture"
+    off = "off"
+
+
+class WeatherMode(StrEnum):
+    live = "live"
+    fixture = "fixture"
+
+
+class NotificationMode(StrEnum):
+    console = "console"
+    mailtrap = "mailtrap"
+    gmail = "gmail"
+
+
+class PolicyMode(StrEnum):
+    """Governs what the system may claim about regulation.
+
+    demo     - fictional fixture, no citation, no legal claim
+    charter  - official-but-dated pack; real cited figures behind a dated badge
+    verified - requires an approved primary-source pack; currently unreachable
+    """
+
+    demo = "demo"
+    charter = "charter"
+    verified = "verified"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    app_env: AppEnv = AppEnv.development
+    log_level: str = "INFO"
+
+    database_url: str = "postgresql+asyncpg://travelops:travelops@localhost:5432/travelops"
+    redis_url: str = "redis://localhost:6379/0"
+
+    llm_mode: LLMMode = LLMMode.fixture
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_temperature: float = 0.1
+
+    weather_mode: WeatherMode = WeatherMode.fixture
+    weather_poll_seconds: int = 60
+
+    # Deterministic risk index threshold (0-100). NOT a calibrated probability.
+    delay_risk_event_threshold: int = Field(default=75, ge=0, le=100)
+
+    notification_mode: NotificationMode = NotificationMode.console
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    demo_recipient_allowlist: str = ""
+
+    policy_mode: PolicyMode = PolicyMode.charter
+    policy_pack_dir: Path = Path("./policy_packs")
+    policy_pack_id: str = "in-moca-charter-2019"
+    policy_pack_version: str = "2019.02"
+
+    assurance_config_path: Path = Path("./config/assurance.v1.yaml")
+
+    max_workflow_steps: int = Field(default=20, ge=1, le=1000)
+    action_timeout_seconds: int = Field(default=30, ge=1, le=600)
+
+    data_seed: int = 20260807
+    demo_dataset_id: str = "bengaluru_storm"
+
+    # Explicit opt-ins for degradation. Default False = fail closed.
+    allow_llm_degradation: bool = False
+    allow_notification_degradation: bool = True
+
+    @field_validator("log_level")
+    @classmethod
+    def _valid_log_level(cls, value: str) -> str:
+        allowed = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
+        upper = value.upper()
+        if upper not in allowed:
+            raise ValueError(f"log_level must be one of {sorted(allowed)}")
+        return upper
+
+    @property
+    def recipient_allowlist(self) -> list[str]:
+        return [item.strip() for item in self.demo_recipient_allowlist.split(",") if item.strip()]
+
+
+class ResolvedModes:
+    """Effective runtime modes after validation, with degradation reasons.
+
+    Serialised by GET /system/mode. Contains no secrets.
+    """
+
+    def __init__(
+        self,
+        *,
+        llm: LLMMode,
+        weather: WeatherMode,
+        notification: NotificationMode,
+        policy: PolicyMode,
+        real_email_enabled: bool,
+        assurance_config_present: bool,
+        assurance_config_version: str | None,
+        assurance_config_hash: str | None,
+        degradations: list[str],
+    ) -> None:
+        self.llm = llm
+        self.weather = weather
+        self.notification = notification
+        self.policy = policy
+        self.real_email_enabled = real_email_enabled
+        self.assurance_config_present = assurance_config_present
+        self.assurance_config_version = assurance_config_version
+        self.assurance_config_hash = assurance_config_hash
+        self.degradations = degradations
+
+    @property
+    def workflow_executable(self) -> bool:
+        """Assurance config is mandatory. Without it, no action may be authorised."""
+        return self.assurance_config_present
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "llm_mode": self.llm.value,
+            "weather_mode": self.weather.value,
+            "notification_mode": self.notification.value,
+            "policy_mode": self.policy.value,
+            "real_email_enabled": self.real_email_enabled,
+            "assurance": {
+                "config_present": self.assurance_config_present,
+                "config_version": self.assurance_config_version,
+                "config_hash": self.assurance_config_hash,
+                "workflow_executable": self.workflow_executable,
+            },
+            "degradations": self.degradations,
+        }
+
+
+def _read_assurance_config(path: Path) -> tuple[str | None, str | None]:
+    """Return (version, sha256) for the gate config, or (None, None) if unreadable."""
+    if not path.is_file():
+        return None, None
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+
+    version: str | None = None
+    try:
+        import yaml
+
+        parsed = yaml.safe_load(raw.decode("utf-8")) or {}
+        if isinstance(parsed, dict):
+            value = parsed.get("version")
+            version = str(value) if value is not None else None
+    except Exception:  # noqa: BLE001 - unreadable config must not crash resolution
+        version = None
+    return version, digest
+
+
+def resolve_modes(settings: Settings) -> ResolvedModes:
+    """Resolve effective modes, failing closed on unsafe combinations."""
+    degradations: list[str] = []
+
+    # ---------------------------------------------------------------- reasoning
+    llm = settings.llm_mode
+    if llm is LLMMode.live and not settings.groq_api_key:
+        if settings.allow_llm_degradation:
+            llm = LLMMode.fixture
+            degradations.append("LLM_MODE=live requested without GROQ_API_KEY; degraded to fixture")
+        else:
+            raise ConfigurationError(
+                "LLM_MODE=live requires GROQ_API_KEY. Set the key, choose "
+                "LLM_MODE=fixture, or set ALLOW_LLM_DEGRADATION=true to permit fallback."
+            )
+
+    # ---------------------------------------------------------------- notifications
+    notification = settings.notification_mode
+    real_email_enabled = False
+    if notification in {NotificationMode.mailtrap, NotificationMode.gmail}:
+        missing = [
+            name
+            for name, value in (
+                ("SMTP_HOST", settings.smtp_host),
+                ("SMTP_USERNAME", settings.smtp_username),
+                ("SMTP_PASSWORD", settings.smtp_password),
+            )
+            if not value
+        ]
+        if missing:
+            if settings.allow_notification_degradation:
+                notification = NotificationMode.console
+                degradations.append(
+                    f"NOTIFICATION_MODE={settings.notification_mode.value} missing "
+                    f"{', '.join(missing)}; degraded to console"
+                )
+            else:
+                raise ConfigurationError(
+                    f"NOTIFICATION_MODE={settings.notification_mode.value} requires "
+                    f"{', '.join(missing)}."
+                )
+        elif not settings.recipient_allowlist:
+            # Credentials present but no allowlist: never blast synthetic passengers.
+            degradations.append(
+                "DEMO_RECIPIENT_ALLOWLIST is empty; all deliveries recorded as simulated"
+            )
+        else:
+            real_email_enabled = True
+
+    # ---------------------------------------------------------------- assurance
+    version, digest = _read_assurance_config(settings.assurance_config_path)
+    config_present = digest is not None
+    if not config_present:
+        degradations.append(
+            f"assurance config not found at {settings.assurance_config_path}; "
+            "workflow execution is blocked"
+        )
+
+    # ---------------------------------------------------------------- policy
+    policy = settings.policy_mode
+    if policy is PolicyMode.verified:
+        pack_dir = (
+            settings.policy_pack_dir / settings.policy_pack_id / settings.policy_pack_version
+        )
+        raise ConfigurationError(
+            "POLICY_MODE=verified requires an approved primary-source pack whose "
+            f"verified_mode_eligible is true. {pack_dir} is not eligible "
+            "(PACK_NOT_VERIFIED_ELIGIBLE). Use POLICY_MODE=charter or demo."
+        )
+
+    return ResolvedModes(
+        llm=llm,
+        weather=settings.weather_mode,
+        notification=notification,
+        policy=policy,
+        real_email_enabled=real_email_enabled,
+        assurance_config_present=config_present,
+        assurance_config_version=version,
+        assurance_config_hash=digest,
+        degradations=degradations,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+@lru_cache(maxsize=1)
+def get_modes() -> ResolvedModes:
+    return resolve_modes(get_settings())

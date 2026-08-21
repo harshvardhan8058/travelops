@@ -34,3 +34,10 @@ logs/
 *.sqlite
 *.sqlite3
 *.db
+
+# Local virtualenvs
+.venv/
+backend/.venv/
+
+# Generated DDL scratch
+*.ddl.sql

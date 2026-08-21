@@ -1,0 +1,63 @@
+# Decision Assurance Gate configuration — version 1
+#
+# This file is safety configuration. If it is missing or unreadable, the system refuses to
+# execute any action (see app/config.py). Its SHA-256 is recorded on every evaluation so a
+# replay uses the semantics that applied at decision time.
+#
+# Owner: Stream B. Changes require a new `version` value, because old evaluations must
+# remain interpretable against the config they were made under.
+
+version: "assurance-v1"
+
+# ---------------------------------------------------------------- freshness limits
+# Maximum age before a source counts as stale. Minutes unless stated.
+freshness:
+  metar_minutes: 60
+  taf_minutes: 360
+  flight_status_minutes: 5
+  policy_pack_days: 3650
+
+# ---------------------------------------------------------------- action risk tiers
+# low    - reversible, no external side effect
+# medium - reserves simulated inventory or changes internal state
+# high   - money, cancellation, or bulk external effect. ALWAYS needs human approval.
+#
+# An action type absent from this map is treated as HIGH, not low. Unknown means dangerous.
+risk_tiers:
+  check_connections: low
+  assess_crew_impact: low
+  find_hotel_options: low
+  prepare_notifications: low
+  record_outcome: low
+
+  reserve_hotel_block: medium
+  arrange_ground_transport: medium
+  reassign_gate: medium
+  rebook_passengers: medium
+
+  evaluate_entitlements: high
+  notify_passengers: high
+
+high_risk_requires_human: true
+
+# ---------------------------------------------------------------- warning tolerance
+# The ONLY route to `execute_flagged`. Maps action type -> checks whose WARN is tolerated.
+#
+# Deliberately narrow: only low-risk, reversible actions with no external effect appear
+# here. Absence of an entry means a WARN blocks, which is the safe default. There is no
+# global "soft failure" bypass.
+warn_allowed_actions:
+  check_connections:
+    - sources_fresh
+  find_hotel_options:
+    - sources_fresh
+  assess_crew_impact:
+    - sources_fresh
+
+# ---------------------------------------------------------------- notes for reviewers
+# 1. evaluate_entitlements is high risk even in charter mode: it produces a figure a
+#    passenger could rely on.
+# 2. notify_passengers is high risk because it is a bulk external effect that cannot be
+#    retracted once sent.
+# 3. reserve_hotel_block is medium, not high, because reservations are simulated against
+#    our own inventory and are reversible.
