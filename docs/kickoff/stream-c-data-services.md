@@ -57,9 +57,13 @@ The other three streams own, and I never edit:
   Stream D  all of frontend/
 
 I may EXTEND backend/tests/unit/test_crosswind.py as I build Delay Risk. Its existing
-assertions are frozen, and so are the other shared guard tests directly under
-backend/tests/unit/ - in particular test_no_llm_in_services.py, which constrains my own code.
-If it fails, my import is wrong; I never edit the test to permit it.
+assertions are frozen, and so are the other shared guard tests: the four remaining files
+directly under backend/tests/unit/, plus backend/tests/contract/test_container_runtime_paths.py
+which sits INSIDE a directory I own. I am the one stream that must consciously treat a file it
+owns as frozen.
+test_no_llm_in_services.py constrains my own code and covers app/services/, app/assurance/,
+app/policy/ and app/orchestrator/. If it fails, my import is wrong; I never edit the test to
+permit it.
 
 I AM THE ONLY STREAM PERMITTED TO GENERATE MIGRATIONS. Two streams autogenerating produces
 unorderable heads, which is the classic way parallel work dies. Streams A, B and D send me

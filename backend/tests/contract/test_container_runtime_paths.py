@@ -94,7 +94,9 @@ def test_datastores_are_not_published_to_the_host(compose: dict):
         )
 
     for service in ("api", "web"):
-        for mapping in _volumes(compose, service) and compose["services"][service]["ports"]:
+        published = compose["services"][service]["ports"]
+        assert published, f"{service} must publish a port for the demo to be reachable"
+        for mapping in published:
             assert mapping.startswith("127.0.0.1:"), (
                 f"{service} publishes {mapping} beyond loopback"
             )

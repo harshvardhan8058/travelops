@@ -62,11 +62,19 @@ The other three streams own, and I never edit:
 I own .kiro/steering/travelops.md and .kiro/skills/. Both change the behaviour of all four
 sessions, so I only edit them with the team's agreement, never unilaterally mid-slice.
 
-THE SHARED GUARD TESTS. The .py files directly under backend/tests/unit/ - not the
-per-stream subdirectories - are cross-stream invariant guards: test_no_llm_in_services.py,
-test_state_machine.py, test_contracts.py, test_config_fail_closed.py,
-test_container_runtime_paths.py, test_crosswind.py. They are what stop an architectural
-boundary being crossed by accident.
+THE SHARED GUARD TESTS. Six files are cross-stream invariant guards. Five sit directly
+under backend/tests/unit/ - not the per-stream subdirectories - and one sits in
+backend/tests/contract/:
+    backend/tests/unit/test_no_llm_in_services.py
+    backend/tests/unit/test_state_machine.py
+    backend/tests/unit/test_contracts.py
+    backend/tests/unit/test_config_fail_closed.py
+    backend/tests/unit/test_crosswind.py
+    backend/tests/contract/test_container_runtime_paths.py
+They are what stop an architectural boundary being crossed by accident. Note that
+test_no_llm_in_services.py is wider than its name suggests: it protects app/assurance/,
+app/policy/ and app/orchestrator/ as well as app/services/. app/agents/ is the only layer
+permitted to reason with a model.
   - Any stream may ADD a guard test.
   - NO stream may weaken or delete an existing assertion, including me. If a guard test
     fails, the code is wrong, not the test. Relaxing one is a whole-team decision.

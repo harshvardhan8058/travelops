@@ -2,7 +2,9 @@
 
 The definitive answer to "what is done, what is left, and what do you need from us."
 
-Verified against `main` at commit `17bf407`. Re-verify with:
+Verified against `main` at commit `2dd3833ad68e5b502bb7a8b199399230e121e3b1` (21 August 2026).
+Every repository fact below was re-checked against that commit rather than carried forward.
+Re-verify with:
 
 ```bash
 cd backend && uv run pytest && uv run ruff check .
@@ -99,7 +101,7 @@ available and it is currently unscheduled.
 - `scripts/doctor.sh` pre-flight check for the demo machine.
 - `.env.example` where every mode fails closed.
 
-### Backend — 66 Python files
+### Backend — 67 Python files
 
 - **Config** with fail-closed resolution: refuses live-LLM-without-key, refuses
   `POLICY_MODE=verified`, refuses SMTP-without-credentials. Degrades only when explicitly
@@ -108,8 +110,9 @@ available and it is currently unscheduled.
   8-flights/9-rotations claim is countable. `action.assurance_id` is `NOT NULL`.
   `human_decision` append-only and unique per evaluation. Policy applicability tri-state.
   Partial unique index enforcing one active incident per flight.
-- **Migration** `0001_initial_schema` renders valid Postgres DDL: 34 tables, JSONB preserved,
-  partial index with its `WHERE` clause.
+- **Migration** `0001_initial_schema` renders valid Postgres DDL: 33 `create_table` calls
+  matching the 33 tables in `Base.metadata` exactly, JSONB preserved, partial index with its
+  `WHERE` clause.
 - **Incident state machine** with the full legal transition table and a test proving
   `executing` is unreachable except through `assuring`.
 - **Contracts:** nine typed events; three *distinct* reasoning payloads discriminated by
@@ -122,7 +125,7 @@ available and it is currently unscheduled.
   fixture-backed endpoints so the frontend is never blocked.
 - **Crosswind trigonometry**, tested, because a units error there would invalidate every risk
   score downstream.
-- **96 tests passing.** Ruff check and format clean across 66 files.
+- **103 tests passing.** Ruff check and format clean across 67 files.
 
 ### Frontend — 9 TypeScript files
 
