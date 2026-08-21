@@ -52,6 +52,10 @@ services:
       - ./policy_packs:/app/policy_packs:ro
       - ./config:/app/config:ro
       - ./data:/app/data
+      # app/api/fixtures_router.py resolves FIXTURE_DIR to /fixtures/api inside the
+      # container. Without this mount every fixture endpoint returns ENTITY_NOT_FOUND,
+      # because the build context is ./backend and repo-root fixtures/ is never copied in.
+      - ./fixtures:/fixtures:ro
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -76,6 +80,10 @@ services:
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
+      # scripts/sync-fixtures.mjs resolves its source to /fixtures/api inside the
+      # container. Without this mount the predev hook fails, `npm run dev` never starts,
+      # and :5173 refuses the connection.
+      - ./fixtures:/fixtures:ro
     ports:
       - "127.0.0.1:5173:5173"
     depends_on:

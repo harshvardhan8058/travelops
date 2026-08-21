@@ -1,0 +1,16 @@
+# A host virtualenv contains absolute paths and host-architecture binaries.
+.venv
+venv
+
+# Caches and artifacts
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Never needed in the image
+.git
+.env
+.env.*
+*.log
