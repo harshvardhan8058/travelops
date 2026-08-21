@@ -71,7 +71,7 @@ class TestIncidentDetail:
         body = client.get(f"{PREFIX}/incidents/{incident}").json()
         rail = {entry["state"]: entry["reached_at"] for entry in body["state_rail"]}
 
-        assert rail["blocked"] is not None
+        assert rail["awaiting_approval"] is not None
         # The happy-path spine is still present, with the states nobody reached left null.
         assert rail["resolved"] is None
 
@@ -84,13 +84,29 @@ class TestRun:
         assert body["state"] in {"blocked", "awaiting_approval", "resolved", "executing"}
         assert body["steps_taken"] > 0
 
-    def test_the_run_stops_at_the_honest_service_boundary(self, client, incident):
-        """Stream C's services do not exist, so the run must say so and stop."""
+    def test_the_run_stops_for_operator_approval(self, client, incident):
+        """The low-risk tasks execute for real; the bulk external effect waits for a person.
+
+        This is the whole point of the gate. `notify_passengers` is high risk in the
+        committed config, so no amount of successful prior work lets it through on its own.
+        """
         body = client.post(f"{PREFIX}/incidents/{incident}/run").json()
 
-        assert body["state"] == "blocked"
-        assert body["is_terminal"] is True
-        assert "SERVICE_NOT_IMPLEMENTED" in body["note"]
+        assert body["state"] == "awaiting_approval"
+        assert body["is_terminal"] is False
+        assert "operator decision" in (body["note"] or "")
+
+    def test_the_low_risk_tasks_really_executed(self, client, incident):
+        """Not refused, not faked: two Stream C services ran and recorded a result."""
+        client.post(f"{PREFIX}/incidents/{incident}/run")
+        body = client.get(f"{PREFIX}/incidents/{incident}").json()
+
+        done = {a["action_type"]: a for a in body["actions"]}
+        assert set(done) == {"check_connections", "assess_crew_impact"}
+        for action in done.values():
+            assert action["status"] == "success"
+            assert "SERVICE_NOT_IMPLEMENTED" not in action["reason"]
+            assert action["provenance_kind"] in {"synthetic", "simulated", "fixture", "real"}
 
     def test_the_plan_records_the_deterministic_generator(self, client, incident):
         client.post(f"{PREFIX}/incidents/{incident}/run")
@@ -99,7 +115,34 @@ class TestRun:
         assert plan["generator"] == "fallback-playbook"
         assert plan["prompt_version"] is None
         assert plan["model_self_report"] is None
-        assert len(plan["tasks"]) == 5
+
+    def test_the_plan_proposes_only_what_can_be_executed(self, client, incident):
+        """A plan that proposes work nothing can do stops dead and overstates the system.
+
+        The two Stage 3 actions are deferred rather than proposed-and-failed, and the
+        omission is written into the rationale rather than left for a reader to notice.
+        """
+        client.post(f"{PREFIX}/incidents/{incident}/run")
+        plan = client.get(f"{PREFIX}/incidents/{incident}").json()["plan"]
+
+        assert [t["action_type"] for t in plan["tasks"]] == [
+            "check_connections",
+            "assess_crew_impact",
+            "notify_passengers",
+        ]
+        assert "find_hotel_options" in plan["rationale"]
+        assert "evaluate_entitlements" in plan["rationale"]
+        assert "no deterministic service is available" in plan["rationale"]
+
+    def test_the_deferral_is_on_the_timeline_too(self, client, incident):
+        client.post(f"{PREFIX}/incidents/{incident}/run")
+        entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
+
+        proposed = next(e for e in entries if e["event_type"] == "PLAN_PROPOSED")
+        assert proposed["detail"]["deferred_actions"] == [
+            "evaluate_entitlements",
+            "find_hotel_options",
+        ]
 
     def test_a_replayed_idempotency_key_returns_the_original_result(self, client, incident):
         headers = {"Idempotency-Key": "run-abc-123"}
@@ -111,13 +154,17 @@ class TestRun:
         assert second["state"] == first["state"]
         assert second["steps_taken"] == first["steps_taken"]
 
-    def test_running_a_terminal_incident_does_not_advance_it(self, client, incident):
+    def test_running_again_while_awaiting_approval_changes_nothing(self, client, incident):
+        """Waiting on a person is a resting state, not something a retry can push past."""
         client.post(f"{PREFIX}/incidents/{incident}/run")
-        body = client.post(f"{PREFIX}/incidents/{incident}/run").json()
+        before = client.get(f"{PREFIX}/incidents/{incident}").json()
 
-        assert body["state"] == "blocked"
-        assert body["previous_state"] == "blocked"
-        assert "terminal" in (body["note"] or "")
+        body = client.post(f"{PREFIX}/incidents/{incident}/run").json()
+        after = client.get(f"{PREFIX}/incidents/{incident}").json()
+
+        assert body["state"] == "awaiting_approval"
+        assert body["previous_state"] == "awaiting_approval"
+        assert len(after["actions"]) == len(before["actions"])
 
     def test_correlation_id_is_echoed_on_a_mutation(self, client, incident):
         response = client.post(
