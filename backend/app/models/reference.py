@@ -83,6 +83,11 @@ class WeatherObservation(Base, TimestampMixin):
     airport_icao: Mapped[str] = mapped_column(ForeignKey("airport.icao_code"), nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # TAF, not METAR. Scoring a forecast as though it were an observation is a subtle and
+    # very common leakage bug, so the two are separable by column rather than by convention.
+    # The provider signals it with a `taf:` source_ref prefix; this is where that is recorded.
+    is_forecast: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     # Units are normalised at the provider boundary. Knots, metres, feet. Never km/h.
     wind_speed_kt: Mapped[int | None] = mapped_column(SmallInteger)
     wind_direction_deg: Mapped[int | None] = mapped_column(SmallInteger)
