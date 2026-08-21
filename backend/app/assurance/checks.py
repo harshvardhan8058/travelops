@@ -65,7 +65,7 @@ def _is_absent(value: Any) -> bool:
     return value is _MISSING or value is None
 
 
-def _dedupe(items: Sequence[str]) -> list[str]:
+def dedupe(items: Sequence[str]) -> list[str]:
     """Preserve declaration order while removing repeats.
 
     Declaration order, not alphabetical: the pack's fail-closed cases name missing facts in
@@ -100,9 +100,7 @@ def evidence_complete(*, required_facts: list[str], provided_facts: dict[str, An
     No required facts is a PASS: whether a rule *should* have declared a fact is the pack's
     responsibility, not this check's.
     """
-    missing = _dedupe(
-        [path for path in required_facts if _is_absent(_lookup(provided_facts, path))]
-    )
+    missing = dedupe([path for path in required_facts if _is_absent(_lookup(provided_facts, path))])
     if not missing:
         return _passed(CheckName.evidence_complete)
 
@@ -249,7 +247,7 @@ def sources_fresh(
         state=state,
         reason_code=selected[0][1],
         reason="; ".join(problem[2] for problem in selected),
-        evidence_refs=_dedupe([problem[3] for problem in selected]),
+        evidence_refs=dedupe([problem[3] for problem in selected]),
     )
 
 
@@ -286,8 +284,8 @@ def entities_valid(*, referenced_refs: list[str], resolved: dict[str, Any]) -> C
             name=CheckName.entities_valid,
             state=CheckState.failed,
             reason_code=ReasonCode.ENTITY_NOT_FOUND,
-            reason=f"unresolved: {', '.join(_dedupe(not_found))}",
-            evidence_refs=_dedupe(not_found),
+            reason=f"unresolved: {', '.join(dedupe(not_found))}",
+            evidence_refs=dedupe(not_found),
         )
 
     if mismatched:
@@ -295,8 +293,8 @@ def entities_valid(*, referenced_refs: list[str], resolved: dict[str, Any]) -> C
             name=CheckName.entities_valid,
             state=CheckState.failed,
             reason_code=ReasonCode.ENTITY_STATE_MISMATCH,
-            reason=f"state changed since planning: {', '.join(_dedupe(mismatched))}",
-            evidence_refs=_dedupe(mismatched),
+            reason=f"state changed since planning: {', '.join(dedupe(mismatched))}",
+            evidence_refs=dedupe(mismatched),
         )
 
     return _passed(CheckName.entities_valid)
@@ -489,7 +487,7 @@ def no_conflicts(
 
     DUPLICATE_ACTION outranks CAPACITY_UNAVAILABLE.
     """
-    requested = _dedupe(target_refs)
+    requested = dedupe(target_refs)
     duplicates: list[str] = []
     exhausted: list[str] = []
 
@@ -518,7 +516,7 @@ def no_conflicts(
         duplicates.extend(ref for ref in requested if ref in existing)
 
     if duplicates:
-        collisions = _dedupe(duplicates)
+        collisions = dedupe(duplicates)
         return CheckResult(
             name=CheckName.no_conflicts,
             state=CheckState.failed,
@@ -528,7 +526,7 @@ def no_conflicts(
         )
 
     if exhausted:
-        collisions = _dedupe(exhausted)
+        collisions = dedupe(exhausted)
         return CheckResult(
             name=CheckName.no_conflicts,
             state=CheckState.failed,
