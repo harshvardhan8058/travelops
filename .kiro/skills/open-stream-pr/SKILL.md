@@ -5,7 +5,8 @@ description: Open or review a pull request for a TravelOps workstream. Use when 
 
 # Open or review a stream PR
 
-Six accounts work this repository in parallel. These conventions are what keep that from
+Four accounts work this repository in parallel — A · Core & API, B · Assurance & Policy,
+C · Data, Providers & Services, D · Frontend. These conventions are what keep that from
 turning into a merge problem.
 
 Ownership model: `docs/28-parallel-workstreams.md`.
@@ -23,9 +24,9 @@ git diff --cached --name-only
 **Every path must belong to your stream.** If it does not, remove it and raise the change with
 the owning stream instead.
 
-Never touch, unless your stream owns it: `backend/migrations/` (Stream C only),
-`backend/app/models/`, `policy_packs/`, the generated API client, `docker-compose.yml`,
-`Makefile`, `.kiro/steering/`.
+Never touch, unless your stream owns it: `backend/migrations/` and `fixtures/api/` (Stream C
+only), `backend/app/models/`, `policy_packs/`, `config/`, `docker-compose.yml`, `Makefile`,
+`.kiro/`, `docs/`.
 
 ## Creating the PR
 
