@@ -43,8 +43,10 @@ The other three streams own, and I never edit:
             need, that is a request to Stream C. Never edit a fixture to suit my component,
             and never fabricate a field that no endpoint returns.
 
-The shared guard tests directly under backend/tests/unit/ are frozen. I may add one; I may
-never weaken or delete an existing assertion. If a guard test fails, my code is wrong.
+The shared guard tests are frozen - the five directly under backend/tests/unit/ plus
+backend/tests/contract/test_container_runtime_paths.py, which asserts the ./fixtures mount my
+dev server depends on. I may add one; I may never weaken or delete an existing assertion. If a
+guard test fails, my code is wrong.
 
 BRANCH: stream/d/frontend
 Run `npm run typecheck`, `npm run lint`, `npm run tokens:check` and `npm run build` before

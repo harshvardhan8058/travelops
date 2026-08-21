@@ -105,17 +105,21 @@ edit.
 
 ### The shared guard tests are frozen for everyone, including their owner
 
-The `.py` files directly under `backend/tests/unit/` — as opposed to the per-stream subdirectories — are
-cross-stream invariant guards:
+Six test files are cross-stream invariant guards. Five sit directly under `backend/tests/unit/` — as
+opposed to the per-stream subdirectories — and one sits in `backend/tests/contract/`:
 
-| Guard test | Stops |
-| --- | --- |
-| `test_no_llm_in_services.py` | An AST check: nothing under `app/services/` importing an LLM client |
-| `test_state_machine.py` | An illegal incident transition becoming reachable |
-| `test_contracts.py` | A typed contract drifting from its specification |
-| `test_config_fail_closed.py` | Missing safety config silently degrading instead of blocking |
-| `test_container_runtime_paths.py` | The `fixtures/` mount regressing and breaking `:5173` |
-| `test_crosswind.py` | The crosswind trigonometry being rewritten incorrectly |
+| Guard test | Location | Stops |
+| --- | --- | --- |
+| `test_no_llm_in_services.py` | `tests/unit/` | An AST check: nothing under `app/services/`, `app/assurance/`, `app/policy/` or `app/orchestrator/` importing `groq`, `openai`, `anthropic`, `litellm`, `ollama` or `app.llm` |
+| `test_state_machine.py` | `tests/unit/` | An illegal incident transition becoming reachable, and `executing` becoming reachable other than from `assuring` or `awaiting_approval` |
+| `test_contracts.py` | `tests/unit/` | A typed contract drifting from its specification |
+| `test_config_fail_closed.py` | `tests/unit/` | Missing safety config silently degrading instead of blocking |
+| `test_crosswind.py` | `tests/unit/` | The crosswind trigonometry being rewritten incorrectly |
+| `test_container_runtime_paths.py` | `tests/contract/` | The `fixtures/` mount regressing and breaking `:5173`, and the datastores becoming reachable beyond loopback |
+
+Note that the AST guard is **wider than its filename suggests**: it protects `app/assurance/`,
+`app/policy/` and `app/orchestrator/` as well as `app/services/`. `app/agents/` is deliberately excluded
+and is the only layer permitted to reason with a model.
 
 The rule: **any stream may add a guard test; no stream may weaken or delete an existing assertion.** If a
 guard fails, the code is wrong, not the test. Relaxing one is a whole-team decision, not a stream's.
@@ -123,7 +127,9 @@ guard fails, the code is wrong, not the test. Relaxing one is a whole-team decis
 This matters most where a guard constrains the stream that would most like to remove it. C is the stream
 that would benefit from deleting `test_no_llm_in_services.py`, so C explicitly may not. Nominal ownership
 sits with A for review purposes, and `test_crosswind.py` is delegated to C to *extend* as Delay Risk is
-built, with its existing assertions still frozen.
+built, with its existing assertions still frozen. `test_container_runtime_paths.py` sits inside C's
+`backend/tests/contract/` directory, so C is the one stream that must consciously treat a file it owns as
+frozen.
 
 ### Everything else
 

@@ -27,8 +27,15 @@ or honesty about simulated data.
 
 ## Immediate baseline
 
-At the time of this plan, the repository contains design documentation and no application code. That is
-not a blocker to starting, but it means the first milestone is a vertical slice—not more architecture.
+When this plan was first written the repository held design documentation and no application code, so the
+first milestone was a vertical slice rather than more architecture.
+
+**That milestone is delivered.** As of `main` at `2dd3833` (21 August 2026) the Wave 0 bootstrap is
+merged and verified: a runnable four-service stack, 33 tables with a matching initial migration, typed
+event and assurance contracts, a versioned gate config, 11 API fixtures, the UI shell, and 103 passing
+backend tests. The baseline for the remaining checkpoints is therefore a working deterministic skeleton
+with 18 deliberate stubs, not an empty repository — see
+[`30-project-status.md`](30-project-status.md) for the verified inventory.
 
 ## Stage 2 — prove feasibility (20–24 August)
 

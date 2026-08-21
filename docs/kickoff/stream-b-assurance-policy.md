@@ -48,8 +48,11 @@ The other three streams own, and I never edit:
             data/, fixtures/
   Stream D  all of frontend/
 
-The shared guard tests directly under backend/tests/unit/ are frozen. I may add one; I may
-never weaken or delete an existing assertion. If a guard test fails, my code is wrong.
+The shared guard tests are frozen - the five directly under backend/tests/unit/ plus
+backend/tests/contract/test_container_runtime_paths.py. I may add one; I may never weaken or
+delete an existing assertion. If a guard test fails, my code is wrong.
+test_no_llm_in_services.py explicitly covers app/assurance/ and app/policy/, so it constrains
+my own code: if it fails, my import is wrong and I never edit the test to permit it.
 
 I need the policy_pack, policy_rule, policy_applicability, assurance_evaluation and
 human_decision tables. Those models are COMPLETE and owned by Stream C. Import them. If I
