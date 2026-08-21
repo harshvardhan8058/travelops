@@ -12,6 +12,26 @@
 /** Rendered by the UI, never inferred from a provider name. */
 export type ProvenanceKind = 'real' | 'simulated' | 'synthetic' | 'fixture' | 'unavailable';
 
+export const PROVENANCE_KINDS: readonly ProvenanceKind[] = [
+  'real',
+  'simulated',
+  'synthetic',
+  'fixture',
+  'unavailable',
+] as const;
+
+/**
+ * Narrows a provenance string from an untyped field, e.g. `ActionSummary.provenance_kind`.
+ *
+ * Returns null for anything unrecognised rather than guessing a kind, because a wrong
+ * provenance dot is worse than an absent one: a controller who cannot tell live data from
+ * simulated cannot make a decision, and a confidently wrong dot removes the chance to notice.
+ */
+export function asProvenanceKind(value: string | undefined | null): ProvenanceKind | null {
+  if (!value) return null;
+  return PROVENANCE_KINDS.includes(value as ProvenanceKind) ? (value as ProvenanceKind) : null;
+}
+
 export interface Provenance {
   kind: ProvenanceKind;
   provider: string;
@@ -142,8 +162,13 @@ export interface CheckResult {
   name: CheckName;
   state: CheckState;
   reason_code: string;
-  reason?: string;
-  tier?: RiskTier;
+  /** Real API always sends the key, null when there is nothing to say. */
+  reason?: string | null;
+  tier?: RiskTier | null;
+  /**
+   * Always `[]` from the real API today: the engine persists only state, reason code, reason
+   * and tier per check, so refs live at evaluation level.
+   */
   evidence_refs?: string[];
 }
 
@@ -160,12 +185,33 @@ export interface AssuranceEvaluation {
   /** Always displayed: a replay must prove which semantics applied. */
   config_version: string;
   config_hash: string;
-  human_decision?: unknown | null;
+  /** The persisted operator response, or null. Authoritative over any session-only copy. */
+  human_decision?: HumanDecisionOut | null;
+  /** Fixture-only commentary; the real API does not return it. */
   note?: string;
-  warn_permitted_by_config?: boolean;
+  /** Null unless a WARN was recorded. */
+  warn_permitted_by_config?: boolean | null;
+}
+
+/** As embedded on an evaluation by the real API. */
+export interface HumanDecisionOut {
+  id: number;
+  decision: 'approved' | 'rejected';
+  actor_id: string;
+  reason: string;
+  decided_at: string;
 }
 
 export interface AssuranceResponse {
+  /**
+   * Which incident these evaluations belong to. Optional only because the committed fixture
+   * predates the field; the real API always sends it. Consumed rather than decorative: the
+   * panel states the scope and flags a mismatch against the incident on screen, because
+   * rendering another incident's gate records next to this one would be the worst kind of
+   * quiet bug.
+   */
+  incident_reference?: string;
+  /** Literally 'unavailable' when nothing has been evaluated yet. */
   config_version: string;
   config_hash: string;
   evaluations: AssuranceEvaluation[];
@@ -188,7 +234,8 @@ export interface TimelineEntry {
   actor_kind: 'orchestrator' | 'agent' | 'service' | 'human' | 'provider';
   event_type: string;
   summary: string;
-  detail?: Record<string, unknown>;
+  detail?: Record<string, unknown> | null;
+  correlation_id?: string | null;
 }
 
 export interface TimelineResponse {
@@ -209,6 +256,10 @@ export interface PlanTaskRow {
  * The flight summary embedded in an incident. Every field beyond the number is optional
  * because the UI must render whatever the endpoint actually returns and name what it does
  * not, rather than assuming a field exists.
+ *
+ * `route` arrives as ICAO codes from the real API (`VOBL → VIDP`) and as IATA in the
+ * committed fixture (`BLR → DEL`). It is rendered as returned; the UI never translates one
+ * into the other, because it has no airport table to do that correctly.
  */
 export interface IncidentFlightSummary {
   id?: number;
@@ -218,7 +269,8 @@ export interface IncidentFlightSummary {
   estimated_departure?: string | null;
   delay_minutes?: number;
   block_time_minutes?: number;
-  passengers?: number;
+  /** Null when no booking records exist. Deliberately not 0 — see backend FlightSummary. */
+  passengers?: number | null;
 }
 
 export interface WeatherObservation {
@@ -246,33 +298,69 @@ export interface RetrievedPrecedent {
 export interface ActionRecord {
   id: number;
   plan_task_id: number;
+  /** Present on the real API, absent from the committed fixture. */
+  action_type?: string;
   assurance_id: number;
   human_decision_id: number | null;
   actor: string;
   status: string;
+  /**
+   * Free text, but it begins with a stable reason code when execution was refused — e.g.
+   * `SERVICE_NOT_IMPLEMENTED: …`. dispatch.py states the code is stable precisely so the UI
+   * maps it to copy instead of paraphrasing the message.
+   */
   reason: string;
   cost_inr: number | null;
   idempotency_key: string;
   executed_at: string | null;
-  provenance_kind?: ProvenanceKind;
+  provenance_kind?: ProvenanceKind | string;
 }
 
 /**
  * Append-only, unique per evaluation (docs/11-data-model.md). Correcting a decision requires
  * a new evaluation rather than mutating history, so the UI never edits one of these.
+ *
+ * Matches the backend's `HumanDecisionOut`, which is embedded on each evaluation as
+ * `human_decision`. `id` is absent on a session-only record, which is exactly the difference
+ * `persisted` records.
  */
 export interface HumanDecision {
+  id?: number;
   assurance_id: number;
   decision: 'approved' | 'rejected';
   actor_id: string;
   reason: string;
   decided_at: string;
   /**
-   * True when the decision exists only in this browser session because fixtures are being
-   * served and no endpoint accepted the write. Rendered explicitly: a demo must never imply
-   * an audit record that does not exist.
+   * True when the API accepted the write. False when the decision exists only in this
+   * browser session because fixtures are being served and no endpoint took it. Rendered
+   * explicitly: a demo must never imply an audit record that does not exist.
    */
   persisted: boolean;
+}
+
+/** Result of `POST /incidents/{id}/run` — the real "advance the workflow" call. */
+export interface RunResponse {
+  incident_reference: string;
+  state: IncidentState;
+  previous_state: IncidentState;
+  steps_taken: number;
+  is_terminal: boolean;
+  /** Why the run stopped short of a terminal state. Rendered verbatim, never summarised. */
+  note: string | null;
+  replayed: boolean;
+  idempotency_key: string | null;
+}
+
+/** Result of `POST /assurance/{id}/decision`. */
+export interface DecisionResponse {
+  assurance_id: number;
+  decision: 'approved' | 'rejected';
+  actor_id: string;
+  reason: string;
+  decided_at: string;
+  /** True when a matching decision already existed; the original is returned unchanged. */
+  replayed: boolean;
 }
 
 export interface IncidentDetail {
@@ -284,32 +372,58 @@ export interface IncidentDetail {
   severity: string;
   state: IncidentState;
   opened_at: string;
+  closed_at?: string | null;
+  /**
+   * Six canonical states, PLUS an appended `awaiting_approval` / `blocked` / `failed` entry
+   * when one was actually reached. Verified against the real API: a blocked incident returns
+   * seven entries. Render it as a list, never as six fixed slots.
+   */
   state_rail: { state: IncidentState; reached_at: string | null }[];
   evidence: {
-    risk: {
-      risk_index: number;
-      risk_level: RiskLevel;
-      rule_version: string;
-      factors: RiskFactor[];
-      note?: string;
-    };
-    weather: WeatherObservation;
-    affected_entities: Record<string, number>;
+    /**
+     * NULL until the Delay Risk service has recorded a Prediction — which is the normal state
+     * of a freshly opened incident, confirmed against the live API. Never a fabricated index.
+     */
+    risk: RiskEvidence | null;
+    /** Null until a weather observation exists for the origin airport. */
+    weather: WeatherObservation | null;
+    /**
+     * Only keys derived from records. An absent key means "not computed", NOT zero, so the UI
+     * renders an em dash for anything missing. The real API returns at most `passengers` and
+     * `bookings`; the committed fixture also carries connections, crew and hotel counts.
+     */
+    affected_entities?: Record<string, number>;
     retrieved_precedent?: RetrievedPrecedent | null;
   };
-  plan: {
-    id: number;
-    /** 'groq:llama-3.3-70b' or 'fallback-playbook'. Never ambiguous in the UI. */
-    generator: string;
-    prompt_version: string | null;
-    /** Diagnostic metadata only. Never drives a decision. */
-    model_self_report: number | null;
-    generated_at?: string;
-    rationale?: string;
-    tasks: PlanTaskRow[];
-  };
+  /** NULL before the orchestrator has proposed a plan. */
+  plan: PlanSummary | null;
   actions: ActionRecord[];
   provenance: Provenance;
+}
+
+export interface RiskEvidence {
+  risk_index: number;
+  risk_level: RiskLevel;
+  rule_version: string;
+  factors: RiskFactor[];
+  evidence_refs?: string[];
+  /** Fixture-only commentary; the real API does not return it. */
+  note?: string;
+}
+
+export interface PlanSummary {
+  id: number;
+  /**
+   * 'fallback-playbook' or 'groq:llama-3.3-70b'. The real API returns the bare token; the
+   * committed fixture appends ' · deterministic'. Classify on the token, never on the prose.
+   */
+  generator: string;
+  prompt_version: string | null;
+  /** Diagnostic metadata only. Never drives a decision. */
+  model_self_report: number | null;
+  generated_at?: string;
+  rationale?: string | null;
+  tasks: PlanTaskRow[];
 }
 
 // ---------------------------------------------------------------- cascade

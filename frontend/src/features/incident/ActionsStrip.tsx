@@ -9,6 +9,7 @@
  * Owner: Stream D.
  */
 
+import { asProvenanceKind } from '@/api/types';
 import type { ActionRecord, IncidentDetail } from '@/api/types';
 import {
   EmptyState,
@@ -19,6 +20,7 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { actionDerivation } from '@/components/ui/derivation';
+import { refusalFor } from './refusal';
 
 export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
   const actions: ActionRecord[] = incident.actions;
@@ -43,6 +45,7 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
             <thead>
               <tr className="border-b border-border-subtle bg-inset text-label uppercase text-fg-muted">
                 <th className="px-3 py-1.5 text-left font-medium">Task</th>
+                <th className="px-3 py-1.5 text-left font-medium">Action</th>
                 <th className="px-3 py-1.5 text-left font-medium">Actor</th>
                 <th className="px-3 py-1.5 text-left font-medium">Result</th>
                 <th className="px-3 py-1.5 text-left font-medium">Reason</th>
@@ -60,6 +63,19 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
                     <MonoValue muted>{action.plan_task_id}</MonoValue>
                   </td>
                   <td className="px-3">
+                    {/* Present on the real API, absent from the committed fixture. */}
+                    {action.action_type ? (
+                      <MonoValue>{action.action_type}</MonoValue>
+                    ) : (
+                      <span
+                        className="text-caption text-fg-muted"
+                        title="not returned by this endpoint"
+                      >
+                        —
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3">
                     <MonoValue>{action.actor}</MonoValue>
                   </td>
                   <td className="px-3">
@@ -69,11 +85,23 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
                       />
                     </WhyPopover>
                   </td>
-                  <td
-                    className="max-w-[380px] truncate px-3 text-fg-secondary"
-                    title={action.reason}
-                  >
-                    {action.reason}
+                  {/*
+                   * A refusal shows designed copy with its stable code beside it; the raw message
+                   * stays available on hover so nothing is hidden.
+                   */}
+                  <td className="max-w-[380px] px-3 text-fg-secondary" title={action.reason}>
+                    {refusalFor(action.reason) ? (
+                      <span className="flex items-center gap-1.5">
+                        <MonoValue muted className="text-caption">
+                          {refusalFor(action.reason)?.code}
+                        </MonoValue>
+                        <span className="truncate text-state-warn">
+                          {refusalFor(action.reason)?.headline}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="block truncate">{action.reason}</span>
+                    )}
                   </td>
                   <td className="px-3 text-right">
                     {action.cost_inr === null ? (
@@ -96,11 +124,24 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
                     </MonoValue>
                   </td>
                   <td className="px-3">
-                    {action.provenance_kind ? (
-                      <ProvenanceDot kind={action.provenance_kind} provider={action.actor} />
-                    ) : (
-                      <span className="text-caption text-fg-muted">—</span>
-                    )}
+                    {(() => {
+                      const kind = asProvenanceKind(action.provenance_kind);
+                      if (kind) {
+                        return <ProvenanceDot kind={kind} provider={action.actor} />;
+                      }
+                      return (
+                        <span
+                          className="text-caption text-fg-muted"
+                          title={
+                            action.provenance_kind
+                              ? `unrecognised provenance kind: ${action.provenance_kind}`
+                              : 'no provenance recorded for this action'
+                          }
+                        >
+                          —
+                        </span>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}
