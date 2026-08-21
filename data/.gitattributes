@@ -1,0 +1,21 @@
+# Patterns here are relative to data/.
+#
+# Archived snapshots are hash-verified artefacts: their bytes are the evidence.
+# `snapshots/ourairports/<date>/MANIFEST.json` records the SHA-256 of the committed subset
+# files and `verify_snapshot()` recomputes it before the seed will run, so any process that
+# rewrites those bytes breaks the integrity check.
+#
+# Git for Windows defaults to core.autocrlf=true, which rewrites LF to CRLF on checkout. That
+# adds one byte per line and changes the hash: airports.subset.csv goes from
+# affd0426485e5420bf26e71f509c84bb59ac174cf06461fb6f3c6be79d0af66b (2623 bytes, as committed)
+# to 25ab9fd4488c34bed65f52994636479a52976b339e000adf1c2110acdf6b2025 (2634 bytes). The
+# repository is unchanged; the working tree stops being what the manifest describes, and
+# `make seed` fails on Windows and nowhere else.
+#
+# `-text` disables end-of-line translation in both directions, so the working tree always
+# holds the exact bytes that were committed and hashed. The fix is to stop the artefact being
+# rewritten — not to record a second, platform-specific hash.
+snapshots/** -text
+
+# Generated CSV/SQL dumps under data/ are evidence for the same reason.
+*.csv -text

@@ -11,6 +11,8 @@ index that is plausible and quietly wrong — and nothing downstream can detect 
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from data.loaders.ourairports import (
     AIRPORT_ICAOS,
@@ -210,3 +212,121 @@ def test_derived_and_surveyed_parallel_headings_barely_differ():
     gap were large, the derivation would not be safe to use."""
     runways = {r.designator: r for r in load_runways() if r.airport_icao == "VOBL"}
     assert abs(runways["09L"].heading_degrees_true - runways["09R"].heading_degrees_true) <= 5
+
+
+# ------------------------------------------------- byte-level integrity of the archive
+#
+# The archive is evidence, so these guard the bytes rather than the parsed contents. They
+# exist because of a real failure: on Windows, Git's default `core.autocrlf=true` rewrote the
+# subsets to CRLF on checkout, which added a byte per line and changed
+# `airports.subset.csv` from affd0426... to 25ab9fd4.... `verify_snapshot()` correctly
+# refused, `make seed` failed, and it failed on that platform only — so a Linux CI run could
+# never have caught it.
+#
+# The manifest was right and was not changed. `data/.gitattributes` stops the rewrite.
+
+
+def test_manifest_hashes_match_the_committed_bytes_exactly():
+    """The regression test for the reported bug, stated in the most direct possible terms.
+
+    Recompute the SHA-256 of each subset file and compare it to what the manifest declares.
+    This is what `verify_snapshot()` does; asserting it separately means the expectation is
+    visible in the test suite rather than only inside a helper.
+    """
+    manifest = read_manifest()
+    for key, entry in manifest["files"].items():
+        payload = (snapshot_dir() / entry["subset_file"]).read_bytes()
+        actual = hashlib.sha256(payload).hexdigest()
+        assert actual == entry["subset_sha256"], (
+            f"{key}: manifest says {entry['subset_sha256']}, bytes on disk hash to {actual}. "
+            "If the file holds CRLF, the checkout rewrote it — restore it rather than "
+            "updating the manifest."
+        )
+
+
+def test_manifest_records_the_byte_count_it_hashed():
+    """A length is a cheap second signal. A CRLF rewrite changes it by one byte per line, so a
+    mismatch here localises the problem before anyone reaches for the hashes."""
+    manifest = read_manifest()
+    for entry in manifest["files"].values():
+        payload = (snapshot_dir() / entry["subset_file"]).read_bytes()
+        assert entry["subset_bytes"] == len(payload)
+
+
+def test_the_subsets_contain_no_carriage_returns():
+    """The check that actually fires on the affected platform.
+
+    A hash comparison on Windows fails with a bare mismatch and no indication why. This says
+    it outright, and on Linux it still asserts the invariant the hashes depend on.
+    """
+    for entry in read_manifest()["files"].values():
+        payload = (snapshot_dir() / entry["subset_file"]).read_bytes()
+        assert b"\r" not in payload, (
+            f"{entry['subset_file']} contains CR bytes, so it is not the artefact the manifest "
+            "describes. Git rewrote it on checkout; confirm data/.gitattributes is present."
+        )
+
+
+def test_the_manifest_states_the_line_ending_its_hash_assumes():
+    """A hash over bytes is only meaningful once the byte form is declared."""
+    integrity = read_manifest()["integrity"]
+    assert integrity["subset_line_ending"] == "LF"
+    assert integrity["subset_encoding"] == "utf-8"
+
+
+def test_the_snapshot_is_protected_from_end_of_line_translation():
+    """The fix itself, asserted.
+
+    Without this attribute the archive is not reproducible across platforms, and the failure
+    appears as a corrupted-evidence error on a demo machine rather than as a checkout setting.
+    """
+    from app.config import REPO_ROOT
+
+    attributes = REPO_ROOT / "data" / ".gitattributes"
+    assert attributes.is_file(), "data/.gitattributes is missing; snapshots are unprotected"
+
+    rules = [
+        line.strip()
+        for line in attributes.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert any(rule.startswith("snapshots/") and "-text" in rule for rule in rules), (
+        f"no `-text` rule covering snapshots/ in data/.gitattributes: {rules}"
+    )
+
+
+def test_a_crlf_rewrite_is_diagnosed_rather_than_left_as_a_bare_mismatch(tmp_path):
+    """The check stays hard — it must still raise — but it must say what happened.
+
+    Verified against a copy, so the real archive is never modified by a test.
+    """
+    import json
+    import shutil
+
+    from data.loaders import ourairports
+
+    staged = tmp_path / "2026-08-21"
+    shutil.copytree(snapshot_dir(), staged)
+
+    manifest = json.loads((staged / "MANIFEST.json").read_text(encoding="utf-8"))
+    for entry in manifest["files"].values():
+        target = staged / entry["subset_file"]
+        target.write_bytes(target.read_bytes().replace(b"\n", b"\r\n"))
+
+    original_root = ourairports.SNAPSHOT_ROOT
+    ourairports.SNAPSHOT_ROOT = tmp_path
+    try:
+        with pytest.raises(RuntimeError) as exc:
+            ourairports.verify_snapshot("2026-08-21")
+    finally:
+        ourairports.SNAPSHOT_ROOT = original_root
+
+    message = str(exc.value)
+    assert "hash mismatch" in message
+    assert "CRLF" in message
+    assert "Do not update the manifest to the CRLF hash" in message
+
+
+def test_the_real_archive_still_verifies_after_that(tmp_path):
+    """Guards the test above: it must not have mutated the committed snapshot."""
+    verify_snapshot()
