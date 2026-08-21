@@ -248,6 +248,19 @@ class TestOperatorDecision:
         body = client.get(f"{PREFIX}/incidents/{incident}/assurance").json()
         return body["evaluations"][0]["id"]
 
+    def _pending_evaluation(self, client, incident) -> int:
+        """The evaluation the gate actually held for a person.
+
+        Not `evaluations[0]`: that is `check_connections`, which the gate authorised outright.
+        Approving something that was never held produces a `human_decision` row that no action
+        references — correctly, because `execute()` only records one when the gate demanded it.
+        """
+        client.post(f"{PREFIX}/incidents/{incident}/run")
+        body = client.get(f"{PREFIX}/incidents/{incident}/assurance").json()
+        pending = [e for e in body["evaluations"] if e["decision"] == "needs_human"]
+        assert pending, "expected the gate to hold at least one action for approval"
+        return pending[0]["id"]
+
     def test_approval_is_recorded_with_a_pseudonymous_actor(self, client, incident):
         evaluation_id = self._first_evaluation(client, incident)
         response = client.post(
@@ -300,6 +313,99 @@ class TestOperatorDecision:
         details = response.json()["error"]["details"]
         assert details["recorded_decision"] == "approved"
         assert details["requested_decision"] == "rejected"
+
+    def test_the_approval_is_attributed_to_a_human_on_the_timeline(self, client, incident):
+        """Regression: an approval was recorded as `actor_kind=orchestrator`.
+
+        The only timeline entry an approval produced was the orchestrator's `STATE_CHANGED`
+        from `awaiting_approval` to `executing`. That entry is correct — the orchestrator is
+        what moved the incident — but it was also the *sole* record, so the audit trail showed
+        a machine authorising a bulk external effect that a person actually authorised.
+
+        A human overriding the gate is the single most important actor in this system to
+        attribute correctly, so this asserts the whole chain: the decision endpoint writes a
+        human-attributed entry carrying the operator and evaluation IDs, and the action that
+        follows references the decision row.
+        """
+        evaluation_id = self._pending_evaluation(client, incident)
+        client.post(
+            f"{PREFIX}/assurance/{evaluation_id}/decision",
+            json={
+                "decision": "approved",
+                "reason": "confirmed against the ops board",
+                "actor_id": "operator-7",
+            },
+        )
+
+        entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
+        human = [e for e in entries if e["event_type"] == "HUMAN_DECISION_RECORDED"]
+
+        assert len(human) == 1, "exactly one entry per human decision, not zero and not two"
+        entry = human[0]
+        assert entry["actor_kind"] == "human"
+        assert entry["actor"] == "human"
+        assert entry["stage"] == "assure"
+        assert entry["detail"]["assurance_id"] == evaluation_id
+        assert entry["detail"]["actor_id"] == "operator-7"
+        assert entry["detail"]["decision"] == "approved"
+        assert entry["detail"]["human_decision_id"] is not None
+        assert entry["correlation_id"]
+
+        # No other entry claims to be the human's, and the orchestrator keeps its own.
+        assert [e["actor_kind"] for e in entries].count("human") == 1
+        assert any(e["event_type"] == "STATE_CHANGED" for e in entries)
+
+    def test_the_resulting_action_references_the_human_decision(self, client, incident):
+        """The other half of the chain: approval authorises, and the action records it."""
+        evaluation_id = self._pending_evaluation(client, incident)
+        client.post(
+            f"{PREFIX}/assurance/{evaluation_id}/decision",
+            json={"decision": "approved", "reason": "confirmed", "actor_id": "operator-7"},
+        )
+        client.post(f"{PREFIX}/incidents/{incident}/run")
+
+        body = client.get(f"{PREFIX}/incidents/{incident}").json()
+        authorised = [a for a in body["actions"] if a["assurance_id"] == evaluation_id]
+        assert authorised, "the approved evaluation produced no action"
+        for action in authorised:
+            assert action["human_decision_id"] is not None
+
+        # And the timeline's human entry names the same decision row.
+        entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
+        entry = next(e for e in entries if e["event_type"] == "HUMAN_DECISION_RECORDED")
+        assert entry["detail"]["human_decision_id"] == authorised[0]["human_decision_id"]
+
+    def test_a_rejection_is_also_attributed_to_a_human_exactly_once(self, client, incident):
+        """Rejections used to be journalled by the engine on the next run instead.
+
+        Both outcomes are now recorded in one place, at the time the person decided, so a
+        rejection cannot produce two entries or land with a later timestamp than the decision.
+        """
+        evaluation_id = self._pending_evaluation(client, incident)
+        client.post(
+            f"{PREFIX}/assurance/{evaluation_id}/decision",
+            json={"decision": "rejected", "reason": "not appropriate", "actor_id": "operator-9"},
+        )
+        client.post(f"{PREFIX}/incidents/{incident}/run")
+
+        entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
+        human = [e for e in entries if e["event_type"] == "HUMAN_DECISION_RECORDED"]
+
+        assert len(human) == 1
+        assert human[0]["actor_kind"] == "human"
+        assert human[0]["detail"]["decision"] == "rejected"
+        assert human[0]["detail"]["actor_id"] == "operator-9"
+
+    def test_a_replayed_decision_does_not_add_a_second_timeline_entry(self, client, incident):
+        """A replay decided nothing new, so it must not appear as a fresh human act."""
+        evaluation_id = self._pending_evaluation(client, incident)
+        payload = {"decision": "approved", "reason": "confirmed"}
+        client.post(f"{PREFIX}/assurance/{evaluation_id}/decision", json=payload)
+        client.post(f"{PREFIX}/assurance/{evaluation_id}/decision", json=payload)
+
+        entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
+        human = [e for e in entries if e["event_type"] == "HUMAN_DECISION_RECORDED"]
+        assert len(human) == 1
 
     def test_unknown_evaluation_is_a_typed_404(self, client, incident):
         response = client.post(

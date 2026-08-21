@@ -33,9 +33,10 @@ from app.db.session import get_session
 from app.errors import EntityNotFound, InvalidStateTransition
 from app.events.types import HumanDecisionRecorded
 from app.models.enums import AssuranceDecision, CheckState, HumanDecisionType
-from app.models.workflow import AssuranceEvaluation, HumanDecision, Plan
+from app.models.workflow import AssuranceEvaluation, DecisionLog, HumanDecision, Plan
 from app.models.workflow import PlanTask as PlanTaskRow
 from app.observability.logging import correlation_id_var, get_logger
+from app.orchestrator.engine import ACTOR_HUMAN, STAGE_ASSURE
 from app.schemas.assurance_api import (
     AssuranceEvaluationOut,
     AssuranceResponse,
@@ -250,6 +251,13 @@ async def record_decision(
     await session.flush()
 
     correlation = correlation_id_var.get()
+    await _journal_decision(
+        session,
+        evaluation=evaluation,
+        decision=decision,
+        decided_at=decided_at,
+        correlation=correlation,
+    )
     log.info(
         "human_decision_recorded",
         assurance_id=assurance_id,
@@ -266,6 +274,70 @@ async def record_decision(
         decided_at=decided_at,
         replayed=False,
     )
+
+
+async def _journal_decision(
+    session: AsyncSession,
+    *,
+    evaluation: AssuranceEvaluation,
+    decision: HumanDecision,
+    decided_at: datetime,
+    correlation: str | None,
+) -> None:
+    """Record the operator's decision on the timeline, attributed to a person.
+
+    Written here rather than by the orchestrator, for two reasons.
+
+    **Attribution.** The orchestrator's own entry for an approval is a `STATE_CHANGED` from
+    `awaiting_approval` to `executing`, and that is correctly the orchestrator acting — it is
+    the thing that moved the incident. But it was the *only* record of an approval, so the
+    timeline showed the operator's decision as `actor_kind=orchestrator`. A human authorising a
+    bulk external effect is the single most important actor in this system to attribute
+    correctly, and the audit trail said a machine did it.
+
+    **Timing.** This is the moment the person decided. The orchestrator only learns about it on
+    the next `POST /run`, which may be much later, so a journal entry written there would carry
+    an `occurred_at` that is not when the decision happened.
+
+    Rejections previously got their entry from the engine instead. That is now removed, so both
+    outcomes are recorded once, in the same place, at the time they occurred.
+    """
+    resolved = (
+        await session.execute(
+            select(Plan.incident_id, PlanTaskRow.action_type)
+            .join(PlanTaskRow, PlanTaskRow.plan_id == Plan.id)
+            .where(PlanTaskRow.id == evaluation.plan_task_id)
+            .limit(1)
+        )
+    ).first()
+    incident_id = resolved[0] if resolved else None
+    action_type = resolved[1] if resolved else f"plan task {evaluation.plan_task_id}"
+
+    recorded = HumanDecisionType(decision.decision)
+    verb = "approved" if recorded is HumanDecisionType.approved else "rejected"
+    session.add(
+        DecisionLog(
+            incident_id=incident_id,
+            occurred_at=decided_at,
+            stage=STAGE_ASSURE,
+            # `_actor_kind` maps this to `human`, which is what the UI groups on.
+            actor=ACTOR_HUMAN,
+            event_type="HUMAN_DECISION_RECORDED",
+            summary=f"Operator {verb} {action_type} (evaluation {evaluation.id})",
+            detail={
+                "assurance_id": evaluation.id,
+                "human_decision_id": decision.id,
+                "plan_task_id": evaluation.plan_task_id,
+                "action_type": action_type,
+                # Pseudonymous, per the contract. Never a name or an address.
+                "actor_id": decision.actor_id,
+                "decision": recorded.value,
+                "reason": decision.reason,
+            },
+            correlation_id=correlation,
+        )
+    )
+    await session.flush()
 
 
 async def _publish_decision(
