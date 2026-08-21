@@ -94,6 +94,13 @@ Useful checks:
 **[`docs/30-project-status.md`](docs/30-project-status.md)** is the single source of truth for what is
 built, what remains, and the complete list of what the team needs to supply. Read it first.
 
+The three actions only a human can do — Groq key, one run of the stack on the demo laptop, and SME
+sign-off on the policy rules — are written out step by step in
+**[`docs/31-team-actions.md`](docs/31-team-actions.md)**.
+
+Agents working this repo get eight on-demand procedures from [`.kiro/skills/`](.kiro/skills/); see
+[`docs/32-skills.md`](docs/32-skills.md).
+
 ## Start here
 
 1. [`docs/DECISIONS.md`](docs/DECISIONS.md) — canonical decisions and event dates

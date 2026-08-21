@@ -25,6 +25,25 @@ submission plan.
 
 Full decision record: `docs/DECISIONS.md`. Read it before changing architecture.
 
+## Skills — reusable procedures, loaded on demand
+
+Eight skills live in `.kiro/skills/` and activate automatically when a request matches. Use them
+rather than re-deriving a procedure:
+
+| Skill | For |
+| --- | --- |
+| `verify-before-commit` | The exact verification suite. Run before every commit |
+| `open-stream-pr` | Branch naming, ownership check, reviewer invariant checklist |
+| `add-api-endpoint` | Replacing a fixture endpoint without breaking the shape |
+| `implement-assurance-check` | The six checks and the fail-closed aggregation order |
+| `add-policy-rule` | Encoding regulation as versioned data |
+| `add-provider` | Live + fixture pair behind one Protocol |
+| `implement-service` | A deterministic domain service |
+| `build-ui-screen` | Any UI work, with the design rules applied |
+
+Steering states the constraints; skills state the procedures. Both are owned by Stream A because
+a change affects all six sessions. Overview: `docs/32-skills.md`.
+
 ## Non-negotiable design rules
 
 1. **The orchestrator is the brain, not the LLM.** The correct taxonomy is **1 orchestrator + 3 reasoning
