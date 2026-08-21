@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 from data.generators.cascade_spec import BENGALURU_STORM
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.base import Base
 from app.db.scenario_queries import (
@@ -37,6 +37,7 @@ from app.models.enums import ActionStatus, ProvenanceKind
 from app.services.connection import ConnectionService
 from app.services.crew_impact import CrewImpactService
 from app.services.delay_risk import DelayRiskService
+from tests.contract.sqlite_support import create_sqlite_engine
 
 AFFECTED_FLIGHT_IDS = {flight.flight_id for flight in BENGALURU_STORM.affected_flights}
 
@@ -219,7 +220,7 @@ def test_delay_risk_ruleset_is_seeded_as_data(plan):
 @pytest.fixture
 async def session(tmp_path):
     """A real schema on SQLite. Postgres is the target; this keeps CI honest without it."""
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'seed.db'}")
+    engine = create_sqlite_engine(tmp_path / "seed.db")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
@@ -406,3 +407,72 @@ async def test_the_whole_chain_agrees_with_the_committed_fixture(session):
     assert connection.payload["at_risk_count"] == rollups["connections_at_risk"]
     assert crew.payload["pairings_at_risk"] == rollups["crew_pairings_affected"]
     assert len(AFFECTED_FLIGHT_IDS) == rollups["flights_affected"]
+
+
+# --------------------------------------------------- SQLite must be as strict as Postgres
+
+
+async def test_sqlite_enforces_foreign_keys_in_these_tests(tmp_path):
+    """Guards the guard.
+
+    With foreign keys off — SQLite's default — `reset_demo_dataset` deleting incidents while
+    `decision_log` still referenced them passed here and raised
+    `ForeignKeyViolationError` on Postgres. `make reset` would have failed on the demo machine
+    and nowhere else. If this assertion is ever removed, that whole class of bug becomes
+    invisible again.
+    """
+    from tests.contract.sqlite_support import foreign_keys_are_enforced
+
+    engine = create_sqlite_engine(tmp_path / "pragma.db")
+    try:
+        assert await foreign_keys_are_enforced(engine) is True
+    finally:
+        await engine.dispose()
+
+
+async def test_reset_leaves_no_orphaned_workflow_rows(session):
+    """A reset must be safe to run after a demo, not only before one."""
+    from sqlalchemy import func, select
+
+    from app.models.workflow import DecisionLog, Incident, Prediction
+
+    await seed_demo_dataset(session)
+    await session.commit()
+
+    # Stand in for a run: an incident with a prediction and an audit entry pointing at it.
+    from app.db.assessment import record_delay_risk_prediction
+
+    record = await record_delay_risk_prediction(
+        session,
+        airport_icao="VOBL",
+        flight_id=BENGALURU_STORM.affected_flights[0].flight_id,
+        as_of=BENGALURU_STORM.injected_at,
+    )
+    incident = Incident(
+        reference="INC-2026-0820-VOBL-99",
+        flight_id=BENGALURU_STORM.affected_flights[0].flight_id,
+        prediction_id=record.prediction_id,
+        trigger_type="weather",
+        severity="high",
+        state="detected",
+        demo_dataset_id=DEMO_DATASET_ID,
+    )
+    session.add(incident)
+    await session.flush()
+    session.add(
+        DecisionLog(
+            incident_id=incident.id,
+            stage="detect",
+            actor="orchestrator",
+            event_type="INCIDENT_OPENED",
+            summary="stand-in for a real run",
+        )
+    )
+    await session.commit()
+
+    await reset_demo_dataset(session)
+    await session.commit()
+
+    for model in (DecisionLog, Incident, Prediction):
+        remaining = (await session.execute(select(func.count()).select_from(model))).scalar_one()
+        assert remaining == 0, f"{model.__tablename__} still has {remaining} rows"

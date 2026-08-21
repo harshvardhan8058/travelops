@@ -49,9 +49,19 @@ from typing import Any
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.crew import CrewMember, CrewPairingAssignment, Pairing, PairingLeg
+from app.models.crew import (
+    CrewMember,
+    CrewPairingAssignment,
+    Pairing,
+    PairingImpact,
+    PairingLeg,
+)
 from app.models.enums import IncidentState, ProvenanceKind, TriggerType
-from app.models.policy import BusinessConstraint
+from app.models.policy import (
+    BusinessConstraint,
+    EntitlementEvaluation,
+    PolicyApplicability,
+)
 from app.models.reference import (
     Airport,
     Booking,
@@ -62,7 +72,20 @@ from app.models.reference import (
     Runway,
     WeatherObservation,
 )
-from app.models.workflow import Incident, IncidentGroup
+from app.models.workflow import (
+    Action,
+    AssuranceEvaluation,
+    DecisionLog,
+    HotelReservation,
+    HumanDecision,
+    Incident,
+    IncidentGroup,
+    IncidentOutcome,
+    Notification,
+    Plan,
+    PlanTask,
+    Prediction,
+)
 
 #: Tags the rows this module owns. `reset` never touches anything outside the dataset.
 DEMO_DATASET_ID = "bengaluru_storm"
@@ -469,6 +492,144 @@ _MODEL_BY_TABLE = {
 }
 
 
+async def _delete_workflow_records(session: AsyncSession, report: ResetReport) -> None:
+    """Remove everything the workflow appended for the demo incidents, child-first.
+
+    A run leaves behind decision-log entries, a plan, plan tasks, assurance evaluations and
+    actions, all pointing at the demo incidents. Deleting the incidents while those exist
+    raises `ForeignKeyViolationError` on Postgres — and passes silently on SQLite, which does
+    not enforce foreign keys unless asked. `make reset` after a demo run would have failed on
+    the demo machine and nowhere else, so the order below is explicit and tested against both
+    engines.
+
+    Scoped to the demo incidents throughout: an operator's own incidents are untouched.
+    """
+    incident_ids = (
+        (
+            await session.execute(
+                select(Incident.id).where(Incident.demo_dataset_id == DEMO_DATASET_ID)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    group_ids = (
+        (
+            await session.execute(
+                select(IncidentGroup.id).where(IncidentGroup.demo_dataset_id == DEMO_DATASET_ID)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    if group_ids:
+        result = await session.execute(
+            delete(PairingImpact).where(PairingImpact.incident_group_id.in_(group_ids))
+        )
+        report.deleted["pairing_impact"] = result.rowcount or 0
+
+    if not incident_ids:
+        return
+
+    plan_ids = (
+        (await session.execute(select(Plan.id).where(Plan.incident_id.in_(incident_ids))))
+        .scalars()
+        .all()
+    )
+    task_ids = (
+        (
+            (await session.execute(select(PlanTask.id).where(PlanTask.plan_id.in_(plan_ids))))
+            .scalars()
+            .all()
+        )
+        if plan_ids
+        else []
+    )
+    evaluation_ids = (
+        (
+            (
+                await session.execute(
+                    select(AssuranceEvaluation.id).where(
+                        AssuranceEvaluation.plan_task_id.in_(task_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if task_ids
+        else []
+    )
+    action_ids = (
+        (
+            (await session.execute(select(Action.id).where(Action.plan_task_id.in_(task_ids))))
+            .scalars()
+            .all()
+        )
+        if task_ids
+        else []
+    )
+
+    # Deepest children first. Each step names what would otherwise hold a reference.
+    steps: list[tuple[str, Any]] = []
+    if action_ids:
+        steps += [
+            ("notification", delete(Notification).where(Notification.action_id.in_(action_ids))),
+            (
+                "hotel_reservation",
+                delete(HotelReservation).where(HotelReservation.action_id.in_(action_ids)),
+            ),
+        ]
+    if task_ids:
+        steps.append(("action", delete(Action).where(Action.plan_task_id.in_(task_ids))))
+    if evaluation_ids:
+        steps.append(
+            (
+                "human_decision",
+                delete(HumanDecision).where(HumanDecision.assurance_id.in_(evaluation_ids)),
+            )
+        )
+    if task_ids:
+        steps.append(
+            (
+                "assurance_evaluation",
+                delete(AssuranceEvaluation).where(AssuranceEvaluation.plan_task_id.in_(task_ids)),
+            )
+        )
+    if plan_ids:
+        steps.append(("plan_task", delete(PlanTask).where(PlanTask.plan_id.in_(plan_ids))))
+    steps += [
+        ("plan", delete(Plan).where(Plan.incident_id.in_(incident_ids))),
+        # Stream B's records also hang off the incident.
+        (
+            "entitlement_evaluation",
+            delete(EntitlementEvaluation).where(
+                EntitlementEvaluation.incident_id.in_(incident_ids)
+            ),
+        ),
+        (
+            "policy_applicability",
+            delete(PolicyApplicability).where(PolicyApplicability.incident_id.in_(incident_ids)),
+        ),
+        (
+            "incident_outcome",
+            delete(IncidentOutcome).where(IncidentOutcome.incident_id.in_(incident_ids)),
+        ),
+        ("decision_log", delete(DecisionLog).where(DecisionLog.incident_id.in_(incident_ids))),
+        ("incident", delete(Incident).where(Incident.id.in_(incident_ids))),
+    ]
+
+    for table, statement in steps:
+        result = await session.execute(statement)
+        report.deleted[table] = (report.deleted.get(table) or 0) + (result.rowcount or 0)
+
+    # Predictions are referenced BY incidents, so they go once the incidents are gone.
+    flight_ids = [row["id"] for row in build_seed_plan()["flight"]]
+    result = await session.execute(delete(Prediction).where(Prediction.flight_id.in_(flight_ids)))
+    report.deleted["prediction"] = result.rowcount or 0
+
+
 async def reset_demo_dataset(session: AsyncSession) -> ResetReport:
     """Remove the demo dataset and nothing else.
 
@@ -479,11 +640,9 @@ async def reset_demo_dataset(session: AsyncSession) -> ResetReport:
     report = ResetReport(dataset_id=DEMO_DATASET_ID)
     plan = build_seed_plan()
 
-    # Workflow rows first: incidents reference flights, which the dataset owns.
-    incident_result = await session.execute(
-        delete(Incident).where(Incident.demo_dataset_id == DEMO_DATASET_ID)
-    )
-    report.deleted["incident"] = incident_result.rowcount or 0
+    # Everything the workflow appended, child-first, before the rows it points at.
+    await _delete_workflow_records(session, report)
+    await session.flush()
 
     for table in reversed(TABLE_ORDER):
         model = _MODEL_BY_TABLE[table]
