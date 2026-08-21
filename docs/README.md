@@ -13,6 +13,8 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | # | Document | Why |
 | ---: | --- | --- |
 | 0 | [`30-project-status.md`](30-project-status.md) | **Start here. What is done, what is left, what the team must supply** |
+| 0b | [`31-team-actions.md`](31-team-actions.md) | The three human actions, step by step, with fallbacks |
+| 0c | [`32-skills.md`](32-skills.md) | The eight agent skills in `.kiro/skills/` |
 | 1 | [`DECISIONS.md`](DECISIONS.md) | Canonical naming, scope, dates and settled choices |
 | 2 | [`09-requirements.md`](09-requirements.md) | What the product must and must not do |
 | 3 | [`14-hackathon-plan.md`](14-hackathon-plan.md) | Stage 2 through finals, with explicit gates/cuts |
