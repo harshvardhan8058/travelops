@@ -11,7 +11,7 @@ instructions when a request matches. So a session that says *"implement the sour
 check"* gets the assurance rules without anyone pasting them.
 
 Committing `.kiro/skills/` to git is the documented way to share workflows across a team, which
-is exactly our six-account situation.
+is exactly our four-account situation.
 
 ## The eight
 
@@ -72,5 +72,5 @@ Kiro matches requests against it, so "helps with policy" will not activate relia
 Keep `SKILL.md` actionable; put long reference material in a `references/` subfolder and point
 at it, since the full body loads on activation.
 
-Skill files are owned by Stream A, like the steering file, because a change affects all six
+Skill files are owned by Stream A, like the steering file, because a change affects all four
 sessions.

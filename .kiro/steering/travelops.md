@@ -42,7 +42,7 @@ rather than re-deriving a procedure:
 | `build-ui-screen` | Any UI work, with the design rules applied |
 
 Steering states the constraints; skills state the procedures. Both are owned by Stream A because
-a change affects all six sessions. Overview: `docs/32-skills.md`.
+a change affects all four sessions. Overview: `docs/32-skills.md`.
 
 ## Non-negotiable design rules
 
@@ -75,12 +75,22 @@ a change affects all six sessions. Overview: `docs/32-skills.md`.
 
 ## Parallel work
 
-Six Kiro accounts run against this repo. **Stay inside your stream's owned paths** — see
-`docs/28-parallel-workstreams.md` for ownership and `docs/29-kickoff-prompts.md` for per-stream scope.
-Never edit `migrations/`, `models/`, the generated API client, `policy_packs/`, compose/Makefile, or this
-steering file unless your stream owns it. Request the change from the owning stream instead.
+Four Kiro accounts run against this repo, one stream each:
 
-`migrations/` is **Stream C only**. Two streams generating migrations produces unorderable heads.
+| Stream | Owns (write access) |
+| --- | --- |
+| **A · Core & API** | `backend/app/{orchestrator,events,api,agents,llm,observability,schemas}/`, `config.py`, `main.py`, `cli.py`, `errors.py`, `docker-compose.yml`, `Makefile`, `.kiro/`, `docs/`, `scripts/` |
+| **B · Assurance & Policy** | `backend/app/{assurance,policy}/`, `policy_packs/`, `config/` |
+| **C · Data, Providers & Services** | `backend/app/{models,db,providers,services,memory}/`, `backend/migrations/`, `data/`, `fixtures/` |
+| **D · Frontend** | all of `frontend/` |
+
+**Stay inside your stream's owned paths.** Read the whole repo freely; write only what you own. See
+`docs/28-parallel-workstreams.md` for the full ownership model and `docs/kickoff/` for per-stream scope.
+Request changes outside your paths from the owning stream instead of making them.
+
+`backend/migrations/` is **Stream C only**. Two streams generating migrations produces unorderable heads.
+`fixtures/api/*.json` is also Stream C, and it is contractual: Stream A's endpoints must stay
+byte-compatible with it and Stream D renders it directly.
 
 ## UI rules — read `docs/21-design-system.md` and `docs/27-ui-specification.md` before writing any component
 

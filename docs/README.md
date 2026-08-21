@@ -4,9 +4,11 @@
 Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 
 > **Status:** submitted deck frozen. Wave 0 bootstrap is complete — scaffold, 33-table schema,
-> typed contracts, gate config, API fixtures and the UI shell all run and are verified. The six
-> streams can now build in parallel per [`29-kickoff-prompts.md`](29-kickoff-prompts.md). Stage
-> dates are in [`DECISIONS.md`](DECISIONS.md).
+> typed contracts, gate config, API fixtures and the UI shell all run and are verified. The four
+> streams can now build in parallel — paste-ready prompts in [`kickoff/`](kickoff/README.md),
+> ownership and token-load ranking in
+> [`28-parallel-workstreams.md`](28-parallel-workstreams.md). Stage dates are in
+> [`DECISIONS.md`](DECISIONS.md).
 
 ## Read in this order
 
@@ -23,9 +25,9 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | 6 | [`26-implementation-contracts.md`](26-implementation-contracts.md) | API, state, auth, security and observability baseline |
 | 7 | [`21-design-system.md`](21-design-system.md) | How the UI looks: tokens, density, motion. No purple |
 | 8 | [`27-ui-specification.md`](27-ui-specification.md) | What the UI does: every screen, feature and interaction |
-| 9 | [`28-parallel-workstreams.md`](28-parallel-workstreams.md) | Six Kiro accounts, exclusive file ownership, no merge chaos |
+| 9 | [`28-parallel-workstreams.md`](28-parallel-workstreams.md) | Four Kiro accounts, exclusive file ownership, and which account burns the most tokens |
 | 10 | [`29-kickoff-prompts.md`](29-kickoff-prompts.md) | Wave sequencing, daily rhythm, ownership rationale |
-| 11 | [`kickoff/`](kickoff/README.md) | **Six ready-to-paste prompts, one per account. Nothing to edit** |
+| 11 | [`kickoff/`](kickoff/README.md) | **Four ready-to-paste prompts, one per account. Nothing to edit** |
 
 ## Architecture and safety
 
@@ -62,8 +64,8 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | [20 — Phased Delivery](20-phased-delivery.md) | Five demonstrable phases |
 | [23 — Stack Alignment](23-stack-alignment.md) | Optional Coforge list and deliberate tool choices |
 | [27 — UI Specification](27-ui-specification.md) | Screens, features, states, keyboard model, feature-to-stage map |
-| [28 — Parallel Workstreams](28-parallel-workstreams.md) | Six-account file ownership, contract freeze, branch model |
-| [29 — Kickoff Prompts](29-kickoff-prompts.md) | The exact prompt to paste into each of the six accounts |
+| [28 — Parallel Workstreams](28-parallel-workstreams.md) | Four-account file ownership, token-load ranking, branch model |
+| [29 — Kickoff Prompts](29-kickoff-prompts.md) | Sequencing, account assignment and token limits for the four accounts |
 | [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) | Unresolved team-access/review inputs only |
 
 ## Non-negotiable rules

@@ -12,11 +12,12 @@ Owner: Stream A. Contract: `docs/26-implementation-contracts.md`.
 
 ## The shape is contractual
 
-`fixtures/api/*.json` and the frontend both depend on it. Streams E and F are building against
-those files right now. Changing a field name breaks their work silently.
+`fixtures/api/*.json` and the frontend both depend on it. Stream D is building against those
+files right now. Changing a field name breaks its work silently.
 
-If a shape genuinely must change: say so, update the fixture and the TypeScript type in the
-same PR, and tell the frontend streams. Never change it quietly.
+`fixtures/api/` is owned by **Stream C**, not by you. If a shape genuinely must change, raise it
+with Stream C — they update the fixture, Stream D updates the TypeScript type, and the change is
+announced. Never edit a fixture yourself to make your endpoint pass.
 
 ## Replacing a fixture endpoint
 

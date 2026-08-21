@@ -39,7 +39,8 @@ import {
 } from '@/components/ui/primitives';
 ```
 
-Stream E owns these. If one is missing, ask — do not build a local variant.
+Stream D owns all of `frontend/`, including these. If a primitive is missing, add it to
+`primitives.tsx` rather than building a local variant inside a feature folder.
 
 ## Four rules that make it look like instrumentation
 

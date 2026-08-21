@@ -1,86 +1,149 @@
-# 28. Parallel Workstreams — Running Six Kiro Accounts
+# 28. Parallel Workstreams — Running Four Kiro Accounts
 
-Six accounts across four people is real capacity, but parallel AI agents on one repository fail in a
-predictable way: two sessions edit the same file, both are individually correct, and the merge is a mess.
+Four accounts is real capacity, but parallel AI agents on one repository fail in a predictable way: two
+sessions edit the same file, both are individually correct, and the merge is a mess.
 
 This document removes that risk by assigning **exclusive file ownership** per stream. The rule is simple:
 
 > A stream may only create or modify files inside the paths it owns. Anything outside is a request to the
 > owning stream, not an edit.
 
+Every stream may **read** the entire repository. Only writes are partitioned.
+
 ## Why the steering file matters here
 
 `.kiro/steering/travelops.md` is loaded automatically in every session in this repository. That is what
-makes six independent sessions produce consistent code: the taxonomy, the assurance rules, the policy
+makes four independent sessions produce consistent code: the taxonomy, the assurance rules, the policy
 modes, the provenance requirement and the no-purple UI rules are enforced everywhere without anyone
 repeating them.
 
 **Treat steering as shared law.** Only Stream A edits it, and only with the team's agreement, because a
-change there silently changes what the other five sessions will build.
+change there silently changes what the other three sessions will build.
 
-## The six streams
+## The four streams
 
-| Stream | Owns | Deliverable | Suggested owner |
-| --- | --- | --- | --- |
-| **A · Core** | `backend/app/orchestrator/`, `events/`, `config.py`, `main.py`, `.kiro/steering/` | Workflow engine, state machine, event bus, limits, config validation | Harshvardhan Sharma |
-| **B · Assurance + Policy** | `backend/app/assurance/`, `backend/app/policy/`, `policy_packs/` | Six checks, fail-closed aggregation, pack loader, rules engine, charter-mode evaluation | Karthikeyan D |
-| **C · Data + Providers** | `backend/app/models/`, `migrations/`, `providers/`, `data/` | Schema, Alembic, seeders, weather/flight/notification providers with fixtures | Harshvardhan Jha |
-| **D · Services** | `backend/app/services/` | The ten deterministic services | Sabyasachin Biswal |
-| **E · Frontend shell** | `frontend/src/design/`, `components/ui/`, `api/`, `features/ops-board/`, `features/timeline/` | Tokens, primitives, typed client, Ops Board, Decision Timeline | second session, any member |
-| **F · Frontend workspace** | `features/incident/`, `features/assurance/`, `features/policy-citation/`, `features/cascade/`, `features/reports/` | Recovery workspace, assurance panel, policy citation, cascade graph | second session, any member |
+| Stream | Owns (write access) | Deliverable |
+| --- | --- | --- |
+| **A · Core & API** | `backend/app/{orchestrator,events,api,agents,llm,observability,schemas}/`, `config.py`, `main.py`, `cli.py`, `errors.py`, `docker-compose.yml`, `Makefile`, `.kiro/`, `docs/`, `scripts/` | Workflow engine, event bus, the twelve real endpoints, CLI, reasoning agents, prompt files |
+| **B · Assurance & Policy** | `backend/app/{assurance,policy}/`, `policy_packs/`, `config/`, `backend/tests/unit/{assurance,policy}/` | Six checks, fail-closed aggregation, pack loader, tri-state resolver, rules engine, 23 pack cases |
+| **C · Data, Providers & Services** | `backend/app/{models,db,providers,services,memory}/`, `backend/migrations/`, `data/`, `fixtures/`, `backend/tests/unit/services/`, `backend/tests/contract/` | Loaders, generators, four providers with fixture twins, the ten deterministic services |
+| **D · Frontend** | all of `frontend/` | Eight screens, provenance popovers, replay, command palette, keyboard model |
 
-Streams E and F are the two extra accounts. Frontend parallelises best because the screens are genuinely
-separable once tokens and the typed client exist.
+### Why this particular split
+
+Three alternatives were considered and rejected:
+
+- **Merging A and D** (backend control plane + frontend) makes one account enormous — engine, event bus,
+  twelve endpoints *and* eight screens — while leaving the other three underloaded.
+- **Splitting `backend/app/services/` file-by-file** across accounts spreads the ten services around to
+  balance the load, but it breaks directory-level single ownership. Two sessions in one package means
+  constant conflicts on `__init__.py` and shared helpers.
+- **Folding B into anything else** dilutes the safety boundary. B is the code that decides whether
+  anything is allowed to happen. It is the smallest stream by file count and the largest by reasoning
+  depth, and it needs undivided attention.
+
+C absorbs the old Data+Providers and Services streams because services consume models and providers
+directly. One owner across that boundary removes the busiest cross-stream handshake in the project.
+D absorbs both frontend streams because the shell now exists — the remaining screens are separable but
+share primitives, and a single owner never has to request a new primitive from another account.
+
+## Which account will burn the most tokens
+
+Measured on `main` at Wave 0 completion:
+
+| Rank | Stream | Existing LOC | Units left to build | Why it costs what it costs |
+| --- | --- | --- | --- | --- |
+| **1 — highest** | **D · Frontend** | 1,662 | 7 screens + popover upgrade + palette + keyboard model | TSX is the most verbose code in the repo, and UI work is inherently iterative: layout, then states, then keyboard, then contrast. Many read-modify-verify cycles per screen. |
+| **2** | **C · Data, Providers & Services** | 1,652 | 11 services + 4 providers × 2 impls + generators + loaders | Roughly 20 implementation units. The generators are the hard part — they must work backwards to hit exactly 8 flights, ~604 passengers, 22 connections and **exactly 9 crew pairings**, which takes several correction rounds. |
+| **3** | **A · Core & API** | 1,436 | engine + event bus + 9 endpoint replacements + CLI + agents | Moderate file count but high integration cost: every endpoint has to stay byte-compatible with a committed fixture, so each one is a write-then-diff loop. |
+| **4 — lowest** | **B · Assurance & Policy** | 365 | 5 stub files, 40 rules, 23 cases | Fewest files by far, but the deepest reasoning per line. Token spend is concentrated in iterating the rule engine until all 23 cases pass, not in producing volume. |
+
+**Put your highest token limit on the account running Stream D, and your second highest on Stream C.**
+
+Stream B is the account to give your *best reviewer*, not your biggest quota — it will consume the least
+and matter the most. If one of your four accounts has a noticeably smaller limit than the others, assign
+it to B.
+
+If D still runs out of quota, the remedy is ordering, not more scope: screens 2 and 4 (Recovery Workspace
+and Approval Queue) carry the Stage 2 demo. Screens 3, 5, 7 and 8 are individually shippable afterwards,
+so hitting a limit costs you a screen, never the demo.
 
 ## Hard sequencing constraints
 
 Only three real dependencies exist. Everything else runs concurrently.
 
 ```text
-C (schema + migrations)  ──▶  A, B, D can persist
-A (event + task contracts) ──▶  D can be invoked
-C (OpenAPI generated)     ──▶  E, F have real types
+C (schema + migrations)   ──▶  A, B can persist
+A (event + task contracts) ──▶  C's services can be invoked
+A (OpenAPI generated)      ──▶  D has real types
 ```
 
-Until those land, downstream streams work against fixtures. That is why the next section exists.
+All three are **already satisfied on `main`.** Wave 0 committed the schema, the migration, the typed
+event contracts, the assurance contract and a fixture for every endpoint the frontend needs. That is why
+four streams can start simultaneously today rather than after a contract-freeze day.
 
-## Day one: freeze the contracts before parallelising
-
-Six sessions building against guesses is worse than one session building slowly. Before streams split:
-
-1. **C** writes the schema and runs the first migration.
-2. **A** commits typed event and task contracts.
-3. **B** commits the assurance evaluation record shape.
-4. **C** generates the OpenAPI document; **E** generates the typed client from it.
-5. Commit fixture JSON for every endpoint the frontend needs.
-
-These come from [`26-implementation-contracts.md`](26-implementation-contracts.md) and
-[`11-data-model.md`](11-data-model.md) — the shapes are already decided, so this is transcription, not
-design. Budget half a day.
-
-After that, E and F never wait for the backend. They build against fixtures and switch to live responses
-by changing a base URL.
+Until an endpoint is real, D consumes the committed fixture for it. `VITE_USE_FIXTURES=true` is the
+default, so **D is never blocked by the backend.**
 
 ## Files that must never be edited in parallel
 
 | File | Owner | Why |
 | --- | --- | --- |
-| `.kiro/steering/travelops.md` | A | Changes behaviour of all six sessions |
+| `.kiro/steering/travelops.md` | A | Changes behaviour of all four sessions |
+| `.kiro/skills/` | A | Shared procedures; a change affects everyone |
 | `docker-compose.yml`, `Makefile`, `.env.example` | A | Constant conflict magnets |
-| `migrations/` | **C only** | Two sessions generating migrations produces unorderable heads |
-| `models/` | C | Everyone imports it |
-| Generated API client | E | Regenerate, never hand-edit |
+| `backend/migrations/` | **C only** | Two sessions generating migrations produces unorderable heads |
+| `backend/app/models/` | C | Everyone imports it |
+| `backend/app/schemas/` | A | Shared response contracts |
+| `fixtures/api/*.json` | C | These are contractual; D renders them and A must match them |
 | `policy_packs/` | B | Pack hashes and review state must stay coherent |
-| `docs/` | Whoever owns the subject | One doc, one owner |
+| `frontend/src/design/tokens.css` | D | Single source of colour |
+| `docs/` | A | One doc, one owner |
 
 If a stream needs a change in someone else's path, it opens a PR comment or a short issue. It does not
 edit.
 
+### The shared guard tests are frozen for everyone, including their owner
+
+The `.py` files directly under `backend/tests/unit/` — as opposed to the per-stream subdirectories — are
+cross-stream invariant guards:
+
+| Guard test | Stops |
+| --- | --- |
+| `test_no_llm_in_services.py` | An AST check: nothing under `app/services/` importing an LLM client |
+| `test_state_machine.py` | An illegal incident transition becoming reachable |
+| `test_contracts.py` | A typed contract drifting from its specification |
+| `test_config_fail_closed.py` | Missing safety config silently degrading instead of blocking |
+| `test_container_runtime_paths.py` | The `fixtures/` mount regressing and breaking `:5173` |
+| `test_crosswind.py` | The crosswind trigonometry being rewritten incorrectly |
+
+The rule: **any stream may add a guard test; no stream may weaken or delete an existing assertion.** If a
+guard fails, the code is wrong, not the test. Relaxing one is a whole-team decision, not a stream's.
+
+This matters most where a guard constrains the stream that would most like to remove it. C is the stream
+that would benefit from deleting `test_no_llm_in_services.py`, so C explicitly may not. Nominal ownership
+sits with A for review purposes, and `test_crosswind.py` is delegated to C to *extend* as Delay Risk is
+built, with its existing assertions still frozen.
+
+### Everything else
+
+Root and build files sit with A: `.gitignore`, `README.md`, `docker-compose.yml`, `Makefile`,
+`.env.example`, `backend/Dockerfile`, `backend/.dockerignore`, `backend/.python-version`,
+`backend/pyproject.toml`, `backend/tests/__init__.py`. `backend/alembic.ini` sits with C, alongside the
+migrations it configures. `frontend/Dockerfile` sits with D, inside the directory it builds.
+
+Every file in the repository has exactly one owning stream. That is verifiable, not aspirational — a
+coverage check over the ownership table returns no unclaimed files.
+
+Note that `fixtures/api/*.json` sits with C rather than A. The fixtures are the contract between A's real
+endpoints and D's screens; keeping them with the data owner means a shape change is a deliberate, single
+place decision rather than something two streams drift on.
+
 ## Branch and integration model
 
 ```text
-main                      always runnable
-└── stream/<letter>/<slice>    e.g. stream/b/assurance-gate
+main                        always runnable
+└── stream/<letter>/<slice>     e.g. stream/b/assurance-gate
 ```
 
 - One branch per slice, not per stream. Short-lived, merged daily.
@@ -90,65 +153,65 @@ main                      always runnable
 - `git pull --rebase origin main` before every push.
 - Nobody merges their own PR without one other stream reviewing it.
 
-## Session prompt template
-
-Each account starts its session with a scoped prompt. This is what keeps a session inside its lane:
+With four accounts every stream reviews exactly one other stream's work in a fixed rotation, so no PR
+waits on a volunteer:
 
 ```text
-You are working on TravelOps AI, Stream <LETTER> — <NAME>.
-
-Read first: docs/26-implementation-contracts.md, docs/16-folder-structure.md,
-and the doc listed for my stream below.
-
-I own ONLY these paths: <paths>
-Do not create or modify files outside them. If a change is needed elsewhere,
-tell me and I will raise it with the owning stream.
-
-Current target: <Stage 2 deliverable from docs/25-evaluation-readiness.md>
-Definition of done: the relevant gate in docs/25-evaluation-readiness.md passes.
-
-Branch: stream/<letter>/<slice>. Commit in small, working increments.
+A reviews B    B reviews C    C reviews D    D reviews A
 ```
 
-Per-stream required reading:
+## Session prompt
+
+Do not write your own. [`kickoff/`](kickoff/README.md) holds four complete, paste-ready prompts — one per
+account, nothing to fill in. Each declares its owned paths, lists what Wave 0 already built so it is not
+rebuilt, orders its deliverables, and states a definition of done.
+
+Per-stream required reading, if you need it outside the prompts:
 
 | Stream | Read |
 | --- | --- |
 | A | `26-implementation-contracts.md`, `01-architecture.md`, `02-disruption-flow.md` |
 | B | `18-decision-assurance-gate.md`, `19-jurisdiction-and-policy-packs.md`, `13-compensation-and-policy.md`, the pack's `rules.yaml` and `test_cases.yaml` |
-| C | `11-data-model.md`, `10-data-sources.md`, `12-synthetic-data-plan.md` |
-| D | `03-agent-design.md`, `06-ai-vs-deterministic.md`, `22-crew-pairing-model.md` |
-| E | `21-design-system.md`, `27-ui-specification.md` screens 1 and 6 |
-| F | `21-design-system.md`, `27-ui-specification.md` screens 2–5 and 7 |
-
-## Realistic expectations
-
-Six parallel sessions do not produce six times the output. Expect roughly **two and a half to three times**
-a single stream, because integration, review and contract alignment consume the rest. That is still a large
-win, and it is the difference between Stage 2 being comfortable and being a scramble.
-
-Two failure modes to watch:
-
-- **Divergent conventions.** Two sessions invent two different error shapes. Mitigation: the steering file
-  and a single review pass on the first PR from each stream.
-- **Silent scope creep.** A session decides it needs a feature outside its lane and builds it. Mitigation:
-  the ownership table, and reviewing PR file lists before content.
+| C | `11-data-model.md`, `10-data-sources.md`, `12-synthetic-data-plan.md`, `03-agent-design.md`, `06-ai-vs-deterministic.md`, `22-crew-pairing-model.md` |
+| D | `21-design-system.md`, `27-ui-specification.md` (all eight screens) |
 
 ## Suggested first slices
 
-Everything below is independently startable once contracts are frozen.
+Everything below is independently startable right now.
 
 | Stream | First slice |
 | --- | --- |
-| A | Compose up, health endpoints, config validation that fails closed, incident state machine |
+| A | Redis Streams event bus, then the orchestrator engine's `open_incident` and `advance` |
 | B | Six checks as pure functions with unit tests, then aggregation, then the pack loader |
-| C | Migrations, airport/runway loader, synthetic passenger and pairing seeders, fixed seed `20260807` |
-| D | Delay Risk service with unit-tested thresholds, then Connection service |
-| E | Tailwind token override, `<StateBadge>`, `<MonoValue>`, `<ProvenanceDot>`, Ops Board against fixtures |
-| F | Recovery workspace three-column layout and assurance panel against fixtures |
+| C | Delay Risk `execute()` on top of the committed crosswind maths, then the pairing generator |
+| D | `WhyPopover` upgrade to a real positioned popover, then the Recovery Workspace layout |
 
-## Cost note
+## Sequencing inside the two heavy streams
 
-Six Pro accounts is meaningful spend. If you want to reduce it, streams **E and F can share one account**
-sequentially, and stream **D can fold into A** once the orchestrator is stable. Four accounts is enough to
-hit Stage 2 comfortably; six is enough to hit Stage 3 early.
+C and D each carry more than a single sprint of work. Both have an explicit demo-critical prefix, and
+both prompts encode it. Summarised here so the plan is legible without opening the prompts:
+
+**C — do these four services first, defer the other six.** Delay Risk, Connection, Crew Impact,
+Communication. Those four are the entire Stage 2 narrative. Flight Recovery, Hotel, Transport,
+Compensation, Gate/Resource and Analytics can land in Stage 3 without weakening the demo — with the one
+caveat that Compensation is what makes the policy screen live, so it is first among the deferred six.
+
+**D — Recovery Workspace and the assurance panel first.** Those two screens are where a judge sees the
+gate refuse to execute. The cascade graph, policy citation, executive report and provenance ledger are
+each self-contained afterwards.
+
+## Realistic expectations
+
+Four parallel sessions do not produce four times the output. Expect roughly **two to two and a half
+times** a single stream, because integration, review and contract alignment consume the rest. That is
+still a large win, and it is the difference between Stage 2 being comfortable and being a scramble.
+
+Two failure modes to watch:
+
+- **Divergent conventions.** Two sessions invent two different error shapes. Mitigation: the steering
+  file, the shared skills in `.kiro/skills/`, and a single review pass on the first PR from each stream.
+- **Silent scope creep.** A session decides it needs a feature outside its lane and builds it. Mitigation:
+  the ownership table, and reviewing PR file lists before content.
+
+Review the PR **file list before the code**. If it touches paths the stream does not own, that is the
+finding, regardless of how good the code is.

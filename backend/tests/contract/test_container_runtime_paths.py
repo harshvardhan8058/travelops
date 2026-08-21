@@ -40,9 +40,7 @@ def _volumes(compose: dict, service: str) -> list[str]:
 def test_repo_root_fixtures_are_mounted(compose: dict, service: str):
     """Both containers must see repo-root fixtures/ at /fixtures."""
     mounts = _volumes(compose, service)
-    assert any(
-        m.startswith("./fixtures:") and CONTAINER_FIXTURE_PATH in m for m in mounts
-    ), (
+    assert any(m.startswith("./fixtures:") and CONTAINER_FIXTURE_PATH in m for m in mounts), (
         f"service '{service}' does not mount ./fixtures at {CONTAINER_FIXTURE_PATH}. "
         "The build context cannot reach repo-root fixtures/, so it must be a volume."
     )

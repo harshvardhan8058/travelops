@@ -148,10 +148,10 @@ available and it is currently unscheduled.
   by block time.
 - The 24-hour cancellation rule is marked `superseded_suspected` and excluded from evaluation.
 
-### Documentation — 41 files
+### Documentation — 42 files
 
 Architecture, requirements, data model, assurance gate, policy packs, crew pairings, phased
-delivery, design system, UI specification, workstream ownership, and six ready-to-paste
+delivery, design system, UI specification, workstream ownership, and four ready-to-paste
 kickoff prompts.
 
 ---
@@ -161,14 +161,21 @@ kickoff prompts.
 Eighteen files contain `NotImplementedError`. That is deliberate: Wave 0 built the contracts
 and left each stream's logic to its owner, with required behaviour in the docstring.
 
-| Stream | Files to implement | First slice |
-| --- | --- | --- |
-| **A · Core** | `orchestrator/engine.py`, `events/bus.py` (new), `cli.py` | Event bus, then the engine run loop |
-| **B · Assurance + Policy** | `assurance/checks.py`, `assurance/gate.py`, `policy/{loader,resolver,engine}.py` | Six checks as pure functions |
-| **C · Data + Providers** | `providers/*` implementations, `data/loaders/`, `data/generators/` | Airport loader, then the pairing generator |
-| **D · Services** | 10 service `execute()` bodies, `memory/retrieval.py` | Delay Risk on top of the existing crosswind |
-| **E · Frontend shell** | `WhyPopover` upgrade, sources screen, replay screen, command palette | Positioned popover |
-| **F · Frontend workspace** | Recovery workspace, assurance panel, approval queue, policy citation, cascade, report | Recovery workspace layout |
+The work is allocated across **four** Kiro accounts, not six. Ownership rationale and the
+token-load ranking: [`28-parallel-workstreams.md`](28-parallel-workstreams.md). Paste-ready
+prompts: [`kickoff/`](kickoff/README.md).
+
+| Stream | Files to implement | First slice | Token load |
+| --- | --- | --- | --- |
+| **A · Core & API** | `orchestrator/engine.py`, `events/bus.py` (new), `cli.py`, 9 endpoints out of `fixtures_router.py`, `agents/`, `observability/` | Event bus, then the engine run loop | Medium |
+| **B · Assurance & Policy** | `assurance/checks.py`, `assurance/gate.py`, `policy/{loader,resolver,engine}.py` | Six checks as pure functions | **Lowest** |
+| **C · Data, Providers & Services** | `providers/*` implementations, `data/loaders/`, `data/generators/`, 10 service `execute()` bodies, `memory/retrieval.py` | Airport loader, then the pairing generator | **Second highest** |
+| **D · Frontend** | `WhyPopover` upgrade, recovery workspace, assurance panel, approval queue, policy citation, cascade, report, sources, replay, command palette | Positioned popover, then the workspace layout | **Highest** |
+
+Streams C and D each carry more than a sprint, so both prompts front-load the Stage 2 demo and
+mark the rest deferrable. C does Delay Risk, Connection, Crew Impact and Communication before
+the other six services. D does the recovery workspace and assurance panel before the other
+screens. Hitting a quota ceiling then costs a screen or a deferred service, never the demo.
 
 ### Not verified, and I will not claim otherwise
 
@@ -178,9 +185,9 @@ and left each stream's logic to its owner, with required behaviour in the docstr
 - **The `make` targets do not run on Windows.** PowerShell equivalents are in
   [`31-team-actions.md`](31-team-actions.md).
 - **Fixture endpoints have no response models.** They return `Any`, so OpenAPI renders their
-  schema as `"string"`. Harmless now — Streams E and F hand-wrote their types — but Stream A must
-  add a Pydantic response model to each endpoint it makes real, otherwise a generated client
-  would be useless.
+  schema as `"string"`. Harmless now — Stream D hand-wrote its types — but Stream A must add a
+  Pydantic response model to each endpoint it makes real, otherwise a generated client would be
+  useless. The `add-api-endpoint` skill now requires this.
 - No live Groq call has been made.
 - No live METAR fetch has been made.
 - No real email has been sent.

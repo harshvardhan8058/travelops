@@ -57,20 +57,20 @@ not a blocker to starting, but it means the first milestone is a vertical slice�
 
 ### Team split
 
-Six Kiro Pro accounts run six streams with exclusive file ownership. Full allocation, sequencing
-constraints, branch model and session prompts: [`28-parallel-workstreams.md`](28-parallel-workstreams.md).
+Four Kiro accounts run four streams with exclusive file ownership. Full allocation, token-load
+ranking, sequencing constraints and branch model: [`28-parallel-workstreams.md`](28-parallel-workstreams.md).
+Paste-ready prompts: [`kickoff/`](kickoff/README.md).
 
 | Stream | Stage 2 output |
 | --- | --- |
-| A · Core | Compose up, health, config fail-closed, incident state machine, event bus |
-| B · Assurance + Policy | Six checks, fail-closed aggregation, pack loader, charter-mode evaluation |
-| C · Data + Providers | Schema, migrations, seeded fixture, weather/flight/notification providers |
-| D · Services | Delay Risk, Connection, Hotel, Transport, Communication services |
-| E · Frontend shell | Tokens, primitives, typed client, Ops Board, Decision Timeline |
-| F · Frontend workspace | Recovery workspace, assurance panel, policy citation |
+| A · Core & API | Event bus, orchestrator engine, real endpoints replacing fixtures, CLI |
+| B · Assurance & Policy | Six checks, fail-closed aggregation, pack loader, charter-mode evaluation |
+| C · Data, Providers & Services | Loaders, generators, weather/flight/notification providers, Delay Risk, Connection, Crew Impact, Communication |
+| D · Frontend | Recovery workspace, assurance panel, approval queue, policy citation |
 
-**Day one is contract freeze, not parallel building.** Schema, event/task contracts, assurance record
-shape, generated OpenAPI and endpoint fixtures land first; then the streams split.
+**Contract freeze already happened.** Wave 0 is merged: schema, migration, event and task contracts,
+assurance record shape and an endpoint fixture set are all on `main`, so the four streams start
+simultaneously rather than waiting a day.
 
 **Gate:** a clean checkout reaches a resolved incident without calling an LLM. If this does not work,
 do not start Phase 3.

@@ -1,9 +1,55 @@
-# 31. Team Actions — the three things only you can do
+# 31. Team Actions — the four things only you can do
 
-Everything else is either already built or owned by a stream. These three need a human with
+Everything else is either already built or owned by a stream. These four need a human with
 access, and this document is precise enough that nobody has to ask a follow-up question.
 
 Status summary lives in [`30-project-status.md`](30-project-status.md).
+
+---
+
+## Action 0 — Assign the four Kiro accounts and their token limits
+
+### Why it is needed
+
+The plan is built for **four** accounts, one stream each, with exclusive file ownership. Nothing
+starts until each account knows which stream it is, because two accounts guessing the same lane
+is the one failure mode that costs a day rather than an hour.
+
+### Exactly what to do
+
+1. Decide who sits at which account:
+
+   | Account | Stream | Prompt to paste |
+   | --- | --- | --- |
+   | 1 | A · Core & API | [`kickoff/stream-a-core.md`](kickoff/stream-a-core.md) |
+   | 2 | B · Assurance & Policy | [`kickoff/stream-b-assurance-policy.md`](kickoff/stream-b-assurance-policy.md) |
+   | 3 | C · Data, Providers & Services | [`kickoff/stream-c-data-services.md`](kickoff/stream-c-data-services.md) |
+   | 4 | D · Frontend | [`kickoff/stream-d-frontend.md`](kickoff/stream-d-frontend.md) |
+
+2. **Set the token limits in this order.** This is the part that is easy to get wrong:
+
+   | Priority | Account | Reason |
+   | --- | --- | --- |
+   | Highest limit | **4 · Frontend** | Seven screens left, and TSX is the most verbose code in the repo. UI work runs the most read-modify-verify cycles of any stream. |
+   | Second highest | **3 · Data, Providers & Services** | About twenty implementation units, and the synthetic generators take several correction rounds because they must land on exactly 9 crew pairings. |
+   | Standard | **1 · Core & API** | Moderate file count, but every endpoint must stay byte-compatible with a committed fixture, so each one is a write-then-diff loop. |
+   | Smallest is fine | **2 · Assurance & Policy** | Fewest files by far. Its cost is reasoning depth, not volume. Give this one your most careful reviewer instead of your biggest quota. |
+
+3. Paste each prompt into its account. Nothing to fill in — each prompt already declares its
+   owned paths, what Wave 0 already built, its phase order and its definition of done.
+
+### How you know it worked
+
+Each session's first reply states its plan for its first slice and does **not** propose touching
+another stream's paths. If a session proposes editing `backend/app/models/` and it is not Stream
+C, stop it there — that is the ownership rule working.
+
+### If an account runs out of quota anyway
+
+Do not widen anyone's scope to compensate. Streams C and D both have an explicit phase order in
+their prompt, with the Stage 2 demo front-loaded. Hitting a ceiling then costs a deferred service
+or a deferred screen, never the demo. Full reasoning and the measured numbers behind the ranking:
+[`28-parallel-workstreams.md`](28-parallel-workstreams.md#which-account-will-burn-the-most-tokens).
 
 ---
 
@@ -262,6 +308,7 @@ That is a defensible position. Claiming verification we do not have is not.
 
 | # | Action | Deadline | Blocks | Fallback |
 | --- | --- | --- | --- | --- |
+| 0 | Assign four accounts to four streams; highest token limit on account 4, second highest on account 3 | **Now** | All parallel work | **None** |
 | 1 | Groq key in `backend/.env`; send limits only | Before Stage 3 | Live reasoning | `fixture` and `off` both work |
 | 2 | Run the stack on the demo laptop — API ✅ 21 Aug; console + migration pending | **Now** | Confidence the stack runs | **None** |
 | 3 | SME completes `review.yaml` | Before Stage 3 | `POLICY_MODE=verified` | `charter` mode, dated badge |
