@@ -15,8 +15,9 @@ rest of the project cites when deciding what may be claimed.
 | Architecture/requirements | Corrected after mentor review |
 | Premium UI design system | Implemented for the demo path; remaining screens listed in `30-project-status.md` |
 | Application code | Stage 2 deterministic slice complete: orchestrator, event bus, assurance gate, policy packs, four services, real endpoints, CLI |
-| Runtime/demo | Recovery reaches `resolved` through the real Uvicorn process against PostgreSQL 16, with `LLM_MODE=off` |
-| Full `docker compose` cold start | **Unconfirmed on a real machine.** Verified per-service, not orchestrated together — team action 2 |
+| Runtime/demo | Recovery reaches `resolved` on the demo machine via `docker compose`, and against PostgreSQL 16 through the real Uvicorn process, with `LLM_MODE=off` |
+| Full `docker compose` cold start | **Confirmed on the demo machine**, 21 August: healthy datastores, migrations, seed, injection, the gate holding a high-risk action, approval, execution, `resolved` |
+| Operations console on the demo machine | **Unconfirmed.** The stack serves it; nobody has reported `:5173` rendering there |
 | Reasoning agents (Stage 3) | **Not started.** `LLM_MODE=off` is the only exercised path |
 | Six remaining deterministic services | **Not built.** Deferred from the plan and recorded as deferred, never faked |
 | India policy pack | **Blocked on primary source + review.** `charter` mode works; `verified` unreachable by design |
@@ -26,14 +27,19 @@ rest of the project cites when deciding what may be claimed.
 
 | Claim | Observed |
 | --- | --- |
-| `alembic upgrade head`, `make seed`, `make demo` | Inside the built API image against PostgreSQL 16; seed is 2083 rows at digest `70fbdf8947c638e5` |
-| `POST /run` → `awaiting_approval` → approve → `POST /run` → `resolved` | Real Uvicorn process over HTTP, Redis deliberately unreachable |
+| The whole chain on the demo machine | `docker compose` on Windows / Docker Desktop 29.x (WSL2), 21 August: healthy datastores → migrations → seed → inject → run → hold → approve → run → `resolved` |
+| `alembic upgrade head`, `make seed`, `make demo` | Also inside the built API image against PostgreSQL 16; seed is 2083 rows at digest `70fbdf8947c638e5` |
+| `POST /run` → `awaiting_approval` → approve → `POST /run` → `resolved` | Real Uvicorn process over HTTP, Redis deliberately unreachable, to prove the bus is optional |
 | Risk 80 / `severe`, six named factors with observed values | `GET /incidents/{ref}` |
 | 8 of 10 connections, 2 rotations, 0 real / 174 simulated notifications | Recorded `action` rows |
-| Backend suite | 1068 passing; 1084 with `TRAVELOPS_TEST_DATABASE_URL`, including 16/16 real-app PostgreSQL tests |
+| An operator approval attributed to `human`, and the action referencing it | `GET /incidents/{ref}/timeline` and the `action` row's `human_decision_id` |
+| Backend suite | 1087 passing; with `TRAVELOPS_TEST_DATABASE_URL` also 16/16 real-app PostgreSQL tests |
 
-The gap that matters: nobody has yet run `docker compose up` with all four services on the demo
-laptop. Everything above was verified service by service.
+`scripts/verify_demo.py` re-checks thirteen of these in one command, inside the container, and
+exits non-zero on any failure. Use it rather than re-deriving the sequence by hand.
+
+The gap that remains is the console, not the backend: nobody has reported `:5173` rendering on
+the demo machine.
 
 ## Evidence conventions
 
@@ -62,13 +68,15 @@ checks in `30-project-status.md` and every UI box in this file remain the demo m
 
 - [x] Clean checkout documented. `README.md` carries the full sequence including `make seed`
       and `make demo`, which were previously missing from it.
-- [ ] `docker compose up --build` starts frontend, API, Postgres and Redis. **Partly confirmed.**
-      The API builds and starts on Windows with Docker Desktop 29.x (WSL2), 21 August, and
-      `/docs` serves. Still unconfirmed on that machine: `alembic upgrade head`, `make seed`,
-      `make demo`, the recovery calls, and the console at `:5173`.
-      **To close this box:** run steps 1–7 in [`31-team-actions.md`](31-team-actions.md) and paste
-      the output of `scripts/verify_demo.py`. A full pass prints `13 of 13 checks passed` and
-      exits 0; anything less names the failing check.
+- [x] `docker compose up --build` starts frontend, API, Postgres and Redis, and the data and
+      recovery chain runs on it. **Confirmed on the demo machine**, Windows with Docker Desktop
+      29.x (WSL2), 21 August: PostgreSQL and Redis healthy, migrations applied, seed loaded,
+      injection opened the incident at risk 80, two deterministic actions executed, the
+      high-risk notification was held, the operator approval persisted, the notification then
+      executed, and the incident reached `resolved`.
+      **Still unconfirmed on that machine: the console at `:5173`.** The API side of the stack
+      is proven; nobody has yet reported the browser rendering. That belongs to the UI list
+      below, which stays unticked.
 - [x] Health endpoint confirms database/Redis/provider state. With Redis unreachable,
       `/health/ready` returns 503 and names `redis: down` per dependency rather than failing
       opaquely; `/system/mode` reports modes with no secret in the payload.
@@ -128,20 +136,28 @@ record. Do not add LLM features until fixed.
 
 #### Assessment, 21 August 2026
 
-**Not GO yet, by one item.** Every deterministic vertical-slice and cascade box is ticked from
-observed evidence. The cold-start list has one box open, and it is narrower than it looks: the
-compose stack already builds and starts on the Windows demo machine with `/docs` serving. What
-nobody has yet done on that machine is the data and recovery chain — migrate, seed, inject, then
-the four calls in the README — and open the console.
+**GO on the deterministic vertical slice and cold start.** Every box in both lists is ticked from
+observed evidence, and the cold-start box was closed by a run on the demo machine itself rather
+than an equivalent: PostgreSQL and Redis healthy, migrations applied, seed loaded, incident opened
+at risk 80, two deterministic actions executed, the high-risk notification held by the gate, the
+operator approval persisted, the notification then executed, and the incident resolved.
 
 None of the NO-GO conditions is present. The run is repeatable, actions are not duplicated,
 provenance is on every datum, and no action exists without its assurance record.
 
-So this is not a code gap. It is **half an hour on the demo laptop**, and the sequence is written
-out in `README.md` and in [`31-team-actions.md`](31-team-actions.md) with PowerShell equivalents.
-Until somebody runs it and records the output, the honest sentence in a review is: "verified
-against PostgreSQL service by service and through the real application process; full compose
-data path not yet confirmed on the demo machine."
+**What GO does not cover.** The UI list below is separate and remains unticked — nobody has
+reported the console at `:5173` rendering on the demo machine, and the projector legibility check
+has not been done. So the accurate sentence in a review is:
+
+> The deterministic recovery is verified end to end on the demo machine, including the gate
+> holding a high-risk action and a human approval being recorded and honoured. The operations
+> console has been built but its rendering on that machine is not yet confirmed.
+
+One audit defect was found by that run and is fixed: an operator approval was recorded on the
+Decision Timeline as `actor_kind=orchestrator`. Approvals and rejections are now both recorded at
+the moment the operator acts, attributed to `human`, carrying the operator and assurance IDs, and
+the executed action references the decision row. Four regression tests cover it and all four fail
+if the fix is reverted.
 
 ## Stage 3 — 1–2 September: bounded reasoning
 
