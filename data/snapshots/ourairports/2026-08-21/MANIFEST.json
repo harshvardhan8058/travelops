@@ -1,0 +1,37 @@
+{
+  "source": "ourairports",
+  "licence": "public domain",
+  "attribution": "Airport and runway data from OurAirports (ourairports.com/data)",
+  "retrieved_at": "2026-08-21T10:23:58+00:00",
+  "airport_icaos": [
+    "VOBL",
+    "VIDP",
+    "VABB",
+    "VOHS",
+    "VOMM",
+    "VECC",
+    "VOCI",
+    "VOGO",
+    "VAAH",
+    "VAPO"
+  ],
+  "files": {
+    "airports": {
+      "url": "https://davidmegginson.github.io/ourairports-data/airports.csv",
+      "upstream_sha256": "2a5f05d4e2e9c6190ef6c6d28ff9f032d06d6e15c8d1d03d429d0cb72dda5140",
+      "upstream_bytes": 12703998,
+      "subset_file": "airports.subset.csv",
+      "subset_sha256": "affd0426485e5420bf26e71f509c84bb59ac174cf06461fb6f3c6be79d0af66b",
+      "subset_rows": 10
+    },
+    "runways": {
+      "url": "https://davidmegginson.github.io/ourairports-data/runways.csv",
+      "upstream_sha256": "f164d2f71afad1224c27e218eab0f533839a21cb622f62588ff047ccb211fe93",
+      "upstream_bytes": 3960362,
+      "subset_file": "runways.subset.csv",
+      "subset_sha256": "bfe0e95a6e8ff7cb7e9255bb606f79146ae45c8c7a47ac6c827ea47312aeea7c",
+      "subset_rows": 19
+    }
+  },
+  "note": "The upstream files are not committed; their SHA-256 is, so the exact revision behind the archived subset stays checkable. Only the filtered subset is loaded."
+}
