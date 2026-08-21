@@ -21,7 +21,8 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | 7 | [`21-design-system.md`](21-design-system.md) | How the UI looks: tokens, density, motion. No purple |
 | 8 | [`27-ui-specification.md`](27-ui-specification.md) | What the UI does: every screen, feature and interaction |
 | 9 | [`28-parallel-workstreams.md`](28-parallel-workstreams.md) | Six Kiro accounts, exclusive file ownership, no merge chaos |
-| 10 | [`29-kickoff-prompts.md`](29-kickoff-prompts.md) | Copy-paste prompts per account, wave sequencing, daily rhythm |
+| 10 | [`29-kickoff-prompts.md`](29-kickoff-prompts.md) | Wave sequencing, daily rhythm, ownership rationale |
+| 11 | [`kickoff/`](kickoff/README.md) | **Six ready-to-paste prompts, one per account. Nothing to edit** |
 
 ## Architecture and safety
 

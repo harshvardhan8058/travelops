@@ -3,6 +3,10 @@
 Copy-paste operating instructions. Read [`28-parallel-workstreams.md`](28-parallel-workstreams.md) for the
 ownership model; this document is the execution script.
 
+> **Just want to start?** [`kickoff/`](kickoff/README.md) has six ready-to-paste prompts, one per
+> account, with the preamble already merged in and no placeholders to fill. This document explains
+> the sequencing and ownership behind them.
+
 ## The sequencing that decides your throughput
 
 ```text
