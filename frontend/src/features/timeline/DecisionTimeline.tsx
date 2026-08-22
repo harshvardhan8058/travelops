@@ -8,22 +8,49 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { User } from 'lucide-react';
 import { clsx } from 'clsx';
 
 import { api, ApiError } from '@/api/client';
 import type { TimelineEntry } from '@/api/types';
 import { EmptyState, ErrorState, LoadingState, MonoValue } from '@/components/ui/primitives';
 
+/**
+ * Actor chips. Identity, not status.
+ *
+ * `human` was `--state-warn`, which is the colour this product uses for SEVERITY HIGH, NEEDS
+ * HUMAN, TIER HIGH and AWAITING APPROVAL. On the workspace all five appear at once, so an
+ * operator's completed approval read as one more amber warning rather than as the thing a
+ * person did. docs/21 reserves green, amber and red exclusively for operational state, so
+ * identity has no business borrowing one.
+ *
+ * It is now the only chip drawn in primary text on a raised fill with a strong border: the
+ * highest-contrast, most solid chip in the rail, which is appropriate for the one actor who
+ * carries accountability, and impossible to mistake for a status.
+ */
 const ACTOR_CLASS: Record<TimelineEntry['actor_kind'], string> = {
   orchestrator: 'text-accent border-accent-border',
   agent: 'text-state-info border-state-info/30',
   service: 'text-fg-secondary border-border',
-  human: 'text-state-warn border-state-warn/30',
+  human: 'text-fg bg-raised border-border-strong font-medium',
   provider: 'text-fg-muted border-border-subtle',
+};
+
+/**
+ * Only the human chip carries an icon, deliberately.
+ *
+ * Every status badge on screen pairs a word with an icon, and before this the one entry
+ * representing a person had the least furniture of anything in the rail. A single glyph among
+ * twenty text-only chips is what makes an operator's action findable while scrolling a dense
+ * log — which is the whole point of attributing it.
+ */
+const ACTOR_ICON: Partial<Record<TimelineEntry['actor_kind'], typeof User>> = {
+  human: User,
 };
 
 function Entry({ entry }: { entry: TimelineEntry }) {
   const detail = entry.detail ? JSON.stringify(entry.detail, null, 2) : null;
+  const ActorIcon = ACTOR_ICON[entry.actor_kind];
   return (
     <li className="border-b border-border-subtle px-3 py-2">
       <div className="flex items-center gap-2">
@@ -32,10 +59,11 @@ function Entry({ entry }: { entry: TimelineEntry }) {
         </MonoValue>
         <span
           className={clsx(
-            'shrink-0 rounded-sm border px-1 py-0.5 text-caption uppercase',
+            'inline-flex shrink-0 items-center gap-1 rounded-sm border px-1 py-0.5 text-caption uppercase',
             ACTOR_CLASS[entry.actor_kind],
           )}
         >
+          {ActorIcon && <ActorIcon size={11} strokeWidth={1.5} aria-hidden />}
           {entry.actor_kind}
         </span>
       </div>
