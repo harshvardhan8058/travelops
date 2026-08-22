@@ -28,6 +28,7 @@ import type {
   AirportConditions,
   AssuranceEvaluation,
   CheckResult,
+  CrewPairingImpact,
   FlightRow,
   IncidentDetail,
   Provenance,
@@ -474,5 +475,184 @@ export function actionDerivation(
     },
     when: [{ label: 'executed', at: action.executed_at }],
     evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
+  };
+}
+
+// ---------------------------------------------------------------- Phase 2 adapters
+
+/**
+ * A count that came from the API, naming the endpoint and field it was read from.
+ *
+ * Used by every `<Metric>` on the Command Center, the cascade rollups and the blast radius, so a
+ * reviewer pointing at any number gets the field name rather than a reassurance.
+ */
+export function countDerivation(
+  label: string,
+  value: number | null | undefined,
+  source: { endpoint: string; field: string; provenance?: Provenance; note?: string },
+): Derivation {
+  return {
+    title: `${label} · ${value ?? 'not returned'}`,
+    subtitle: source.endpoint,
+    inputs: [
+      {
+        label: 'value',
+        value: value === null || value === undefined ? 'not returned' : String(value),
+        provenance: source.provenance,
+      },
+      { label: 'field', value: source.field },
+    ],
+    rule: {
+      kind: 'config',
+      id: 'server-side rollup',
+      note:
+        source.note ??
+        'Computed server-side from records. The UI renders the returned total and never sums its own.',
+    },
+    evidenceRefs: source.provenance?.source_ref ? [source.provenance.source_ref] : [],
+    absences:
+      value === null || value === undefined
+        ? [{ label, detail: `not returned by ${source.endpoint}` }]
+        : undefined,
+  };
+}
+
+/** The length of a returned array — the only aggregate the UI is allowed to compute itself. */
+export function arrayLengthDerivation(
+  label: string,
+  length: number,
+  source: { endpoint: string; field: string; provenance?: Provenance },
+): Derivation {
+  return {
+    title: `${label} · ${length}`,
+    subtitle: source.endpoint,
+    inputs: [
+      { label: 'count', value: String(length), provenance: source.provenance },
+      { label: 'counted', value: `length of ${source.field}` },
+    ],
+    rule: {
+      kind: 'formula',
+      formula: `${source.field}.length`,
+      note: 'Counting a returned array is the only aggregate this UI computes. No mean, rate or score is derived anywhere.',
+    },
+    evidenceRefs: source.provenance?.source_ref ? [source.provenance.source_ref] : [],
+  };
+}
+
+/** One crew pairing: which flight reached it, by which mechanism, and the rule's own words. */
+export function pairingDerivation(
+  pairing: CrewPairingImpact,
+  legend: Record<string, string> | undefined,
+  provenance?: Provenance,
+): Derivation {
+  return {
+    title: `${pairing.pairing_reference} · ${pairing.mechanism.replace(/_/g, ' ')}`,
+    subtitle: `reached from ${pairing.source_flight}`,
+    inputs: [
+      { label: 'source flight', value: pairing.source_flight, provenance },
+      { label: 'affected leg', value: pairing.affected_leg },
+      { label: 'base', value: pairing.base_icao },
+      { label: 'at risk', value: String(pairing.at_risk) },
+      {
+        label: 'mechanism',
+        value: pairing.mechanism,
+        detail: legend?.[pairing.mechanism],
+      },
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'crew pairing impact',
+      note: pairing.detail,
+    },
+    evidenceRefs: provenance?.source_ref ? [provenance.source_ref] : [],
+    absences: [
+      {
+        label: 'duty-time legality',
+        detail:
+          'not modelled. Crew handling is coordination and display only; this product does not validate duty limits',
+      },
+    ],
+  };
+}
+
+/** A terminal count in the blast radius: real number, no path behind it. */
+export function terminalDerivation(
+  label: string,
+  count: number,
+  field: string,
+  reason: string,
+): Derivation {
+  return {
+    title: `${label} · ${count}`,
+    subtitle: 'GET /incident-groups/{id}',
+    inputs: [
+      { label: 'count', value: String(count) },
+      { label: 'field', value: field },
+    ],
+    rule: {
+      kind: 'config',
+      id: 'server-side rollup',
+      note: 'Computed server-side from records.',
+    },
+    absences: [{ label: 'per-entity records', detail: reason }],
+  };
+}
+
+/** A report metric. Absent metrics stay absent — never estimated, never zero-filled. */
+export function reportMetricDerivation(
+  label: string,
+  value: number | string | null | undefined,
+  incidentReference: string,
+): Derivation {
+  return {
+    title: `${label} · ${value ?? 'absent'}`,
+    subtitle: `GET /reports/${incidentReference}`,
+    inputs: [
+      {
+        label: label.toLowerCase(),
+        value: value === null || value === undefined ? 'absent' : String(value),
+      },
+    ],
+    rule: {
+      kind: 'config',
+      id: 'report metrics',
+      note: 'Every value is derived from recorded rows. Absent metrics are absent, not estimated.',
+    },
+    absences:
+      value === null || value === undefined
+        ? [
+            {
+              label,
+              detail: 'the records cannot support this metric yet, so it is shown as absent',
+            },
+          ]
+        : undefined,
+  };
+}
+
+/** The gate across a whole plan: counts by decision, never a score. */
+export function planAssuranceDerivation(
+  evaluations: AssuranceEvaluation[],
+  configVersion: string,
+  configHash: string,
+): Derivation {
+  const byDecision = new Map<string, number>();
+  for (const evaluation of evaluations) {
+    byDecision.set(evaluation.decision, (byDecision.get(evaluation.decision) ?? 0) + 1);
+  }
+  return {
+    title: `Gate across ${evaluations.length} evaluation${evaluations.length === 1 ? '' : 's'}`,
+    inputs: [...byDecision.entries()].map(([decision, count]) => ({
+      label: decision,
+      value: String(count),
+    })),
+    rule: {
+      kind: 'config',
+      id: 'fail-closed aggregation',
+      version: configVersion,
+      refs: [`hash ${configHash}`],
+      note: 'Counts by decision only. No aggregate score: a fail-closed, ordered gate has no meaningful average, so one number would invite exactly the trust the gate replaces.',
+    },
+    evidenceRefs: evaluations.flatMap((evaluation) => evaluation.evidence_refs).slice(0, 8),
   };
 }
