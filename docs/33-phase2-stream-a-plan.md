@@ -501,12 +501,11 @@ Everything else still requires an action-level approval against **its own** pers
 > **The full mechanism lives in
 > [`34-phase2-contract-alignment.md` §2](34-phase2-contract-alignment.md#2-single-source-of-truth-for-plan-approval-and-human-decision-scope),
 > which is the citable source.** In short: `human_decision`, one row per evaluation, remains the
-> **only** thing `execute()` consults — it never learns that plan approvals exist. A `plan_approval`
-> row is an *intent*; when the gate later returns `needs_human`, one predicate in
-> `approval_scope.py` decides whether that intent materialises into a `human_decision` for that
-> evaluation. Because the predicate runs against the **real** evaluation, a plan approval cannot
-> extend itself to cover a high-risk action or a failed check — coverage is decided after the gate
-> has spoken, not when the operator clicked. That is what keeps a single path to execution.
+> **only** thing `execute()` consults — it never learns that plan approvals exist. A plan approval
+> **partitions the evaluations already awaiting** a human, using one predicate in
+> `approval_scope.py`, and writes one ordinary `human_decision` per covered evaluation; the excluded
+> ones are returned with a reason and stay awaiting. It never covers an evaluation produced later in
+> the run — forward coverage would be a blank cheque. That is what keeps a single path to execution.
 
 **A finding the team should see before this is built.** Reading `gate.py:274–316`, a low or medium
 tier action currently reaches `needs_human` by only two routes:
@@ -877,10 +876,14 @@ A9  →  A7  →  A1  →  A2  →  A3  →  A8  →  A4  →  A6  →  A5
   expansion (§0.3), already designated first out. **A9→A8 alone deliver the documented Phase 2
   gate.**
 
-The `C2-N` critical order handed to Stream A is **not used in this document**, because those labels
-resolve to nothing in this repository. A binding table for Stream C to fill is at
-[§3.3](34-phase2-contract-alignment.md#33-the-c2-n-labels--binding-request), together with the
-evidence that they are not a renumbering of A1–A9.
+**The `C2-N` labels are resolved.** Stream D's merged plan (#44) binds them as shared Phase 2
+*feature slots* — not Stream C's items, and not a renumbering of A1–A9. The mapping, and the
+reconciliation of A's order with the mandated `C2-N` order, are at
+[§3.3](34-phase2-contract-alignment.md#33-c2-n--resolved-they-are-shared-phase-2-feature-slots-published-by-stream-d)
+and [§3.4](34-phase2-contract-alignment.md#34-reconciling-as-order-with-the-mandated-c2-n-order).
+
+The consequence to know: **the mandate front-loads A6 to its third slot**, so the highest-risk item
+in Phase 2 is built early rather than last. Guard-tests-first is the mitigation.
 
 ## 4. What I need from the other streams before writing code
 
