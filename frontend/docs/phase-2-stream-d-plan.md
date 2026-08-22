@@ -1,7 +1,17 @@
 # Phase 2 — Stream D plan
 
-**Status: architecture decisions final. Implementation blocked until cross-stream ownership and
-dependency contracts are aligned — see §13.**
+**Status: architecture decisions final. Implementation blocked until backend contracts are
+aligned — see §13.**
+
+**Phase 2 UI is a flagship deliverable, not a graph bolted onto Phase 1.** The target is an
+airline operations console a controller could be sat in front of: dense, calm, monochrome, where
+every number can be interrogated and nothing on screen is decorative. The nine surfaces in §0.1
+are one product with one information hierarchy (§0.3), not nine pages that happen to share a
+rail.
+
+The quality bar in §0.2 is written as **verification mechanisms rather than aspirations**, because
+"dense but readable" and "accessibility complete" are unfalsifiable as prose. Each line of the bar
+maps to something that fails a build, fails a test, or fails a harness assertion.
 
 > **Numbering note.** The review's decisions are **D1–D3** (§0). This document's frontend
 > dependency asks were previously numbered D1–D7 and are now **FE-1–FE-7** (§2), so a decision
@@ -44,6 +54,78 @@ This order is coherent with the dependency graph: groundwork precedes everything
 read-only screens land next; group-scoped assurance and crew impact follow because both consume
 the same group→incident join; what-if follows assurance because it re-uses the check renderer;
 replay, then comparison, then hardening last.
+
+**Two flagship surfaces named separately in the brief map onto this frozen order rather than
+extending it**, so the sequencing is not reopened:
+
+| Brief item | Ships as | Section |
+| --- | --- | --- |
+| Blast-radius explanation | **C2-2b**, with the Cascade Explorer | §5.1 |
+| Human approval semantics | **C2-5b**, with group assurance | §9.2 |
+
+---
+
+## 0.2 Quality bar, as verification mechanisms
+
+| Bar | How it is enforced | Fails at |
+| --- | --- | --- |
+| **Projector-first 1920×1080** | Harness asserts, per surface: zero text below 4.5:1, no horizontal page overflow, smallest rendered font ≥ 11px, and every primary action inside the fold. Screenshot review at 1:1 | Harness (`scripts/verify-surface.mjs`) |
+| **Dense but readable hierarchy** | Every surface declares its zone budget in §0.3 and the harness asserts the row height, panel padding and heading scale actually rendered match the declared tier | Harness |
+| **Zero business calculations in frontend** | Metrics may only be rendered through `<Metric>`, which takes a value **and** a required `derivation`. No arithmetic on API values anywhere outside `formatDuration`-style presentation helpers, which are unit-tested and cannot touch money, entitlements or counts. A scripted check flags arithmetic operators applied to API-typed identifiers in `src/features/**` | Unit test + `scripts/check-no-client-math.mjs` |
+| **Every metric traceable to backend data** | `<Metric>`'s `derivation` prop is **type-required**. A metric without a derivation does not compile. Each adapter names the endpoint and field it read | TypeScript |
+| **Keyboard / accessibility complete** | Per-surface a11y matrix in §12: roving tabindex, `aria-sort`, `role` correctness, focus return, live regions. Harness walks every focusable element asserting an accessible name and a visible ≥2px focus ring | Harness + unit |
+| **No generic "AI dashboard" visuals** | `tokens:check` already bans the hues and effects; extended to fail on a status colour used for identity (the Phase 1 `--state-warn`-on-actor defect) and on chart libraries in `package.json` | `npm run tokens:check` |
+| **No invented coordinates, scores, edges or aggregates** | §0.4 whitelist. Graph edges may only be built by the join in §5; aggregates may only be counts of returned arrays, and only where the API does not already return the count | Unit test per builder + review |
+| **Restrained, functional animation** | Motion whitelist in §0.5. `tokens:check` fails on `animate-pulse`, `animate-bounce`, `transition-all`, and any duration above 220ms | `npm run tokens:check` |
+| **Every major number has a derivation/provenance path** | Same as traceability: type-required. Plus the harness asserts each surface's metric tiles expose a popover trigger with an accessible name | TypeScript + harness |
+
+## 0.3 Information hierarchy
+
+One hierarchy across all nine surfaces, so a controller learns it once. Three tiers, and a
+surface states which tier each zone belongs to.
+
+| Tier | Question it answers | Treatment | Budget at 1920×1080 |
+| --- | --- | --- | --- |
+| **T1 situational** | What is broken, how bad, what needs me? | `title`/`subtitle` scale, `StateBadge`, `RiskChip`, 34px rows, always above the fold, never behind a click | ≤ 30% of vertical space |
+| **T2 diagnostic** | Why does it say that? | `body`/`mono-sm`, tables and matrices, one interaction to reach detail | ≈ 50% |
+| **T3 forensic** | Prove it | `caption`, evidence refs, config hashes, correlation ids, raw `detail` — reachable, never competing for attention | ≤ 20%, collapsible |
+
+Rules that follow from it: T3 never sits above T1 on a surface (the Phase 1 rehearsal defect where
+six evidence refs pushed Approve below the fold was exactly this); a T1 zone never scrolls; and any
+surface where T2 exceeds its budget gets a filter, not a smaller font.
+
+## 0.4 Aggregate and relationship whitelist
+
+Exhaustive. Anything not on this list is invented and may not ship.
+
+| Allowed | Source |
+| --- | --- |
+| Counts already returned | `rollups.*`, `awaiting_approval_count`, report `metrics.*` |
+| `array.length` of a returned array | `flights[]`, `crew_pairings[]`, `evaluations[]`, `tasks[]`, `actions[]`, `entries[]` |
+| Partition counts over a returned enum field | evaluations by `decision`, checks by `state`, pairings by `mechanism`, entries by `actor_kind` |
+| Set membership and equality joins on a shared key | `crew_pairings[].source_flight` = `flights[].flight_number`; group `flights[].id` = `/flights[].id` |
+| Interval between two returned timestamps | `formatDuration(first_record, last_record)` — never against the wall clock (Phase 1 defect) |
+
+| Forbidden | Why |
+| --- | --- |
+| Any mean, median, rate, percentage or score | Not returned, and a fail-closed gate has no meaningful average (`docs/18`) |
+| Any money or entitlement arithmetic | The rules engine owns it; the UI renders `formula_used` verbatim |
+| Any edge not in the join above | Connections and hotels are counts with no arrays behind them |
+| Any coordinate | No schema carries latitude or longitude |
+| Any trend, delta-over-time or sparkline | No endpoint returns a series. A two-point line is not a trend |
+
+## 0.5 Motion whitelist
+
+| Motion | Trigger | Duration | Why it earns its place |
+| --- | --- | --- | --- |
+| Opacity + 4px rise | A popover or panel opening | 180ms `ease-out` | Establishes the relationship between trigger and panel |
+| Opacity | A new timeline entry arriving | 220ms | Marks arrival without dragging the eye |
+| Colour/border | Hover and focus | 100ms | Feedback |
+| Edge and node emphasis | Selecting a cascade node | 150ms, opacity and stroke width only | Shows the traversal, which is the explanation |
+
+Nothing loops, pulses, floats, springs or auto-plays. No layout animation: a node-link graph that
+re-flows while being read is unreadable. `prefers-reduced-motion` collapses all of the above to
+instant, which `tokens.css` already enforces globally.
 
 Phase 1 is closed. This plans the seven Phase 2 frontend features against the contracts the
 backend actually serves today, verified by reading `docs/openapi.json`, the Pydantic response
@@ -126,7 +208,9 @@ Ordered by how much they unblock. Each is a request, not a workaround.
 | **FE-7** | `reason_code` on `ActionSummary` | A | Refusal copy without prefix matching | Carried over from the Phase 1 review |
 | **FE-8** | Group-scoped assurance: either `GET /incident-groups/{id}/assurance`, or `incidents[]` on the group payload so the client can fan out | A | **C2-5 under D1** | D1 made this load-bearing. Fan-out over N incidents is acceptable for a demo-scale group of 8; a single endpoint is better |
 | **FE-9** | What-if contract per D2 (replaces the old speculative ask): zero-write, deterministic, returns the same six checks and the same policy result shape for altered inputs | A + B | **C2-4** | Must persist nothing and must not transition state. See §7 |
-| **FE-10** | Plan-level decision contract per D3: a decision covering multiple low/medium evaluations, rejecting high-risk ones server-side | A + B | **C2-5 / §10** | The server must enforce the tier rule; the UI must not be the only thing preventing a high-risk bulk approval |
+| **FE-10** | Plan-level decision contract per D3: a decision covering multiple low/medium evaluations, rejecting high-risk ones server-side | A + B | **C2-5 / §9.1 / §9.2** | The server must enforce the tier rule; the UI must not be the only thing preventing a high-risk bulk approval |
+| **FE-11** | A yes/no on time series ever existing | A | Charting policy (§3) | If no, recorded once and no surface attempts a trend. Current assumption: no |
+| **FE-12** | A yes/no on connections and hotels becoming per-entity records | A + C | Blast radius terminals (§5.1), C2-6 | If no, they stay counts and the UI says so permanently |
 
 **Recommendation:** FE-1, FE-2 and FE-6 are small and unblock four of the seven features. FE-3 is a
 "decline unless someone insists". FE-8, FE-9 and FE-10 are created by decisions D1, D2 and D3
@@ -146,8 +230,12 @@ Common to several features, built once.
 | `src/components/ui/derivation.ts` | New adapters: `rollupDerivation`, `pairingDerivation`, `mechanismDerivation`, `metricDerivation`, `checkAggregateDerivation` |
 | `src/components/ui/Graph.tsx` | Presentational SVG primitives — `<GraphNode>`, `<GraphEdge>`, `<GraphLegend>`. No layout logic, no data fetching |
 | `src/features/cascade/layout.ts` | Pure deterministic layered layout. No dependency, unit-testable, no randomness |
-| `src/components/ui/primitives.tsx` | Add `MetricTile`, `Sparkbar` (single-hue accent ramp), `FilterChips` |
-| `src/hooks/useKeyboardList.ts` | Roving-tabindex list navigation (`j`/`k`/`Enter`), reused by every list and the graph |
+| `src/components/ui/Metric.tsx` | **`<Metric>` — the traceability guarantee.** Takes `value`, `label` and a **required** `derivation`. Renders through `MonoValue`, wraps in `WhyPopover`, and shows `ProvenanceDot` when the derivation carries provenance. A metric without a derivation does not compile, which is what turns "every number is traceable" from a review promise into a type error |
+| `src/components/ui/primitives.tsx` | Add `MetricTile` (a `<Metric>` in a bordered tile), `CountBar` (single-hue accent ramp over **counts only**, never a trend), `FilterChips` |
+| `src/hooks/useKeyboardList.ts` | Roving-tabindex list navigation (`j`/`k`/`Enter`), reused by every list, table and the graph |
+| `src/hooks/useSurfaceShortcuts.ts` | Registers a surface's shortcuts in one place so the global model (§12.1) cannot be shadowed silently |
+| `scripts/check-no-client-math.mjs` | Fails the build on arithmetic applied to API-typed identifiers under `src/features/**`. Presentation helpers live in one audited module and may not touch money, entitlements or counts |
+| `scripts/verify-surface.mjs` | The Phase 1 `/tmp` harness, promoted and parameterised per surface: five states, contrast sweep, overflow, fold check, focus-ring and accessible-name walk |
 
 **Design rules inherited, not re-litigated:** graphite base, instrument cyan for brand/active
 only, green/amber/red exclusively for operational state, 1px borders, `rounded-md`, 14px body,
@@ -156,8 +244,20 @@ through `StateBadge`, every derived figure through `WhyPopover`, every data surf
 `ProvenanceDot`.
 
 **Contrast is now a measured gate, not a claim.** The Phase 1 rehearsal found `--fg-muted` at
-3.74:1. Every new surface must report zero text below 4.5:1 from the same harness before its
-acceptance criteria pass.
+3.74:1 while the token comment claimed 4.6:1. Every new surface must report zero text below 4.5:1
+from `verify-surface.mjs` before its acceptance criteria pass.
+
+**Charts: there is almost nothing legitimate to chart.** No endpoint returns a time series, so a
+line or an area chart would be interpolation between two points — invention. What the data supports
+is counts, and counts are best read as numbers and bars: `CountBar` renders a single-hue accent ramp
+over a partition that already exists in the payload (evaluations by decision, pairings by mechanism,
+sources by kind). No gauges, no donuts, no radials, no rainbow palettes, no chart library — the
+absence of one in `package.json` is itself a check.
+
+**Reuse over novelty.** Phase 1's `AssurancePanel`, `StateRail`, `WhyPopover`, `StateBadge`,
+`MonoValue`, `ProvenanceDot` and `AgeIndicator` are the vocabulary of the console. A Phase 2 surface
+that needs a new way to show a status or a number is a design smell to resolve in review, not in a
+feature folder.
 
 ---
 
@@ -204,6 +304,43 @@ centrepiece.
 | **Tests** | Unit: `layout.ts` determinism (same input → identical positions), edge derivation joins only on exact `flight_number`, unmatched pairings surface as "source flight not in this group" rather than being dropped, node count equals array length. Harness: nine pairing nodes with nine labelled edges, every label ∈ `mechanism_legend` keys, counts equal `rollups`, contrast sweep, keyboard traversal reaches every node |
 | **Acceptance** | A reviewer counts nine pairing nodes unaided and reads why each is affected; every total matches `rollups`; no node exists without a backing record; the four mechanisms appear as words; `why_nine_not_eight` is quoted, not paraphrased |
 | **Demo value** | Answers the mentor's original challenge visually. This is the Phase 2 gate made watchable |
+
+---
+
+## 5.1 Blast-radius explanation (C2-2b)
+
+The graph shows *that* nine rotations are affected. Blast radius answers *how far the damage
+reaches and by what mechanism at each hop* — in words, from records, without a model. It is the
+single most defensible thing this product can put on a projector, because every hop is a join a
+reviewer can check.
+
+**What the data actually supports.** Two traversable hops and two terminal counts:
+
+| Hop | From → to | Edge evidence | Traversable? |
+| --- | --- | --- | --- |
+| 1 | trigger → flights | group `root_cause` + `airport_icao`, `flights[]` | Yes — 8 flights |
+| 2 | flight → crew pairing | `crew_pairings[].source_flight` = `flights[].flight_number`, labelled `mechanism` | Yes — 9 pairings |
+| — | flights → connections | `rollups.connections_at_risk: 22` | **No. A count with no array. Terminal tile** |
+| — | flights → hotel demand | `rollups.candidate_hotels: 11` | **No. Terminal tile** |
+
+So the radius is stated as: *one weather trigger at VOBL → 8 flights → 9 crew pairings, by four
+named mechanisms; 22 connections and 11 candidate hotels are counted but not individually
+returned.* That last clause is not a weakness to hide — it is the difference between this and a
+demo that draws 22 fictional connection nodes.
+
+| Aspect | Detail |
+| --- | --- |
+| **Route** | A panel on `/cascade/:groupId`, with a deep link per hop (`?hop=2&mechanism=positioning`) |
+| **Files** | `src/features/cascade/BlastRadius.tsx`, `RadiusHop.tsx`, `MechanismBreakdown.tsx`, `radius.ts` (pure) |
+| **API** | `GET /incident-groups/{id}` only. FE-6 (`incident_reference` on the group's flights) makes each hop's endpoint navigable |
+| **Data contracts** | `radius.ts` exports `buildRadius(group) → {hops: Hop[], terminals: Terminal[]}`. A `Hop` carries `from`, `to`, `count` (= `array.length`), `mechanismCounts` (partition of `crew_pairings[].mechanism`) and `records[]`. A `Terminal` carries a label, a count from `rollups`, and the reason it is not traversable. Nothing else. `why_nine_not_eight` is rendered verbatim as the summary |
+| **Interaction** | Selecting a hop highlights exactly those nodes and edges in the graph (opacity and stroke only, 150ms); selecting a mechanism filters to pairings with that `mechanism` and shows `mechanism_legend[mechanism]` as the explanation; every count is a `<Metric>` whose popover names `rollups` or the array it counted; expanding a pairing shows its `detail` sentence verbatim |
+| **Never** | A "blast radius score", a severity index, a monetary impact total, or a hop the join does not support. Terminal counts never render as nodes, and never as a percentage of anything |
+| **Accessibility** | The radius is a `<ol>` of hops — an ordered, screen-reader-complete narrative that stands alone with the graph switched off. Each hop is a `button` with `aria-expanded`; the mechanism partition is a `<dl>`; graph highlight is mirrored by `aria-current` on the hop |
+| **Responsive** | 1920: radius panel beside the graph. 1440: below it. 1280: radius first, graph collapsed behind a disclosure — the words survive; the picture is the enhancement |
+| **Tests** | Unit: `buildRadius` over the real payload yields 8 and 9 with four mechanisms; a pairing whose `source_flight` matches no flight becomes a named unmatched record, never a silent drop; terminals always carry a reason; no hop is produced for connections or hotels. Harness: hop selection highlights the same node set the hop lists, contrast sweep, keyboard traversal of all hops |
+| **Acceptance** | A reviewer reads the whole radius without touching the graph; every count matches `rollups` or an array length; the four mechanisms appear as words with their legend text; the two terminal counts are visibly labelled as counts, not paths |
+| **Demo value** | This is the Phase 2 claim in one paragraph a judge can verify line by line: *"disruption is never one flight"*, with the mechanism named at every hop and the limits of our data stated out loud |
 
 ---
 
@@ -343,6 +480,35 @@ D3 replaces one control with two, and defines a set that no approval may ever co
 
 ---
 
+## 9.2 Human approval semantics (C2-5b)
+
+D3 gives the rules. This section gives the *semantics* the UI must convey, because an approval is
+the one place a person's accountability enters an otherwise deterministic system, and the interface
+is what makes that accountability legible or deniable.
+
+**Five semantics, each with a visible consequence.**
+
+| Semantic | What the UI must make unmistakable |
+| --- | --- |
+| **An approval authorises; it does not execute** | Approving never runs anything. Execution is a separate, explicit `Run`. After approving, the UI states that the action is now authorised and awaiting execution — Phase 1 verified the backend behaves this way (`human_decision_id: 1` appears on the action only after the next run) |
+| **A decision is immutable and append-only** | No edit, no delete, no undo. A conflicting decision is refused by the server with 409 and the UI shows the recorded decision plus *"a corrected decision requires a new evaluation"* — the server's own words |
+| **The record is the operator's, not the system's** | Actor, timestamp and the operator's verbatim reason, rendered with the `human` actor treatment fixed in Phase 1 (solid chip, person icon, off the status ramp). The API's persisted `human_decision` always wins over any session copy |
+| **Approval covers risk, never absent evidence** | An evaluation with an evidence `FAIL` is not offered an approval control at all, and says why: a human cannot approve a fact into existence |
+| **Coverage is explicit, and so is exclusion** | A plan-level approval lists every evaluation it will cover with its tier, and every one it excludes with the reason. Silence about exclusions is how a bulk approval becomes a trap |
+
+| Aspect | Detail |
+| --- | --- |
+| **Files** | `src/features/assurance/PlanApprovalPanel.tsx`, `ApprovalCoverageList.tsx`, `DecisionRecord.tsx`; `AssurancePanel.tsx` keeps the single-action path |
+| **API** | `POST /assurance/{id}/decision` (`decision`, `reason` 1–2000, `actor_id`, → `replayed`), plus **FE-10** for the plan-level decision. `evaluations[].human_decision` is the source of truth on read |
+| **State** | Server state only after a write succeeds. The optimistic path is deliberately absent: an approval that appears to succeed and did not is the worst failure mode this screen has. Pending state is explicit; failure surfaces the API code and correlation id |
+| **Interaction** | Mandatory reason with inline validation (`aria-invalid`, `role="alert"`); coverage and exclusion lists before the buttons; no select-all across tiers; after success the panel becomes the immutable record and the reason field is gone, not merely disabled |
+| **Accessibility** | Coverage and exclusion are `<ul>`s read before the controls; the record uses a `<dl>`; the 409 conflict is announced `aria-live="assertive"` because it changes what the operator believes happened |
+| **Tests** | Unit: coverage partition over every tier × check-state combination; a nothing-coverable group disables the control with a stated reason; conflict response renders the recorded decision. Harness: high-risk still awaiting after a plan approval; evidence-FAIL never covered; reload shows the API's record, not the session's; approval count claimed equals decisions recorded |
+| **Acceptance** | Every covered evaluation gets its own immutable record carrying the shared reason; no high-risk or evidence-FAIL evaluation is ever covered; exclusions visible with reasons; the words "authorised" and "executed" are never used interchangeably anywhere in the UI |
+| **Demo value** | *"Approve the routine seven; the cash payout still needs me by name, and the missing fact cannot be approved at all."* The gate's argument made operable — and the moment a judge sees the product take accountability seriously |
+
+---
+
 ## 10. Replay experience (C2-7)
 
 | Aspect | Detail |
@@ -380,6 +546,29 @@ never stalls waiting on another stream.
 
 **Cut before any of the above:** Open-Meteo / historical provider expansion (confirmed
 non-critical). If time is lost, cut from the bottom of `docs/20`'s list — not from this order.
+
+---
+
+## 11.1 Global keyboard model
+
+Defined once, in `docs/27`, and completed in Phase 2. A surface may add shortcuts; it may not
+redefine these. `useSurfaceShortcuts` registers them centrally so a shadowed binding is a test
+failure rather than a surprise on stage.
+
+| Key | Action | Scope |
+| --- | --- | --- |
+| `j` / `k` | Next / previous row or node | Every list, table, matrix and the graph |
+| `Enter` | Open the selected item | Global |
+| `Esc` | Close the topmost overlay, return focus to its trigger | Global (Phase 1 behaviour) |
+| `/` | Focus the surface's filter | Global |
+| `g` then `o` `c` `a` `p` | Ops Board / Cascade / Approvals / Policy | Global |
+| `a` / `r` | Approve / reject the focused blocked action, opening the reason field | Approval surfaces only |
+| `←` / `→` | Step the replay cursor; step a hop in blast radius | Replay, Cascade |
+| `1`–`6` | Jump to a check column | Assurance matrix |
+
+Focus rules, non-negotiable: focus never leaves the document; every overlay returns focus to its
+trigger; a 2px accent ring at 2px offset is always visible; no `outline: none` anywhere; roving
+tabindex means one tab stop per collection, not one per row.
 
 ---
 
@@ -421,6 +610,9 @@ discussion.
 | 7 | Stream A | Who commits the D2 boundary to `docs/DECISIONS.md`? Draft supplied in §14; `docs/` is Stream A's path and Stream D will not write it |
 | 8 | Review | Vitest — yes or no (§12). Nine work items defended by a hand-run script is the current state |
 | 9 | Stream C | Confirm Open-Meteo expansion is descoped so no fixture or provenance row implies it is live |
+| 10 | Stream A | **FE-11** — is any time series ever coming? If not, the answer is recorded once and no surface attempts a trend, which is the current design assumption |
+| 11 | Stream A + C | **FE-12** — do connections and hotels ever become per-entity records? If not, blast radius keeps them as terminal counts permanently, and that is stated in the UI rather than looking like an omission |
+| 12 | Stream B | Confirm `config_version` / `config_hash` are stable within a group in normal operation, so the mismatch flag in §9 is an exception path rather than a permanent banner |
 
 **Ownership restated:** Stream D writes only inside `frontend/`. Every item above that touches
 `backend/`, `docs/`, `fixtures/` or `config/` is a request to its owner, never a local edit.
@@ -473,3 +665,41 @@ D1, D2 and D3 are settled and struck from this list. What is left:
    becomes a zone within C2-1; keeping both means two front doors.
 5. **`agent` actor colour.** It still borrows `--state-info` for identity, the same class of defect
    fixed for `human` in Phase 1. Decide now or when the Planner lands.
+
+
+---
+
+## 16. Anti-goals
+
+Written down so that "flagship" is not misread as "more of everything". Each of these would make
+the product worse, and each is tempting.
+
+| Anti-goal | Why it is refused |
+| --- | --- |
+| A geographic map | No coordinates exist in any contract. A map drawn from guessed positions is a lie with a legend |
+| A KPI wall of big numbers | Numbers without derivations are decoration. Every tile here costs a `<Metric>` with a provenance path, which is the constraint that keeps the count honest |
+| Trend lines and sparklines | No endpoint returns a series. Two points joined by a line is invention with a slope |
+| An "overall health" or "assurance" score | A fail-closed ordered gate has no meaningful average, and a single number invites exactly the trust the gate exists to replace |
+| Drag-and-drop plan editing | The orchestrator owns the plan; a UI that edits it makes the audit trail fiction |
+| A chat panel | `docs/27` rules it out explicitly. This is an operating layer, not an assistant |
+| Free-form what-if inputs | An unbounded input space is a simulation engine, which D2 rules out |
+| Auto-refreshing animation, live-updating charts, "pulse" effects | Motion that does not carry meaning costs attention during a disruption |
+| Dark-mode toggle, theme customisation, dashboard layout editing | Zero demo value, real maintenance cost, and `docs/27` lists them as deliberately not built |
+| Optimistic writes on approvals | An approval that appears to succeed and did not is the worst failure this product can have |
+
+## 17. What "best-in-class" means here, concretely
+
+Four claims a reviewer should be able to test in under a minute each, on any surface:
+
+1. **Point at any number and ask "where is that from?"** — it has a popover naming the endpoint,
+   the field, the rule or formula, and when it was recorded. Type-enforced, not promised.
+2. **Ask "what does this system not know?"** — absences are on screen as absences: `—` with "not
+   computed by this endpoint", terminal counts labelled as counts, `not_owed` as a result, a
+   missing evaluation as a gap rather than a pass.
+3. **Unplug the mouse.** Every surface completes its task from the keyboard with a visible focus
+   ring, including approving an action and scrubbing a replay.
+4. **Stand three metres back at 1920×1080.** Nothing below 4.5:1, no horizontal scrolling, every
+   primary action inside the fold, operational numbers in tabular mono so columns scan.
+
+The console is the argument. If a judge believes the interface, they believe the audit trail behind
+it — which is the only reason any of this styling matters.
