@@ -35,12 +35,14 @@ from app.db.scenario_queries import (
     load_connection_inputs,
     load_crew_impact_inputs,
 )
+from app.db.trip_context import load_trip_context
 from app.models.enums import ActionStatus, ActionType
 from app.models.reference import Airport, Booking, BookingSegment, Flight, Passenger
 from app.observability.logging import get_logger
 from app.orchestrator import dispatch
 from app.services.base import ServiceResult
 from app.services.communication import CommunicationService, Recipient
+from app.services.compensation import CompensationService
 from app.services.connection import ConnectionService
 from app.services.crew_impact import CrewImpactService
 from app.services.hotel import HotelAllocationService, HotelSearchService, load_hotel_options
@@ -467,8 +469,61 @@ async def run_passenger_impact(
     )
 
 
+# ----------------------------------------------------------------------------- entitlements
+
+
+async def run_entitlements(
+    *,
+    session: AsyncSession,
+    target_refs: list[str],
+    payload: dict[str, Any] | None = None,
+    evidence_refs: list[str] | None = None,
+    **_ignored: Any,
+) -> ServiceResult:
+    """`evaluate_entitlements` — gather the trip context, delegate the law to Stream B.
+
+    The facts come from the task's own inputs when the plan supplied them, and are otherwise
+    loaded from records by `load_trip_context`. This adapter performs no legal reasoning and
+    computes no figure: `CompensationService` calls `app.policy.entitlements.calculate` and
+    returns its output unchanged, including the pack's status — so a charter-mode figure cannot
+    reach a screen presented as current law.
+
+    A missing fact is a refusal that names it, never a default. Defaulting a fare to zero would
+    turn "we do not know" into "nothing is owed", which is a claim about a passenger's rights.
+    """
+    facts = (payload or {}).get("facts")
+    if not isinstance(facts, dict) or not facts:
+        facts = await load_trip_context(session, flight_ids_from(target_refs))
+
+    if not facts:
+        return _unavailable(
+            "no trip context could be assembled, so the policy pack cannot be applied",
+            evidence_refs=evidence_refs,
+        )
+    return await CompensationService().execute(facts=facts)
+
+
 # ------------------------------------------------------------------------------- registry
 
+#: `evaluate_entitlements` is implemented (`run_entitlements` below, delegating to
+#: `CompensationService` and thence to Stream B's policy engine) but deliberately NOT registered.
+#:
+#: `gate_requirements` derives 14 required facts for it from the pack itself, and four are not
+#: recorded anywhere in this dataset:
+#:
+#:     cancellation.notice_obligation_met
+#:     alternate_flight.minutes_after_original_scheduled
+#:     passenger.opted_for_alternate
+#:     operating_carrier.is_foreign
+#:
+#: Registering it therefore replaces an honest deferral with a hard block: the gate fails on
+#: missing evidence, and P2-D3 forbids a human approving past that, so the incident cannot
+#: resolve. "No service is available yet" is both truer and less damaging than "we ran it and
+#: the evidence was insufficient".
+#:
+#: To enable it, seed those four columns and add one line here. The service and its trip-context
+#: loader need no changes.
+#:
 #: Action -> adapter, for every Stream C service whose `execute()` is implemented.
 #:
 #: The six services still raising NotImplementedError are deliberately absent, so their

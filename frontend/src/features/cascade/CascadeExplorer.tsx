@@ -27,7 +27,7 @@ import { Metric, MetricTile } from '@/components/ui/Metric';
 import { countDerivation } from '@/components/ui/derivation';
 import { GraphEdge, GraphLegend, GraphNode, GraphSurface } from '@/components/ui/Graph';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
-import { buildCascadeLayout, type LayoutFlight } from './layout';
+import { buildCascadeLayout, layoutServerGraph, type LayoutFlight } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
 
 const ROLLUP_TILES = [
@@ -72,6 +72,13 @@ export function CascadeExplorer() {
 
   const layout = useMemo(() => {
     if (!group) return null;
+    // The server's projection wins whenever it is present. It carries booking and hotel nodes
+    // that cannot be reconstructed from `flights` and `crew_pairings`, and an evidence id on
+    // every edge — so deriving a graph here when the backend has already projected one would
+    // mean drawing edges nothing recorded.
+    if (group.graph) return layoutServerGraph(group.graph, 920);
+
+    // Fallback for the committed fixture, which predates the projection.
     const flights = (group.flights as unknown as LayoutFlight[]) ?? [];
     return buildCascadeLayout(
       {
@@ -83,6 +90,8 @@ export function CascadeExplorer() {
       920,
     );
   }, [group]);
+  /** True when the picture is the backend's, which is what makes every edge citable. */
+  const graphIsProjected = Boolean(group?.graph);
 
   const nodes = layout?.nodes ?? [];
   const keyboard = useKeyboardList({
@@ -111,7 +120,9 @@ export function CascadeExplorer() {
   const selectedFlightNumber = selected?.kind === 'flight' ? selected.label : null;
 
   // Edges belonging to the selected hop or node, for emphasis. Opacity and stroke only.
-  const emphasisFor = (edgeId: string, mechanism: PairingMechanism): 'on' | 'off' | 'neutral' => {
+  // `mechanism` is `string` rather than `PairingMechanism`: the server projection carries
+  // connection and accommodation mechanisms alongside the four crew ones.
+  const emphasisFor = (edgeId: string, mechanism: string): 'on' | 'off' | 'neutral' => {
     const hopMatch =
       selectedHop === 1
         ? edgeId.startsWith('event:')
@@ -222,6 +233,28 @@ export function CascadeExplorer() {
                 }))}
               />
             </div>
+            {graphIsProjected && group.graph && (
+              /*
+               * Where the picture came from, stated on the picture. Completeness is a COUNT of
+               * assessed flights, never a confidence score — the server has no basis for a
+               * probability and neither has this component.
+               */
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
+                <span>
+                  projected by <MonoValue muted>{group.graph.rule_version}</MonoValue> from{' '}
+                  <MonoValue muted>{group.graph.source_action_ids.length}</MonoValue> actions and{' '}
+                  <MonoValue muted>{group.graph.source_prediction_ids.length}</MonoValue>{' '}
+                  predictions
+                </span>
+                <span
+                  className={
+                    group.graph.completeness.is_complete ? 'text-fg-muted' : 'text-state-warn'
+                  }
+                >
+                  {group.graph.completeness.note}
+                </span>
+              </div>
+            )}
           </Panel>
 
           {selected && (

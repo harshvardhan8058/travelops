@@ -16,6 +16,7 @@ import { MonoValue, Panel, StateBadge } from '@/components/ui/primitives';
 import { Metric } from '@/components/ui/Metric';
 import {
   arrayLengthDerivation,
+  blastDimensionDerivation,
   pairingDerivation,
   terminalDerivation,
 } from '@/components/ui/derivation';
@@ -157,6 +158,50 @@ export function BlastRadius({
           );
         })}
       </ol>
+
+      {group.blast_radius && (
+        /*
+         * The server's measured dimensions. This is the one place a figure and its provenance
+         * appear together, which is what lets an incomplete dimension read as a FLOOR rather
+         * than a total — the difference between "22 connections at risk" and "at least 22; we
+         * have assessed six of eight flights".
+         *
+         * `blastDimensionDerivation` already existed on the contract side and was unused. It is
+         * wired here rather than reimplemented, so the popover wording has exactly one home.
+         */
+        <div className="border-t border-border-subtle px-3 py-2">
+          <h3 className="mb-1.5 text-label uppercase text-fg-muted">Measured dimensions</h3>
+          <ul className="flex flex-col gap-1">
+            {group.blast_radius.dimensions.map((dimension) => (
+              <li key={dimension.key} className="flex items-baseline gap-2">
+                <Metric
+                  value={dimension.value}
+                  derivation={blastDimensionDerivation(
+                    dimension,
+                    group.blast_radius?.completeness.ratio ?? 'not recorded',
+                  )}
+                />
+                <span className="text-caption text-fg-secondary">{dimension.unit}</span>
+                <span className="min-w-0 flex-1 truncate text-caption text-fg-muted">
+                  {dimension.label} · measured by{' '}
+                  <MonoValue muted className="text-caption">
+                    {dimension.measured_by || 'declared data'}
+                  </MonoValue>
+                </span>
+                {!dimension.is_complete && (
+                  <span className="shrink-0 text-caption text-state-warn">at least</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {!group.blast_radius.completeness.is_complete && (
+            <p className="mt-1.5 text-caption text-state-warn">
+              Assessed {group.blast_radius.completeness.ratio} declared flights, so these are floors
+              rather than totals.
+            </p>
+          )}
+        </div>
+      )}
 
       {/*
        * Terminal counts. These are real numbers with no records behind them, and saying so is the

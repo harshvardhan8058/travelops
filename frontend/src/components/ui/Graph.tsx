@@ -17,9 +17,17 @@ const KIND_CLASS: Record<CascadeNode['kind'], string> = {
   event: 'fill-inset stroke-accent',
   flight: 'fill-surface stroke-border-strong',
   pairing: 'fill-surface stroke-border',
+  // Present because the server projection reaches passengers and rooms, quiet because they are
+  // numerous and individually unremarkable: they must not compete with the flights and rotations
+  // an operator actually acts on.
+  booking: 'fill-inset stroke-border-subtle',
+  hotel: 'fill-inset stroke-border',
 };
 
 const STATE_STROKE: Record<string, string> = {
+  // Declared but not yet assessed. Dashed rather than omitted, because a node quietly dropped
+  // makes an unfinished cascade look finished.
+  unassessed: 'stroke-border-subtle [stroke-dasharray:3_2]',
   executing: 'stroke-state-info',
   assuring: 'stroke-state-info',
   planning: 'stroke-state-info',
