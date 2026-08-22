@@ -48,6 +48,11 @@ from app.assurance.gate import POLICY_BEARING_ACTIONS
 from app.config import PolicyMode, Settings, get_settings
 from app.errors import PackNotVerifiedEligible, PolicyPackUnavailable
 from app.models.enums import ApplicabilityStatus
+from app.policy.business_constraints import (
+    business_constraint_versions,
+    constraints_from_rows,
+    load_mappings,
+)
 from app.policy.engine import (
     UNKNOWN,
     condition_fact_paths,
@@ -119,6 +124,11 @@ class GateRequirements(BaseModel):
     #: Present when requirements could not be derived. The constraints already fail closed;
     #: this names the reason for the audit record.
     blocking_reasons: list[str] = Field(default_factory=list)
+
+    #: service.constraint_key -> version, for every commercial limit this evaluation was decided
+    #: against. Recorded for the same reason as the pack version: a replay must know which
+    #: numbers applied.
+    business_constraint_versions: dict[str, str] = Field(default_factory=dict)
 
     @property
     def is_vacuous(self) -> bool:
@@ -277,32 +287,85 @@ def _derive_constraints(*, pack: LoadedPack, cited: CitedEntitlement) -> list[di
     return constraints
 
 
+def _business_constraints(
+    *, action_type: str, business_rows: list[dict[str, Any]] | None
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Commercial limits for this action, translated from Stream C's stored rows.
+
+    Returns ([], {}) when the caller supplied no rows, so a caller that has not wired them yet
+    behaves exactly as before. A malformed mapping file is a blocking constraint rather than an
+    empty list: a limit nobody can read must not read as no limit.
+    """
+    if not business_rows:
+        return [], {}
+
+    try:
+        mappings = load_mappings()
+    except PolicyPackUnavailable as exc:
+        return (
+            [
+                {
+                    "id": "business.mappings_unavailable",
+                    "unsatisfiable": True,
+                    "reason": exc.message,
+                }
+            ],
+            {},
+        )
+
+    constraints = constraints_from_rows(
+        action_type=action_type, rows=business_rows, mappings=mappings
+    )
+
+    # Record a version only for a limit that actually applied. A row that produced no constraint
+    # was not decided against, and listing it would pad the audit record with numbers that had no
+    # bearing on the outcome.
+    applied = {str(constraint["id"]) for constraint in constraints if constraint.get("id")}
+    versions = {
+        key: version
+        for key, version in business_constraint_versions(business_rows).items()
+        if f"business.{key}" in applied
+    }
+    return constraints, versions
+
+
 def gate_requirements(
     *,
     action_type: str,
     facts: dict[str, Any],
     pack: LoadedPack | None = None,
     settings: Settings | None = None,
+    business_rows: list[dict[str, Any]] | None = None,
 ) -> GateRequirements:
     """Derive what the gate must demand for this action, from the pack in force.
 
     Feed the result into `GateInputs(required_facts=..., constraints=...)`. Callers must not
     assemble either list themselves: the facts a rule needs are a property of the rule.
 
+    `business_rows` is Stream C's `business_constraint` query result, as returned by
+    `app.db.scenario_queries.load_business_constraints`. Supplying it lets the gate refuse a
+    proposed action that breaches a commercial limit BEFORE it runs, instead of the service
+    refusing internally where the decision is not recorded as an authorisation. Omitting it
+    changes nothing.
+
     Never raises. A pack that cannot be loaded, applicability that cannot be resolved and an
     entitlement that cannot be computed all come back as requirements that fail closed, so
     there is one path through the gate rather than an exception branch around it.
     """
     active = settings or get_settings()
+    business, business_versions = _business_constraints(
+        action_type=action_type, business_rows=business_rows
+    )
 
     if action_type not in POLICY_BEARING_ACTIONS:
         # The pack has nothing to say about reserving a hotel block or checking connections.
-        # Business limits for those live in Stream C's business_constraint table and reach the
-        # gate through the same `constraints` parameter.
+        # Their limits are commercial, and they arrive through `business_rows`.
         return GateRequirements(
             action_type=action_type,
             policy_bearing=False,
             policy_mode=active.policy_mode.value,
+            constraints=business,
+            business_constraint_versions=business_versions,
         )
 
     try:
@@ -372,7 +435,9 @@ def gate_requirements(
         action_type=action_type,
         policy_bearing=True,
         required_facts=[requirement.path for requirement in requirements],
-        constraints=constraints,
+        # A policy-bearing action can also be subject to a commercial limit, so both sets apply.
+        constraints=[*constraints, *business],
+        business_constraint_versions=business_versions,
         requirements=requirements,
         selected_rule_ids=selected,
         excluded_rule_ids=[rule.id for rule in loaded.excluded_rules],
