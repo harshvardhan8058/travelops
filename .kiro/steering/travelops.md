@@ -88,6 +88,25 @@ Four Kiro accounts run against this repo, one stream each:
 `docs/28-parallel-workstreams.md` for the full ownership model and `docs/kickoff/` for per-stream scope.
 Request changes outside your paths from the owning stream instead of making them.
 
+**This is now checkable, and checking it is not optional.** `OWNERS` is the table above in
+machine-readable form; run `make check-ownership STREAM=<x>` before you push. It exits non-zero if
+your branch touches a file another stream owns, and it counts uncommitted work — the point is to
+catch it on the first commit, not the last. Phase 2 breached this rule in twelve files with the
+rule already written down, so treat "I read the table" as insufficient.
+
+**Integrate continuously, not at the end.** Rebase onto latest `main` before starting significant
+work, and again immediately after another stream lands a shared contract. A stream branch more than
+one merge behind is already accumulating divergence. Before opening a phase's final PR: rebase,
+run the full suite, and confirm the PR's `mergeable_state` is `clean`. The final PR of a phase
+carries integration work only — if it is the first time two streams' code has met, the protocol
+was not followed. Full protocol: `docs/35-integration-protocol.md`.
+
+**Before building anything substantial, check nobody else already has.** Ownership stops two
+streams editing one file; it does not stop two streams writing the same feature in different files.
+Phase 2 produced two complete backend integrations, including two migrations claiming revision
+`0008`, and one was discarded. Exactly one stream implements a named capability, decided in the
+phase plan before implementation starts.
+
 `backend/migrations/` is **Stream C only**. Two streams generating migrations produces unorderable heads.
 `fixtures/api/*.json` is also Stream C, and it is contractual: Stream A's endpoints must stay
 byte-compatible with it and Stream D renders it directly.

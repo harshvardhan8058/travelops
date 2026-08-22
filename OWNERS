@@ -1,0 +1,100 @@
+# Shared-file ownership, machine-readable.
+#
+# This file does NOT introduce a new ownership model. `docs/28-parallel-workstreams.md` §"Owns
+# (write access)" has been the authority since Wave 0, and this is that table in a form a script
+# can check. Where the two could disagree, docs/28 wins and this file is wrong — say so rather
+# than editing around it.
+#
+# Phase 2 shows why the machine-readable form was needed: the rule already existed and was
+# breached anyway. `make check-collisions` lists the breaches. Nothing was enforcing it.
+#
+# Format:  <glob>  <owner>
+#   - Later lines win, so a specific path can carve itself out of a broad rule.
+#   - `**` spans directories; a bare path matches exactly.
+#   - owner is a stream letter (A/B/C/D), SHARED for coordinate-before-editing, ANY for free.
+#
+# Checked by `scripts/check_ownership.py`; protocol in `docs/35-integration-protocol.md`.
+
+# ---------------------------------------------------------------- default
+# Unclaimed paths are SHARED, not free. An unowned file is how Phase 2's conflicts started:
+# everyone assumed nobody minded. `make check-owners-audit` keeps this list intentional.
+*                                               SHARED
+
+# ---------------------------------------------------------------- A · Core & API
+backend/app/orchestrator/**                     A
+backend/app/events/**                           A
+backend/app/api/**                              A
+backend/app/agents/**                           A
+backend/app/llm/**                              A
+backend/app/observability/**                    A
+backend/app/schemas/**                          A
+backend/app/config.py                           A
+backend/app/main.py                             A
+backend/app/cli.py                              A
+backend/app/errors.py                           A
+docker-compose.yml                              A
+Makefile                                        A
+.kiro/**                                        A
+docs/**                                         A
+scripts/**                                      A
+
+# ---------------------------------------------------------------- B · Assurance & Policy
+backend/app/assurance/**                        B
+backend/app/policy/**                           B
+policy_packs/**                                 B
+config/**                                       B
+
+# ---------------------------------------------------------------- C · Data, Providers & Services
+backend/app/models/**                           C
+backend/app/db/**                               C
+backend/app/providers/**                        C
+backend/app/services/**                         C
+backend/app/memory/**                           C
+backend/migrations/**                           C
+data/**                                         C
+# Contractual: A's endpoints must stay byte-compatible with these and D renders them directly.
+fixtures/**                                     C
+
+# ---------------------------------------------------------------- D · Frontend
+frontend/**                                     D
+
+# ---------------------------------------------------------------- build/runtime plumbing
+# Not in docs/28's table because it predates it. Assigned to the stream that runs it: the backend
+# image and its migration config belong with the backend's owner of startup, which is A.
+backend/Dockerfile                              A
+backend/.dockerignore                           A
+backend/alembic.ini                             A
+backend/pyproject.toml                          A
+backend/uv.lock                                 A
+backend/.python-version                         A
+
+# ---------------------------------------------------------------- tests follow their code
+# docs/28 assigns tests with the code they cover, so the owner of the code owns the test.
+backend/tests/**                                SHARED
+backend/tests/unit/assurance/**                 B
+backend/tests/unit/policy/**                    B
+backend/tests/unit/services/**                  C
+backend/tests/unit/db/**                        C
+backend/tests/unit/orchestrator/**              A
+backend/tests/contract/**                       A
+backend/tests/e2e/**                            A
+
+# ---------------------------------------------------------------- SHARED
+# Team artefacts. A holds the pen for `docs/` above, but the CONTENT of these is agreed by the
+# team, so a unilateral edit is a protocol breach even from the nominal owner.
+docs/DECISIONS.md                               SHARED
+docs/OPEN-QUESTIONS.md                          SHARED
+docs/28-parallel-workstreams.md                 SHARED
+# Cross-cutting invariant guards. SHARED deliberately: they exist to constrain every stream, so
+# no stream may relax or delete one alone. docs/28 already calls this out for
+# `test_no_llm_in_services.py`, which C explicitly may not remove.
+backend/tests/unit/test_state_machine.py        SHARED
+backend/tests/unit/test_no_llm_in_services.py   SHARED
+backend/tests/unit/test_contracts.py            SHARED
+backend/tests/unit/test_config_fail_closed.py   SHARED
+backend/tests/unit/test_crosswind.py            SHARED
+docs/35-integration-protocol.md                 SHARED
+OWNERS                                          SHARED
+README.md                                       SHARED
+.env.example                                    SHARED
+.gitignore                                      SHARED

@@ -3,11 +3,15 @@ SHELL := /bin/bash
 
 COMPOSE ?= docker compose
 BACKEND  := backend
+# Integration checks compare against this ref, and scan this many commits for history.
+BASE  ?= origin/main
+DEPTH ?= 20
 FRONTEND := frontend
 
 .PHONY: help doctor env up down logs ps migrate revision seed reset demo demo-cascade \
         demo-reset test test-backend test-frontend lint fmt typecheck api-shell db-shell \
-        openapi verify-docs verify-demo verify-phase2 verify-console
+        openapi verify-docs verify-demo verify-phase2 verify-console \
+        check-ownership check-collisions check-owners-audit
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -94,6 +98,19 @@ typecheck: ## Frontend TypeScript typecheck
 openapi: ## Write the OpenAPI document to docs/openapi.json
 	cd $(BACKEND) && uv run python -m app.cli openapi > ../docs/openapi.json
 	@echo "wrote docs/openapi.json"
+
+# ---------------------------------------------------------------- integration protocol
+# docs/35-integration-protocol.md. One owner per shared file, recorded in OWNERS.
+
+check-ownership: ## Files this branch touches that another stream owns. usage: make check-ownership STREAM=D
+	@test -n "$(STREAM)" || (echo "usage: make check-ownership STREAM=A|B|C|D" && exit 3)
+	@python3 scripts/check_ownership.py --stream $(STREAM) --base $(BASE)
+
+check-collisions: ## Files more than one stream has historically touched
+	@python3 scripts/check_ownership.py --report-collisions --base $(BASE) --depth $(DEPTH)
+
+check-owners-audit: ## Check the OWNERS file itself for shadowed or missing rules
+	@python3 scripts/check_ownership.py --audit
 
 verify-docs: ## Check every relative markdown link resolves
 	@python3 scripts/verify_docs.py
