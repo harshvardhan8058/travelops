@@ -39,13 +39,14 @@ authorises.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.assurance.checks import dedupe
 from app.assurance.gate import POLICY_BEARING_ACTIONS
-from app.config import PolicyMode, Settings, get_settings
+from app.config import PolicyMode, Settings, get_settings, resolve_repo_path
 from app.errors import PackNotVerifiedEligible, PolicyPackUnavailable
 from app.models.enums import ApplicabilityStatus
 from app.policy.business_constraints import (
@@ -370,7 +371,7 @@ def gate_requirements(
 
     try:
         loaded = pack or load_pack(
-            pack_dir=active.policy_pack_dir,
+            pack_dir=resolve_repo_path(Path(active.policy_pack_dir)),
             pack_id=active.policy_pack_id,
             version=active.policy_pack_version,
             mode=active.policy_mode,
