@@ -1,0 +1,56 @@
+# Gate-enforceable business limits — version 1
+#
+# Statutory entitlements come from a policy pack. These are the airline's OWN commercial
+# limits, and they live in Stream C's `business_constraint` table so an operator can change
+# one with an audit trail. Until now the gate could not see them: a service read its own cap
+# and refused internally, which means the refusal appeared as a service failure rather than as
+# an authorisation decision, and nothing recorded that a limit had been reached.
+#
+# This file maps a stored constraint onto a field of the proposed action's payload, so
+# `policy_compliant` can check it BEFORE the action runs.
+#
+# WHAT THIS FILE DOES NOT DO
+#
+# It does not restate a limit. Every value comes from the `business_constraint` row at
+# evaluation time; only the mapping lives here. A cap written down twice is a cap that will
+# eventually disagree with itself.
+#
+# It also does not invent a payload field. Each `field` below must exist in the action payload
+# Stream A actually sends, and each (service, constraint_key) pair must exist in Stream C's
+# seeded rows. Pairs that are inputs to a service's own arithmetic rather than limits on a
+# payload — occupancy assumptions, minimum connection time, the delay-risk ruleset, the
+# passenger-priority weights, the crew expansion depth — are deliberately absent: they are
+# not statements the gate can check against a proposed action.
+#
+# Owner: Stream B. Adding a mapping is a reviewed change, because it makes the gate refuse
+# something it previously allowed.
+
+version: "action-requirements-v1"
+
+mappings:
+  # ---------------------------------------------------------------- hotel rate cap
+  # Stream C seeds hotel_service.max_rate_inr as {"inr": 6000}, is_hard: true.
+  # A proposed reservation above the cap is refused by the gate, and the refusal is recorded
+  # against the action rather than lost inside the service.
+  - service: hotel_service
+    constraint_key: max_rate_inr
+    # Read the number out of the stored JSON value. Nothing is hardcoded.
+    value_path: inr
+    applies_to_actions:
+      - find_hotel_options
+      - reserve_hotel_block
+    field: rate_inr
+    op: lte
+    # A hard row FAILs, a soft row WARNs. Taken from the row, not decided here.
+    honour_is_hard: true
+    description: >-
+      Nightly rate cap. The gate refuses a reservation above it before the action runs.
+
+# ---------------------------------------------------------------- reviewer notes
+# 1. `field` is checked against the payload only when the payload contains it. A payload that
+#    never mentions a rate is not silently compliant — `require_field: true` on a mapping makes
+#    its absence a MISSING_REQUIRED_FACT — but no mapping sets that today, because Stream A's
+#    adapters build most service inputs from the database rather than from the task payload,
+#    and demanding a payload field the orchestrator does not send would refuse every action.
+# 2. When Stream C adds a hard limit that a payload can be checked against, it becomes a
+#    mapping here and starts being enforced. No engine change is needed.
