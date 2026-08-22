@@ -1,50 +1,47 @@
 # 33. Phase 2 — Stream A Implementation Plan
 
-Full Disruption Intelligence, from the Core & API side. **Planning only. No code until all four
-stream plans are reviewed.**
+Full Disruption Intelligence, from the Core & API side. **Planning only. No code until the
+ownership and dependency contracts are aligned across streams.**
 
 Written against `main` at `5052388`. Phase 1 is closed: the deterministic slice runs to `resolved`
 on the demo machine, and an operator approval is attributed to a person.
 
+**Revised for the final Phase 2 architecture decisions P2-D1, P2-D2 and P2-D3**, recorded in
+[`DECISIONS.md`](DECISIONS.md#phase-2-architecture-decisions--final). A2.6 changed substantially and
+A2.5's boundary is now settled law rather than a recommendation; §0 records what moved.
+
+> **Two `D` namespaces in this document.** `P2-D1/2/3` are the team's Phase 2 architecture decisions.
+> `D1`–`D7` in A2.9 are **Stream D's dependency asks** from their own plan (PR #40). They are
+> unrelated, and there is a third `D1`–`D6` in `DECISIONS.md`'s design-decision list. Always cite the
+> prefixed form.
+
 ---
 
-## 0. Two things to settle before any of this is built
+## 0. Decisions, and what is still open
 
-### 0.1 One scope item contradicts a settled decision
+### 0.1 What-if — **settled: P2-D2**
 
-**"What-if simulation branches" is currently out of scope by three separate records.**
+The team has ruled. What-if is **in scope**, bounded to a **zero-write deterministic
+re-evaluation**, and is **explicitly not a simulation engine or digital twin**. The boundary is
+recorded canonically in
+[`DECISIONS.md` → P2-D2](DECISIONS.md#p2-d2--what-if-is-in-scope-bounded-to-zero-write-deterministic-re-evaluation);
+that entry, not this document, is the citable source.
 
-| Record | Says |
+This resolves the contradiction my draft raised. For the record, the three scope documents that put
+a simulation engine out of scope are unchanged and still binding — P2-D2 does not amend them,
+because a re-evaluation over recorded facts adds no new subsystem. What is now settled:
+
+| | |
 | --- | --- |
-| `.kiro/steering/travelops.md` | "Deferred: digital twin, **simulation engine**, voice, knowledge graph visualisation" |
-| `DECISIONS.md:300` | Simulation engine listed under "Nice to have" |
-| `08-blueprint-backlog.md:85` | "#15–#17 (replay engine, digital twin, simulation engine) … product-scale features … post-hackathon roadmap **unless one of them *is* the demo**. … the replay engine is now nearly free. **The digital twin and simulation engine are not.**" |
+| **In scope** | Re-evaluating the *same recorded facts* through the *same deterministic* gate and services, varying only declared inputs |
+| **Out of scope, still deferred** | Projected world state, predicted delay/cost/outcome, any figure not traceable to a stored fact, digital twin |
+| **Enforcement** | `basis: Literal["recorded_evidence"]` — the contract cannot express a projection — plus a row-count-unchanged test |
 
-Steering is shared law across all four sessions and changes only with the team's agreement, so I
-am not planning past it unilaterally. There are three ways forward and the team should pick one:
+Practically this ratifies the direction A2.5 was already written to, so **A2.5 does not grow**.
+Stream D's plan (PR #40) reached the same boundary from the response schemas, which is why the
+decision was cheap to make.
 
-**Option A — scope it down to something that is not a simulation engine.** *Recommended.*
-A simulation engine models future world state and propagates hypothetical events through a twin.
-What the demo actually needs is narrower: **compare two or more candidate recovery plans against
-the same recorded facts**, using the deterministic services that already exist. No world model, no
-projected weather, no invented future. That is item **A2.5** below, and it delivers the "what if we
-did it differently" beat without the deferred subsystem.
-
-**Option B — amend steering deliberately.** If the team wants true what-if projection, that is a
-steering change plus a new subsystem, and per `08-blueprint-backlog.md` it only earns its place if
-it *is* the demo. My view: it is not, and Phase 2's demo claim is already strong.
-
-**Option C — defer it to Phase 4/5.** Also defensible.
-
-**Stream D reached the same boundary independently.** Their Phase 2 plan (PR #40) marks operational
-what-if as having no endpoint and warns that a UI computing outcomes would break "the UI never
-calculates", recommending the existing policy-cause comparison instead. Two streams, different
-evidence, same limit — see A2.9 §D5.
-
-Everything else in this plan assumes **Option A**. If the team picks B, A2.5 grows substantially
-and the estimate below is wrong.
-
-### 0.2 "Phase 2" means something narrower in `20-phased-delivery.md`
+### 0.2 "Phase 2" means something narrower in `20-phased-delivery.md` — **still open**
 
 That document defines Phase 2 as **Cascade**: "multi-flight propagation, downstream connections,
 crew pairing impact, the cascade view", gated on "one weather event at BLR produces a traceable
@@ -58,8 +55,17 @@ the work. Proposed mapping, for review:
 | --- | --- | --- |
 | Group lifecycle, cascade orchestration, blast radius | 2 | Yes — this is the Phase 2 gate |
 | Replay orchestration | 4, but "nearly free" per backlog | Yes — cheap, and D already has a route stub |
-| Candidate plan lifecycle and comparison | 4–5 | Yes, in the reduced form of A2.5 |
-| What-if projection | Deferred | **No** — see 0.1 |
+| Candidate plan lifecycle and comparison | 4–5 | Yes — A2.5, per P2-D2 |
+| What-if as zero-write re-evaluation | not enumerated | **Yes** — P2-D2 |
+| What-if as projection / digital twin | Deferred | **No** — P2-D2 excludes it |
+
+### 0.3 Phase 2 cut order — settled
+
+**Open-Meteo and historical provider expansion is non-critical and is cut before any core Phase 2
+feature.** Recorded in
+[`DECISIONS.md` → Phase 2 cut order](DECISIONS.md#phase-2-cut-order). No Stream A item depends on
+forecast or historical retrieval, so this costs this plan nothing — the recorded METAR path already
+carries every figure A2.2 and A2.3 report.
 
 ---
 
@@ -367,10 +373,20 @@ index on `(incident_id, selection_state)`.
 
 ---
 
-## A2.5 — Plan comparison (the reduced "what-if")
+## A2.5 — What-if as plan comparison
 
-**This is Option A from §0.1.** Compare candidate plans against the **same recorded facts**. No
-projected world state, no simulation engine.
+**This is what-if under [P2-D2](DECISIONS.md#p2-d2--what-if-is-in-scope-bounded-to-zero-write-deterministic-re-evaluation):
+a bounded, zero-write, deterministic re-evaluation.** Compare candidate plans against the **same
+recorded facts**. No projected world state, no simulation engine, nothing persisted.
+
+P2-D2's three properties map onto this item exactly, which is worth stating so a reviewer can check
+them one by one:
+
+| P2-D2 property | How A2.5 satisfies it |
+| --- | --- |
+| **Re-evaluation** of the same recorded facts | Calls B's existing `gate.evaluate` over evidence already stored; computes no new facts |
+| **Zero-write** | Persists no `assurance_evaluation`, no `action`, no state change, no `decision_log` row. Asserted by a row-count test |
+| **Bounded** — varies only declared inputs | Varies candidate plan shape along axes declared in `playbook.py`, and nothing else. World state is never an input |
 
 ### Files
 - `backend/app/orchestrator/candidates.py` — `compare_candidates()`.
@@ -432,62 +448,115 @@ prediction.
 
 ---
 
-## A2.6 — Plan-level assurance invocation boundary
+## A2.6 — Group-level assurance invocation boundary, and plan approval
 
-**The most dangerous item in this plan.** Handle with care.
+**The most dangerous item in this plan, and the one the team's decisions changed most.** Handle
+with care.
 
-The gate authorises **actions**. A plan-level pre-check must aggregate, never authorise.
+**Rewritten for P2-D1 and P2-D3** ([`DECISIONS.md`](DECISIONS.md#phase-2-architecture-decisions--final)).
+My draft said a plan-level summary authorises *nothing*, structurally. Two decisions overrode that:
+
+- **P2-D1: the scope is the incident group**, not one incident's plan. So this is a *group* summary.
+- **P2-D3: a plan approval may authorise low and medium risk actions.** So it is no longer purely a
+  report. The `authorises_nothing: Literal[True]` field is **removed** — keeping it would have been
+  a lie in the type system, which is worse than not having it.
+
+That makes this a real authorisation scope, so the boundary has to be enforced by something other
+than "it grants nothing". The replacement is a narrow, testable predicate.
 
 ### Files
-- `backend/app/orchestrator/plan_assurance.py` — **new.**
+- `backend/app/orchestrator/group_assurance.py` — **new** (renamed from `plan_assurance.py`: the
+  scope is the group, and the filename should not outlive the decision).
 
 ### Public contracts
 
 ```python
-class PlanAssuranceSummary(BaseModel):
-    plan_id: int
-    per_task: list[TaskGateOutcome]
+class GroupAssuranceSummary(BaseModel):
+    group_reference: str                      # P2-D1: group, not plan
+    per_incident: list[IncidentGateOutcome]   # each with its selected plan's per-task outcomes
     would_execute: int
     would_need_human: int
     would_be_refused: int
-    authorises_nothing: Literal[True]    # structural, not a comment
+    #: P2-D3: exactly the actions a single plan approval could authorise. Never high-risk,
+    #: never a task with a failed check. Empty is a normal and common answer.
+    approvable_task_ids: list[int]
+    #: Every task excluded from the above, each with the reason it cannot be covered.
+    not_approvable: list[NotApprovableTask]    # reason: HIGH_RISK | FAILED_CHECK
 ```
 
-- Calls B's gate once per task and **aggregates for display**.
-- Grants no permission. `execute()` continues to require its own per-action evaluation and, where
-  the gate said `needs_human`, an approved `human_decision` for **that** evaluation.
-- `authorises_nothing: Literal[True]` is in the contract so no caller can misread the object, and
-  so a reviewer can find the boundary by grepping for it.
+**The P2-D3 predicate, stated exactly.** A plan approval may satisfy `needs_human` for a task
+**only** when both hold:
+
+1. `result.risk_tier in {low, medium}` — high always needs its own action-level approval; and
+2. **no** check in `result.checks` has `state == failed` — approval covers risk, never failed
+   evidence.
+
+Everything else still requires an action-level approval against **its own** persisted
+`assurance_evaluation`, exactly as in Phase 1.
+
+**A finding the team should see before this is built.** Reading `gate.py:274–316`, a low or medium
+tier action currently reaches `needs_human` by only two routes:
+
+| Route | Gate rule | Approvable under P2-D3? |
+| --- | --- | --- |
+| A check `FAIL`ed | rule 2 | **No** — P2-D3 excludes failed evidence |
+| An **unpermitted `WARN`** | rule 4 | **Yes** — a warning is not a failure |
+| High tier with all checks passing | rule 3 | **No** — fires only for `high` |
+
+So under today's gate, P2-D3's authorising domain is exactly **"an unpermitted warning on a
+low/medium action"**. That is a real, non-empty domain and I am planning to it — but it is narrower
+than "plan approval covers low/medium actions" sounds, and if the team meant something broader
+(for example, letting a plan approval pre-authorise actions the gate would already `execute`, as a
+click-reduction rather than a permission), that is a different feature and needs saying. **Listed
+as an open question in §4.**
+
+Because plan approval now grants something, `execute()` must record *what* covered each action.
+Reuse the Phase 1 attribution model: the covering `human_decision` id is stamped on the action just
+as an action-level approval is, with the decision's own `actor_kind=human`. No second audit model.
 
 ### Dependencies
-- **B:** existing `gate.evaluate`. No new contract. Confirm with B that repeated evaluation of the
-  same task is free of side effects.
-- **C:** none.
+- **B:** existing `gate.evaluate`. No new contract. Confirm repeated evaluation is side-effect free.
+- **C:** none beyond A2.4's migration.
 
 ### Database
-**None**, for the reason in A2.5.
+The summary itself persists **nothing** (P2-D2). But a plan *approval* is a real authorisation and
+**must** persist — as a `human_decision`, reusing the existing table. Whether it needs a
+`scope` column (`action` | `plan`) to distinguish the two is a **question for C**, and the honest
+answer is that it probably does: an auditor must be able to tell a per-action signature from a
+plan-wide one. Recorded in §4.
 
-### Tests — `backend/tests/unit/orchestrator/test_plan_assurance.py`
-- A summary saying `would_execute: 3` does **not** let `execute()` run without a per-action
-  evaluation. Asserted by calling `execute()` after a summary and expecting `AssuranceBlocked`.
-- A summary persists nothing.
+### Tests — `backend/tests/unit/orchestrator/test_group_assurance.py`
+- **The load-bearing test:** a high-risk task is **never** in `approvable_task_ids`, and executing
+  it after a plan approval still raises `AssuranceBlocked` until its own approval exists.
+- A task with any `failed` check is never approvable, **at every tier including low** — asserted per
+  tier, because "low risk" is the tier most likely to tempt a shortcut.
+- An unpermitted-warn low/medium task **is** approvable, so P2-D3 is proven non-vacuous.
+- Fetching a summary persists nothing: row counts identical before and after.
+- An action authorised by a plan approval carries that `human_decision_id` and reads as
+  `actor_kind=human` in both the timeline and replay.
 - Extend the frozen guard: `execute()` remains reachable only via a persisted evaluation.
-- A `needs_human` task in the summary still requires an approved decision at execution.
 
 ### Acceptance criteria
-1. A plan summary can be fetched before execution and grants nothing.
-2. Every Phase 1 assurance invariant still holds, verified by the existing suite unchanged.
-3. A reviewer can find the boundary in one grep.
+1. One group-scoped summary covers every member incident's selected plan.
+2. A plan approval executes the low/medium actions it covers, and **not one high-risk action**.
+3. No `FAIL` is ever approvable at plan level, at any tier.
+4. Every Phase 1 assurance invariant still holds, existing suite unchanged.
 
 ### Integration risks
-- **This is where a second authorisation path would be introduced by accident.** Mitigation: the
-  `Literal[True]` field, the "summary then execute is still blocked" test, and an explicit line in
-  the PR checklist. If a reviewer sees `execute()` consulting a `PlanAssuranceSummary`, that is a
-  finding regardless of the surrounding code.
+- **This is the one place in Phase 2 where a real second authorisation path is being added
+  deliberately.** The mitigation is no longer structural, so it must be behavioural: the two-part
+  predicate lives in one function with one name, and every excluded task carries its reason. If a
+  reviewer sees the tier check without the failed-check check, or either of them inlined at a call
+  site, that is a finding.
+- **Blast radius of getting the predicate wrong.** A bug here silently executes something a person
+  did not authorise — the worst failure this system can have. It deserves the hardest review in
+  Phase 2 and should not be the item that gets rushed if time runs short (hence its late position
+  in the order).
 
 ### Demo value
-**Moderate directly, high defensively.** It is the answer to "so the system decides in bulk?" —
-no; it *reports* in bulk and authorises one action at a time.
+**High.** "Approve the recovery for the whole network event in one action — and watch it still stop
+at the one action that needs a person." Bounded autonomy is easier to *show* than to assert, and
+P2-D3 makes the boundary visible rather than theoretical.
 
 ---
 
@@ -711,17 +780,21 @@ So D7 is a **promotion of an existing field**, not a new contract: lift `reason_
 it is a short bounded token, it is exactly what a list view needs, and refusal copy is a list-view
 concern.
 
-### D5 — the what-if limit, reached twice independently
+### D5 — **settled by P2-D2**
 
-Worth flagging for the review: D's plan concluded that operational what-if has no endpoint and that
-a UI computing outcomes would break "the UI never calculates", and recommended the **policy-cause
-comparison** that already exists instead. My §0.1 concluded, from the steering and backlog side,
-that a simulation engine is deferred and that plan comparison over recorded evidence is the honest
-substitute.
+D asked for a what-if contract. P2-D2 now defines exactly what one may contain: a zero-write
+deterministic re-evaluation, and nothing projected. So D5 is answered, with a caveat worth stating
+plainly to D.
 
-Two streams reasoning from different evidence — D from the response schemas, A from the scope
-records — landed on the same boundary. That is the strongest argument in this document for
-**Option A**, and the team should weigh it as such.
+D's plan concluded that *operational* what-if has no endpoint and that a UI computing outcomes would
+break "the UI never calculates", recommending the existing **policy-cause comparison** instead. My
+§0.1 reached the same limit from the scope records. P2-D2 ratified it. Two streams reasoning from
+different evidence — D from the response schemas, A from the scope records — landed where the
+decision landed.
+
+**The caveat:** P2-D2 gives D a *plan-comparison* what-if (A2.5), not the operational what-if their
+UI sketch would need. Those are different screens. D should confirm A2.5's contract satisfies their
+what-if surface, because "what-if is in scope" could easily be read as more than P2-D2 grants.
 
 ### Files
 - `backend/app/schemas/incidents.py` — `reason_code` on `ActionSummary`; new `ActionDetailResponse`.
@@ -781,9 +854,44 @@ Ordered by dependency, then by demo value per unit of effort.
 A2.9 goes first for a scheduling reason, not a technical one: it is the only item where **another
 stream is blocked on Stream A right now**. Everything else in this plan blocks only me.
 
-**If Phase 2 has to be cut**, cut from the bottom: 9, 8, 7. Items 1–6 deliver the documented
-Phase 2 gate — "one weather event at BLR produces a traceable multi-flight, multi-pairing impact
-set" — on their own. Losing 7–9 costs the comparison screen, not the cascade story.
+A2.6 is deliberately late. Under P2-D3 it is the only item that can execute something a person did
+not individually authorise, so it should be built when the surrounding invariants are already
+covered by tests — never as the rushed last item.
+
+### The mandated critical order — **cannot be applied yet**
+
+The team handed down a critical implementation order:
+
+```
+C2-3 → C2-1/C2-2 → C2-5/C2-6 → C2-4 → C2-7 → C2-8 → C2-9
+```
+
+**I cannot map `C2-N` onto anything in this repository, and I am not going to guess.**
+`grep -rn "C2-1\|C2-3\|C2-9" --include=*.md .` returns nothing: no stream plan, doc or issue in
+`main` uses these labels. Stream C has not published a Phase 2 plan (their most recent PR is #36).
+
+Two readings are plausible and they imply **different work**:
+
+1. **Stream C's own item numbering**, handed to every stream as the shared critical path. Most
+   likely, given the `C` prefix and that A2.4 already waits on a C migration. If so, Stream A's
+   order is unchanged and this sequence tells me *when C's dependencies land*.
+2. **A renumbering of this plan's nine items** — a coincidence worth noting, since this plan happens
+   to have exactly nine. But it does not survive checking: it would place blast radius (A2.3) before
+   the cascade orchestration (A2.2) it derives from, which cannot be built in that order.
+
+Reading 2 failing is *evidence for* reading 1, not proof of it. Since the same instruction says
+**"do not implement until the ownership/dependency contracts are aligned across streams"**, this is
+exactly such a misalignment, and it is the top item in §4. One line resolves it: either C's plan, or
+a mapping table.
+
+Until then the dependency-ordered sequence above is what Stream A would follow, and it is
+**provisional**.
+
+**If Phase 2 has to be cut**, cut from the bottom: 9, 8, 7 — and before any of them, cut the
+Open-Meteo/historical provider expansion (§0.3), which is already designated first out. Items 1–6
+deliver the documented Phase 2 gate — "one weather event at BLR produces a traceable multi-flight,
+multi-pairing impact set" — on their own. Losing 7–9 costs the comparison screen, not the cascade
+story.
 
 ## 4. What I need from the other streams before writing code
 
@@ -796,8 +904,15 @@ set" — on their own. Losing 7–9 costs the comparison screen, not the cascade
 | **C** | `flights[]` in the group fixture gains a nullable `incident_reference` (D6) | A2.9 |
 | **D** | Confirm the group detail response may gain a blast-radius block | A2.8 |
 | **D** | Choose D1: action-detail endpoint (recommended) or inline `payload` on `ActionSummary` | A2.9 |
-| **Team** | Decide §0.1 — Option A, B or C on what-if | A2.5 scope |
+| **D** | Confirm A2.5's plan-comparison contract satisfies their what-if surface. P2-D2 grants a plan-comparison what-if, not an operational one | A2.5, A2.9 |
+| **C** | Does `human_decision` need a `scope` column (`action` \| `plan`)? P2-D3 creates two kinds of signature and an auditor must tell them apart | A2.6 |
+| **Team** | **Map the mandated `C2-N` order onto stream items** — see §3. The labels do not exist in this repo | **all implementation** |
+| **Team** | Confirm the P2-D3 authorising domain — see A2.6. Under today's gate it is "unpermitted warning on a low/medium action", which may be narrower than intended | A2.6 |
 | **Team** | Agree §0.2 — what "Phase 2" covers, so the readiness gates match the work | all |
+
+**Settled since the first draft:** §0.1 what-if (P2-D2), the group scope of plan-level assurance
+(P2-D1), plan-approval risk coverage (P2-D3), and the Open-Meteo cut (§0.3). Those rows are gone
+from this table because they are decisions now, not asks.
 
 ## 5. Invariants a reviewer should check first
 
@@ -806,9 +921,14 @@ Before reading any Phase 2 code, check these. Each is a way this plan could go w
 1. `uq_incident_active_per_flight` untouched; one active incident per flight.
 2. No group figure computed by summing per-incident counts. Unions only, via C's rollup.
 3. `execute()` still requires a persisted `assurance_evaluation`, and an approved `human_decision`
-   where the gate demanded one. A `PlanAssuranceSummary` grants nothing.
-4. Dry-run evaluation and plan comparison persist nothing.
-5. No projected or forecast figure in any response. `basis` stays `recorded_evidence`.
+   where the gate demanded one. Under P2-D3 that approval may be a **plan** approval — but only for
+   a low/medium tier action with **no failed check**. Check both halves of that predicate.
+4. **No high-risk action is ever covered by a plan approval** (P2-D3). This is the single most
+   important line in Phase 2.
+5. No `FAIL` is approvable at plan level, at any tier. Fail-closed is not delegable.
+6. A `GroupAssuranceSummary` persists nothing; only a real approval does.
+7. Dry-run evaluation and plan comparison persist nothing (P2-D2, zero-write).
+8. No projected or forecast figure in any response. `basis` stays `recorded_evidence` (P2-D2).
 6. Thresholds and bands come from config, never a literal.
 7. The six frozen guard tests unmodified (`docs/28-parallel-workstreams.md:108`).
 8. Every new endpoint has a `response_model`; no schema renders as `"string"`.
