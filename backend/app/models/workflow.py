@@ -52,6 +52,9 @@ JSON_TYPE = JSONB().with_variant(JSON(), "sqlite")
 # Partial-index predicate for "one active incident per flight" (FR-6).
 _ACTIVE_INCIDENT_PREDICATE = text("state NOT IN ('resolved','blocked','failed')")
 
+#: Partial-index predicate for "one selected plan per incident".
+_SELECTED_PLAN_PREDICATE = text("selection_state = 'selected'")
+
 
 class Prediction(Base):
     """Deterministic delay-risk output.
@@ -174,9 +177,47 @@ class Plan(Base):
     raw_response: Mapped[dict | None] = mapped_column(JSON_TYPE)
     retrieved_incident_ids: Mapped[list] = mapped_column(JSON_TYPE, nullable=False, default=list)
 
+    # ---------------------------------------------------------------- Phase 2 candidates
+    #: candidate | selected | discarded. Existing rows default to `candidate`, so
+    #: `_current_plan`'s "latest when nothing is selected" fallback keeps Phase 1 behaviour
+    #: byte for byte. The backfill is a deliberate no-op.
+    selection_state: Mapped[str] = mapped_column(String(12), nullable=False, default="candidate")
+    selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Pseudonymous actor, as elsewhere. No personal identity for a demo operator.
+    selected_by: Mapped[str | None] = mapped_column(String(64))
+    #: Which declared axis in playbook.py produced this candidate. A label, not a
+    #: discriminator — nothing branches on it.
+    variant_key: Mapped[str | None] = mapped_column(String(32))
+    #: Deterministic identity of the task set. An approval binds to this, so a re-planned or
+    #: reordered plan stops being covered. See app/db/plan_identity.py.
+    plan_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+
     incident: Mapped[Incident] = relationship(back_populates="plans")
     tasks: Mapped[list[PlanTask]] = relationship(
         back_populates="plan", order_by="PlanTask.task_order"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "selection_state IN ('candidate','selected','discarded')",
+            name="plan_selection_state_valid",
+        ),
+        # Attribution cannot be skipped on a selection.
+        CheckConstraint(
+            "selection_state <> 'selected' OR "
+            "(selected_at IS NOT NULL AND selected_by IS NOT NULL)",
+            name="plan_selection_attributed",
+        ),
+        Index("ix_plan_incident_selection", "incident_id", "selection_state"),
+        # One selected plan per incident, from the database. This is what makes a second,
+        # different selection a 409 rather than a race.
+        Index(
+            "uq_plan_selected_per_incident",
+            "incident_id",
+            unique=True,
+            postgresql_where=_SELECTED_PLAN_PREDICATE,
+            sqlite_where=_SELECTED_PLAN_PREDICATE,
+        ),
     )
 
 
@@ -261,6 +302,11 @@ class Action(Base):
     assurance_id: Mapped[int] = mapped_column(ForeignKey("assurance_evaluation.id"), nullable=False)
     # Required when the gate decided needs_human. Enforced in the service transaction.
     human_decision_id: Mapped[int | None] = mapped_column(ForeignKey("human_decision.id"))
+    #: P2-D3 alternative to the above: a plan approval covering this task's low/medium risk.
+    #: Exactly one of the two is set when the gate returned needs_human. A plan approval is
+    #: valid for this action only when the tier is low or medium, no check FAILED, the task id
+    #: is in `covered_task_ids`, and `plan.plan_hash` still matches the approved hash.
+    plan_approval_id: Mapped[int | None] = mapped_column(ForeignKey("plan_approval.id"))
 
     actor: Mapped[str] = mapped_column(String(48), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)

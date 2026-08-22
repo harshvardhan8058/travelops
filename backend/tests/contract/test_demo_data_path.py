@@ -183,13 +183,19 @@ async def session(tmp_path):
     await engine.dispose()
 
 
-async def test_a_seeded_but_unrun_dataset_rolls_up_to_zero(session):
+async def test_a_seeded_but_unrun_dataset_separates_declared_from_derived(session):
     """Immediately after `make seed`, before anything has run.
 
-    The dataset-level facts are already true because they are counted from rows. The workflow
-    figures are zero because no service has reported anything, and `is_complete` says so. A
-    rollup that filled these in from the fixture would put numbers on screen that no run
-    produced.
+    The distinction this pins down is the whole Phase 2 membership decision. Two figures are
+    *declared* — the eight member flights and the 604 passengers holding segments on them —
+    and are true the moment the dataset lands, because they are counted from committed rows.
+    Every figure that requires a service to have looked is zero, and `is_complete` is False.
+
+    Previously `flights_affected` was zero here, because it counted incidents. That made a
+    seeded cascade indistinguishable from an empty one and left "which flights is this about"
+    unanswerable until a run had started. Declaring membership fixes that without inventing
+    anything: `flights_without_incident` lists all eight, so the gap between what the group
+    covers and what has been worked is visible rather than smoothed over.
     """
     from sqlalchemy import select
 
@@ -206,12 +212,20 @@ async def test_a_seeded_but_unrun_dataset_rolls_up_to_zero(session):
     )
     rollup = await cascade_rollup(session, group_id=group.id)
 
-    # No incidents opened yet, so nothing is attributed to the group.
+    # Declared, so true from the moment the dataset lands.
+    assert rollup.membership_is_declared is True
+    assert rollup.member_flight_ids == [1, 2, 3, 5, 6, 7, 8, 9]
+    assert rollup.flights_affected == 8
+    assert rollup.passengers_affected == 604
+
+    # Derived, so zero until a service has reported something.
     assert rollup.incidents_in_group == 0
-    assert rollup.flights_affected == 0
     assert rollup.connections_at_risk == 0
     assert rollup.crew_pairings_affected == 0
     assert rollup.pairings == []
+
+    # And the gap between the two is stated, not hidden.
+    assert rollup.flights_without_incident == [1, 2, 3, 5, 6, 7, 8, 9]
     assert rollup.is_complete is False
 
     # Airport-level facts do not depend on a run.

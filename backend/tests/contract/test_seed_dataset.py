@@ -47,7 +47,10 @@ EXPECTED_COUNTS = {
     "weather_observation": 41,
     "flight": 42,
     "hotel": 11,
-    "business_constraint": 5,
+    # 7 from Phase 2: the passenger priority ruleset and the crew expansion bound both live
+    # in data, so the policy that ranks passengers and the depth of the crew walk are
+    # inspectable and versioned rather than compiled into a service.
+    "business_constraint": 7,
     "crew_member": 24,
     "pairing": 9,
     "pairing_leg": 28,
@@ -56,6 +59,9 @@ EXPECTED_COUNTS = {
     "booking": 604,
     "booking_segment": 642,
     "incident_group": 1,
+    # One row per affected flight. Eight, not seven: UK 705 arrives into VOBL, so a
+    # departure-origin query would miss it and still report nine pairings.
+    "incident_group_flight": 8,
 }
 
 

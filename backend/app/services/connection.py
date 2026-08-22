@@ -24,9 +24,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from itertools import pairwise
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import ActionStatus, ProvenanceKind
 from app.services.base import ServiceResult
@@ -39,6 +39,17 @@ BUSINESS_CONSTRAINT_KEY = "minimum_connection_minutes"
 #: Fallback only. The seeded `business_constraint` row is the runtime source, and this value
 #: is the same one that gets seeded so "no rows" and "seeded rows" agree.
 DEFAULT_MINIMUM_CONNECTION_MINUTES = 45
+
+#: A connection that holds by this margin or less. Reported separately because it is the set
+#: that breaks if the delay grows by another few minutes — the difference between "22 broken"
+#: and "22 broken and 9 more one nudge away" is the difference between a number and a warning.
+#: Not a threshold for *deciding* anything: no connection is ever counted as broken because of
+#: it.
+DEFAULT_NEAR_MISS_MINUTES = 15
+
+#: Cap on alternatives offered per broken connection. Three is what fits on screen; more would
+#: imply a ranking this system has no basis to make.
+MAX_ALTERNATIVES = 3
 
 
 class SegmentFlight(BaseModel):
@@ -115,10 +126,38 @@ class BrokenConnection(BaseModel):
     minimum_connection_minutes: int
     #: Scheduled turnaround minus the minimum connection, after the delay. Negative.
     shortfall_minutes: int
+    #: The same quantity as a signed margin, so broken and held connections can be compared
+    #: on one axis. Negative here by construction; positive for a connection that holds.
+    slack_minutes: int
+    #: Later flights on the same city pair that the passenger could physically reach.
+    #:
+    #: SCHEDULE FEASIBILITY ONLY. There is no seat-availability or capacity data in this
+    #: system, so this is not an offer and not a rebooking recommendation — it is "these
+    #: departures are late enough to be reachable". Presenting it as availability would be
+    #: inventing inventory, which is the one thing a recovery tool must never do.
+    alternative_flight_ids: list[int] = Field(default_factory=list)
+    alternatives_basis: Literal["schedule_feasible_only"] = "schedule_feasible_only"
     #: True when the onward flight is itself delayed enough that the passenger may still
     #: make it. Still counted as broken as sold, but flagged so nobody is re-accommodated
     #: who does not need to be.
     recovered_by_onward_delay: bool
+
+
+class HeldConnection(BaseModel):
+    """A connection that survives the delay, with the margin it survived by.
+
+    Only near misses are retained. Recording every comfortable connection would bloat the
+    payload without telling anyone anything.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    booking_id: int
+    pnr: str
+    inbound_flight_number: str
+    onward_flight_number: str
+    connection_airport_icao: str
+    slack_minutes: int
 
 
 class ConnectionAssessment(BaseModel):
@@ -130,9 +169,31 @@ class ConnectionAssessment(BaseModel):
     rule_version: str = RULE_VERSION
     minimum_connection_minutes: int
 
+    #: Connections that hold, but by `near_miss_minutes` or less.
+    near_misses: list[HeldConnection] = Field(default_factory=list)
+    near_miss_minutes: int = DEFAULT_NEAR_MISS_MINUTES
+
     @property
     def count(self) -> int:
         return len(self.at_risk)
+
+    @property
+    def near_miss_count(self) -> int:
+        return len(self.near_misses)
+
+    @property
+    def margin_note(self) -> str:
+        """One sentence a controller can read, with both numbers in it."""
+        if not self.near_misses:
+            return (
+                f"{self.count} connections break. No further connection is within "
+                f"{self.near_miss_minutes} minutes of breaking."
+            )
+        tightest = min(item.slack_minutes for item in self.near_misses)
+        return (
+            f"{self.count} connections break. {self.near_miss_count} more hold by "
+            f"{self.near_miss_minutes} minutes or less, the tightest by {tightest}."
+        )
 
 
 def _minimum_connection_minutes(rows: list[dict[str, Any]] | None) -> int:
@@ -148,19 +209,55 @@ def _minimum_connection_minutes(rows: list[dict[str, Any]] | None) -> int:
     return DEFAULT_MINIMUM_CONNECTION_MINUTES
 
 
+def _schedule_feasible_alternatives(
+    *,
+    onward: SegmentFlight,
+    earliest_arrival: datetime,
+    flights: dict[int, SegmentFlight],
+) -> list[int]:
+    """Later departures on the same city pair the passenger could physically reach.
+
+    Three deliberate limits, all of them about not overclaiming:
+
+    * Same origin and destination only. Re-routing via a third airport is a rebooking
+      decision with cost and crew consequences, not a schedule lookup.
+    * Compared against the alternative's *revised* departure, because a delayed alternative
+      is easier to catch, and against the passenger's earliest possible arrival at the gate.
+    * No seat availability, because this system holds no capacity data. The result says
+      "reachable", never "available".
+    """
+    candidates = [
+        flight
+        for flight in flights.values()
+        if flight.flight_id != onward.flight_id
+        and flight.origin_icao == onward.origin_icao
+        and flight.destination_icao == onward.destination_icao
+        and flight.revised_departure >= earliest_arrival
+    ]
+    candidates.sort(key=lambda flight: (flight.revised_departure, flight.flight_id))
+    return [flight.flight_id for flight in candidates[:MAX_ALTERNATIVES]]
+
+
 def find_at_risk_connections(
     *,
     itineraries: list[Itinerary],
     flights: dict[int, SegmentFlight],
     minimum_connection_minutes: int = DEFAULT_MINIMUM_CONNECTION_MINUTES,
     affected_flight_ids: set[int] | None = None,
+    near_miss_minutes: int = DEFAULT_NEAR_MISS_MINUTES,
 ) -> ConnectionAssessment:
     """Walk each itinerary and report the first connection that no longer works.
 
     Deterministic: itineraries are processed in booking-id order and each contributes at
     most one result, so the count does not depend on input ordering.
+
+    Phase 2 additions are all *additive to the same walk*, deliberately: `slack_minutes`,
+    the near-miss set and the alternatives are read off connections this function was already
+    examining. No new pass, no second threshold that could disagree with the first, and the
+    count of broken connections is untouched.
     """
     broken: list[BrokenConnection] = []
+    near_misses: list[HeldConnection] = []
     connecting = 0
     single = 0
 
@@ -181,10 +278,26 @@ def find_at_risk_connections(
                 continue
 
             earliest = inbound.revised_arrival + timedelta(minutes=minimum_connection_minutes)
+            slack = int((onward.scheduled_departure - earliest).total_seconds() // 60)
+
             if earliest <= onward.scheduled_departure:
+                # Holds. Retained only when it holds narrowly: this is the set that breaks
+                # if the delay grows, and it is never counted among the broken.
+                if 0 <= slack <= near_miss_minutes:
+                    near_misses.append(
+                        HeldConnection(
+                            booking_id=itinerary.booking_id,
+                            pnr=itinerary.pnr,
+                            inbound_flight_number=inbound.flight_number,
+                            onward_flight_number=onward.flight_number,
+                            connection_airport_icao=inbound.destination_icao,
+                            slack_minutes=slack,
+                        )
+                    )
+                    break
                 continue
 
-            shortfall = int((onward.scheduled_departure - earliest).total_seconds() // 60)
+            shortfall = slack
             broken.append(
                 BrokenConnection(
                     booking_id=itinerary.booking_id,
@@ -206,6 +319,10 @@ def find_at_risk_connections(
                     connection_airport_icao=inbound.destination_icao,
                     minimum_connection_minutes=minimum_connection_minutes,
                     shortfall_minutes=shortfall,
+                    slack_minutes=slack,
+                    alternative_flight_ids=_schedule_feasible_alternatives(
+                        onward=onward, earliest_arrival=earliest, flights=flights
+                    ),
                     recovered_by_onward_delay=earliest <= onward.revised_departure,
                 )
             )
@@ -218,6 +335,8 @@ def find_at_risk_connections(
         connecting_itineraries_examined=connecting,
         single_segment_itineraries=single,
         minimum_connection_minutes=minimum_connection_minutes,
+        near_misses=sorted(near_misses, key=lambda item: (item.slack_minutes, item.booking_id)),
+        near_miss_minutes=near_miss_minutes,
     )
 
 
@@ -293,6 +412,17 @@ class ConnectionService:
                 "single_segment_itineraries": assessment.single_segment_itineraries,
                 "recovered_by_onward_delay_count": len(recovered),
                 "at_risk": [item.model_dump(mode="json") for item in assessment.at_risk],
+                # Connections that hold, but narrowly. Reported alongside the broken set so a
+                # controller sees how much further the delay can grow before this gets worse.
+                "near_miss_count": assessment.near_miss_count,
+                "near_miss_minutes": assessment.near_miss_minutes,
+                "near_misses": [item.model_dump(mode="json") for item in assessment.near_misses],
+                "margin_note": assessment.margin_note,
+                "alternatives_note": (
+                    "Alternative flights are schedule feasible only. This system holds no "
+                    "seat availability or capacity data, so an alternative means the "
+                    "departure is late enough to be reachable — never that a seat exists."
+                ),
             },
             evidence_refs=sorted(set(evidence)),
             provenance_kind=ProvenanceKind.synthetic.value,

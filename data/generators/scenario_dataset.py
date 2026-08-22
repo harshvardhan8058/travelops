@@ -48,6 +48,7 @@ from app.services.delay_risk import (
 from app.services.delay_risk import (
     DEFAULT_RULESET,
 )
+from app.services.passenger_impact import DEFAULT_RULESET as PASSENGER_PRIORITY_RULESET
 from data.generators import SEED
 from data.generators.cascade_spec import BENGALURU_STORM, CascadeScenario
 
@@ -434,6 +435,16 @@ def _build_hotels(rng: random.Random, scenario: CascadeScenario) -> list[HotelRo
     return hotels
 
 
+PASSENGER_IMPACT_SERVICE = "passenger_impact"
+PASSENGER_IMPACT_KEY = "priority_ruleset"
+CREW_IMPACT_SERVICE = "crew_impact"
+CREW_EXPANSION_KEY = "max_expansion_depth"
+
+#: Direct impacts only by default. The nine rotations the demo quotes are the direct set, and
+#: seeding a deeper default would move that headline without anyone deciding to.
+CREW_MAX_EXPANSION_DEPTH = 1
+
+
 def _build_constraints() -> list[ConstraintRow]:
     """Thresholds as data, so no service holds a literal.
 
@@ -482,5 +493,30 @@ def _build_constraints() -> list[ConstraintRow]:
             is_hard=False,
             version="v1",
             description="Occupancy assumption used to convert passengers into rooms required.",
+        ),
+        # ------------------------------------------------------------------ Phase 2 rulesets
+        ConstraintRow(
+            service=PASSENGER_IMPACT_SERVICE,
+            constraint_key=PASSENGER_IMPACT_KEY,
+            constraint_value=PASSENGER_PRIORITY_RULESET,
+            is_hard=False,
+            version=str(PASSENGER_PRIORITY_RULESET["version"]),
+            description=(
+                "Weights for the passenger priority index. Held as data because the ranking "
+                "that decides who gets one of 87 rooms is a policy question, and an operator "
+                "must be able to see and change it with an audit trail."
+            ),
+        ),
+        ConstraintRow(
+            service=CREW_IMPACT_SERVICE,
+            constraint_key=CREW_EXPANSION_KEY,
+            constraint_value={"depth": CREW_MAX_EXPANSION_DEPTH},
+            is_hard=True,
+            version="v1",
+            description=(
+                "How far the crew cascade may be followed. 1 means direct impacts only, which "
+                "is the figure the demo quotes. Bounded from data so the walk always terminates "
+                "and widening it is a recorded decision."
+            ),
         ),
     ]
