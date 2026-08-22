@@ -358,6 +358,76 @@ where calibrated; elsewhere we show a risk level with its contributing factors.
 
 ---
 
+## Phase 2 architecture decisions — **final**
+
+Settled by the team at the close of Phase 1 planning review, binding on all four streams.
+
+> **Label warning.** These were handed down as "D1, D2, D3". That collides with
+> [D1 — airports](#d1--airports), [D2 — retrieval strategy](#d2--retrieval-strategy-skip-vectors-for-the-mvp)
+> and [D3 — regulatory policy](#d3--regulatory-policy-architecture-settled-source-verification-outstanding)
+> above, **and** with Stream D's dependency asks D1–D7 in their Phase 2 plan. They are recorded here as
+> **P2-D1/2/3** so a reviewer can never resolve the wrong one. Cite the prefixed form.
+
+### P2-D1 — plan-level assurance is **incident-group scoped**
+
+A plan-level assurance summary spans the **disruption group**, not a single incident's plan. One
+operator view covers the whole network event.
+
+This does not weaken the invariant that **the gate authorises actions**. The summary aggregates per
+action across every member incident; it is a reporting scope, not a new authorisation scope. Group
+figures remain unions, never sums (see [A2 — cascading disruption](#a2--cascading-disruption-the-significant-change)).
+
+### P2-D2 — what-if is **in scope**, bounded to zero-write deterministic re-evaluation
+
+**This is the boundary, and it is the point of this entry.** What-if is:
+
+- a **re-evaluation** of the *same recorded facts* through the *same deterministic* checks and services;
+- **zero-write** — it persists nothing: no `assurance_evaluation`, no `action`, no state change, no
+  `decision_log` row;
+- **bounded** — it varies only declared inputs (candidate plan shape, policy cause), never world state.
+
+It is **explicitly not a simulation engine and not a digital twin.** Those remain deferred
+(*Nice to have*, above). Concretely, what-if must never:
+
+- model or project future world state (weather, traffic, capacity) beyond what is recorded;
+- emit a predicted delay, cost or outcome; or
+- claim any figure not traceable to a stored fact.
+
+The enforcement is structural, not a convention: the response contract carries
+`basis: Literal["recorded_evidence"]`, so it **cannot express a projection**, and a test asserts row
+counts are identical before and after. If a future request needs projected figures, that is a change
+to this entry and to the deferred list — not an extension of what-if.
+
+Why this is safe to include when the simulation engine is not: a re-evaluation adds **no new
+subsystem**. It reuses the gate and the services that already exist, which is why
+[`08-blueprint-backlog.md`](08-blueprint-backlog.md) could call replay "nearly free" and the twin
+expensive. What-if under P2-D2 is on the cheap side of that line.
+
+### P2-D3 — plan approval covers low/medium risk only, and never failed evidence
+
+An operator may approve a plan, and that approval may authorise its **low and medium** risk actions.
+
+- **High-risk actions always require their own action-level approval.** A plan approval never
+  substitutes for one. This preserves the Phase 1 behaviour where the high-risk notification was held
+  until a person approved that action.
+- **Approval covers risk, never failed evidence.** A `FAIL` on any of the six checks —
+  `evidence_complete`, `sources_fresh`, `entities_valid`, `policy_compliant`, `no_conflicts`,
+  `action_risk` — is **not approvable at plan level, at any risk tier**. Fail-closed is not
+  delegable: an operator may accept exposure, but may not assert a fact the evidence does not support.
+
+Restated against [`18-decision-assurance-gate.md`](18-decision-assurance-gate.md), a plan approval may
+satisfy `needs_human` **only** when the tier is low or medium **and** no check has failed. The gate's
+rules are unchanged; P2-D3 narrows only *what a human's signature is allowed to stand in for*.
+
+### Phase 2 cut order
+
+**Open-Meteo / historical provider expansion is non-critical and is cut before any core Phase 2
+feature.** Forecast retrieval (FR-2) and the historical archive described in
+[`10-data-sources.md`](10-data-sources.md) are enhancements; the recorded METAR path already carries
+the demo. If Phase 2 runs short, this goes first.
+
+---
+
 ## Mentor review — resolutions
 
 Five review comments on the submitted deck. The deck is fixed; these are resolved in the build and docs.
