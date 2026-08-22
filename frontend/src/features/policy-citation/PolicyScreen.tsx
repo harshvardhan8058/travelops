@@ -1,0 +1,336 @@
+/**
+ * Policy and citation — `/policy/:incidentId`. docs/27 screen 5.
+ *
+ * Also hosts what-if variant 1 under P2-D2: the cause re-evaluation the policy engine already
+ * returns. Zero-write by construction — it is a GET — deterministic, and it renders the rules
+ * engine's own `formula_used` verbatim. Nothing here is computed client-side.
+ *
+ * Owner: Stream D.
+ */
+
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { AlertTriangle, Scale } from 'lucide-react';
+import { clsx } from 'clsx';
+
+import { api, ApiError } from '@/api/client';
+import type { Entitlement, PolicyResponse } from '@/api/types';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  MonoValue,
+  Panel,
+  StateBadge,
+} from '@/components/ui/primitives';
+
+type CauseView = 'recorded' | 'alternative';
+
+/** The pack badge renders `ui_label` verbatim. There is no manual override, ever. */
+function PackStatusBanner({ policy }: { policy: PolicyResponse }) {
+  const verified = policy.pack.status === 'approved' && policy.pack.verified_mode_eligible;
+  return (
+    <div
+      className={clsx(
+        'flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2',
+        verified ? 'border-state-ok/30 bg-state-ok-bg' : 'border-state-warn/30 bg-state-warn-bg',
+      )}
+    >
+      <Scale
+        size={14}
+        strokeWidth={1.5}
+        className={verified ? 'text-state-ok' : 'text-state-warn'}
+        aria-hidden
+      />
+      {/*
+        No `uppercase`: the pack label carries meaningful case ("MoCA", "CAR") and this badge is a
+        citation, not a heading. A CSS transform here would misquote the regulation's own name.
+      */}
+      <span
+        className={clsx('text-label font-medium', verified ? 'text-state-ok' : 'text-state-warn')}
+      >
+        {policy.pack.ui_label}
+      </span>
+      <span className="text-caption text-fg-muted">
+        pack <MonoValue muted>{policy.pack.id}</MonoValue> {policy.pack.version} · status{' '}
+        <MonoValue muted>{policy.pack.status}</MonoValue> · hash{' '}
+        <MonoValue muted>{policy.pack.pack_hash}</MonoValue>
+      </span>
+    </div>
+  );
+}
+
+function EntitlementRow({ entitlement }: { entitlement: Entitlement }) {
+  const notOwed = entitlement.outcome === 'not_owed';
+  return (
+    <li className="border-b border-border-subtle px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-body text-fg">{entitlement.type.replace(/_/g, ' ')}</span>
+        {/* "Not owed" is a RESULT, displayed as one — never an absence or an empty cell. */}
+        {notOwed ? (
+          <StateBadge status="skipped" label="not owed" />
+        ) : (
+          <StateBadge status="approved" label={entitlement.outcome} />
+        )}
+        {entitlement.amount_inr !== undefined && (
+          <MonoValue className={notOwed ? 'text-fg-muted' : 'text-fg'}>
+            {entitlement.currency ?? 'INR'} {entitlement.amount_inr}
+          </MonoValue>
+        )}
+        {entitlement.cash === false && (
+          <span className="text-caption uppercase text-fg-muted">non-cash</span>
+        )}
+      </div>
+
+      <p className="mt-1 text-caption text-fg-secondary">{entitlement.explanation}</p>
+
+      <dl className="mt-1.5 flex flex-col gap-1">
+        <Field label="rules fired">
+          {entitlement.rules_fired.map((rule) => (
+            <MonoValue key={rule} muted className="mr-2 text-caption">
+              {rule}
+            </MonoValue>
+          ))}
+        </Field>
+        <Field label="clauses">
+          {entitlement.source_clause_refs.map((ref) => (
+            <MonoValue key={ref} muted className="mr-2 text-caption">
+              {ref}
+            </MonoValue>
+          ))}
+        </Field>
+        {entitlement.reason_codes && entitlement.reason_codes.length > 0 && (
+          <Field label="reason codes">
+            {entitlement.reason_codes.map((code) => (
+              <MonoValue key={code} muted className="mr-2 text-caption">
+                {code}
+              </MonoValue>
+            ))}
+          </Field>
+        )}
+        {entitlement.input_facts && (
+          <Field label="input facts">
+            <MonoValue muted className="break-all text-caption">
+              {JSON.stringify(entitlement.input_facts)}
+            </MonoValue>
+          </Field>
+        )}
+        {entitlement.options && entitlement.options.length > 0 && (
+          <Field label="options">
+            {entitlement.options.map((option) => (
+              <MonoValue key={option} muted className="mr-2 text-caption">
+                {option}
+              </MonoValue>
+            ))}
+          </Field>
+        )}
+      </dl>
+    </li>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-[92px] shrink-0 text-caption uppercase text-fg-muted">{label}</dt>
+      <dd className="min-w-0 flex-1">{children}</dd>
+    </div>
+  );
+}
+
+export function PolicyScreen() {
+  const { incidentId = '' } = useParams();
+  const [view, setView] = useState<CauseView>('recorded');
+
+  const policyQuery = useQuery({
+    queryKey: ['policy', incidentId],
+    queryFn: () => api.policy(incidentId),
+    enabled: incidentId.length > 0,
+  });
+
+  if (policyQuery.isLoading) {
+    return (
+      <Panel title="Policy">
+        <div className="h-[420px]">
+          <LoadingState label="Loading policy evaluation" />
+        </div>
+      </Panel>
+    );
+  }
+
+  if (policyQuery.error || !policyQuery.data) {
+    const error = policyQuery.error instanceof ApiError ? policyQuery.error : null;
+    return (
+      <ErrorState
+        code={error?.code ?? 'INTERNAL_ERROR'}
+        message={error?.message ?? `Could not load the policy evaluation for ${incidentId}.`}
+        correlationId={error?.correlationId ?? null}
+        onRetry={() => void policyQuery.refetch()}
+      />
+    );
+  }
+
+  const policy = policyQuery.data;
+  const comparison = policy.cause_comparison;
+  const alternative = (comparison?.['alternative'] ?? null) as Record<string, unknown> | null;
+  const comparisonEnabled = Boolean(comparison?.['enabled']) && alternative !== null;
+  const missingFacts = policy.applicability.flatMap((entry) => entry.missing_facts ?? []);
+
+  return (
+    <div className="flex min-h-0 flex-col gap-3">
+      <Panel>
+        <PackStatusBanner policy={policy} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
+          <span className="text-caption uppercase text-fg-muted">
+            mode <MonoValue muted>{policy.policy_mode}</MonoValue>
+          </span>
+          <span className="text-caption uppercase text-fg-muted">
+            authority <span className="text-fg-secondary">{policy.pack.authority}</span>
+          </span>
+          <span className="text-caption uppercase text-fg-muted">
+            document <span className="text-fg-secondary">{policy.pack.document}</span>
+          </span>
+          <span className="text-caption uppercase text-fg-muted">
+            source hash <MonoValue muted>{policy.pack.source_hash}</MonoValue>
+          </span>
+        </div>
+      </Panel>
+
+      {missingFacts.length > 0 && (
+        <Panel>
+          <p className="flex items-start gap-2 px-3 py-2 text-caption text-state-warn">
+            <AlertTriangle size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
+            <span>
+              Required facts are missing, so the result is{' '}
+              <MonoValue className="text-state-warn">needs_human</MonoValue> rather than a guessed
+              number: {missingFacts.map((fact) => fact).join(', ')}
+            </span>
+          </p>
+        </Panel>
+      )}
+
+      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-3">
+        <Panel
+          title="Entitlements"
+          actions={
+            comparisonEnabled && (
+              <div role="radiogroup" aria-label="Cause" className="flex items-center gap-1">
+                {(
+                  [
+                    ['recorded', 'Recorded cause'],
+                    ['alternative', 'Re-evaluated cause'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={view === value}
+                    onClick={() => setView(value)}
+                    className={clsx(
+                      'rounded-sm border px-2 py-0.5 text-label uppercase',
+                      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                      view === value
+                        ? 'border-accent-border bg-accent-subtle text-accent'
+                        : 'border-border-subtle text-fg-muted',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )
+          }
+        >
+          {view === 'recorded' ? (
+            policy.entitlements.length === 0 ? (
+              <EmptyState
+                title="No entitlements evaluated"
+                description="The rules engine returned no entitlement rows for this event."
+              />
+            ) : (
+              <ul aria-live="polite">
+                {policy.entitlements.map((entitlement) => (
+                  <EntitlementRow key={entitlement.type} entitlement={entitlement} />
+                ))}
+              </ul>
+            )
+          ) : (
+            <div className="px-3 py-2" aria-live="polite">
+              {/* Zero-write re-evaluation: the engine's own alternative, rendered verbatim. */}
+              <div className="mb-2 flex items-center gap-2">
+                <StateBadge status="scheduled" label="re-evaluated" />
+                <span className="text-caption text-fg-muted">
+                  {String(comparison?.['description'] ?? 'recomputed under a different cause')}
+                </span>
+              </div>
+              <dl className="flex flex-col gap-1">
+                {Object.entries(alternative ?? {}).map(([key, value]) => (
+                  <Field key={key} label={key.replace(/_/g, ' ')}>
+                    {Array.isArray(value) ? (
+                      value.map((item) => (
+                        <MonoValue key={String(item)} muted className="mr-2 text-caption">
+                          {String(item)}
+                        </MonoValue>
+                      ))
+                    ) : (
+                      <MonoValue className="break-all">{String(value)}</MonoValue>
+                    )}
+                  </Field>
+                ))}
+              </dl>
+              <p className="mt-2 text-caption text-fg-muted">
+                A bounded re-evaluation of recorded facts under a different cause. Nothing was
+                written, no state changed, and no outcome is predicted.
+              </p>
+            </div>
+          )}
+        </Panel>
+
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+          <Panel title="Cause assessment">
+            <dl className="flex flex-col gap-1 px-3 py-2">
+              {Object.entries(policy.cause_assessment).map(([key, value]) => (
+                <Field key={key} label={key.replace(/_/g, ' ')}>
+                  {Array.isArray(value) ? (
+                    value.map((item) => (
+                      <MonoValue key={String(item)} muted className="mr-2 break-all text-caption">
+                        {String(item)}
+                      </MonoValue>
+                    ))
+                  ) : (
+                    <span className="text-caption text-fg-secondary">{String(value)}</span>
+                  )}
+                </Field>
+              ))}
+            </dl>
+          </Panel>
+
+          {policy.excluded_rules.length > 0 && (
+            <Panel title="Excluded rules">
+              <ul className="flex flex-col gap-2 px-3 py-2">
+                {policy.excluded_rules.map((rule) => (
+                  <li key={rule.rule_key} className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-1.5">
+                      <MonoValue>{rule.rule_key}</MonoValue>
+                      <StateBadge status="skipped" label={rule.status.replace(/_/g, ' ')} />
+                    </span>
+                    <span className="text-caption text-fg-muted">{rule.reason}</span>
+                    <span className="text-caption text-fg-muted">
+                      evaluated: <MonoValue muted>{String(rule.evaluated)}</MonoValue>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
+
+          <Panel title="Disclaimer">
+            <p className="px-3 py-2 text-caption text-fg-muted">{policy.disclaimer}</p>
+          </Panel>
+        </div>
+      </div>
+    </div>
+  );
+}

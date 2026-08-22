@@ -94,11 +94,14 @@ function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
         <ModeChip label="NOTIFY" value={mode?.notification_mode ?? '…'} />
       </div>
 
-      {/* Renders the pack's real status verbatim. Never upgraded by hand. */}
+      {/*
+        Renders the pack's real status verbatim. Never upgraded by hand, and never case-transformed:
+        the label is a regulation's name ("MoCA", "CAR"), so `uppercase` would misquote it.
+      */}
       {mode?.policy_pack?.ui_label && (
         <span
           className={clsx(
-            'truncate rounded-sm border px-1.5 py-0.5 text-caption uppercase',
+            'truncate rounded-sm border px-1.5 py-0.5 text-caption',
             mode.policy_mode === 'verified'
               ? 'border-state-ok/30 bg-state-ok-bg text-state-ok'
               : 'border-state-warn/30 bg-state-warn-bg text-state-warn',

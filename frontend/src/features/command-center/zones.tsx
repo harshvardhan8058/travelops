@@ -1,31 +1,26 @@
 /**
- * Ops Board — the default route and the opening shot of the demo.
+ * Command Center zones: the network strip and the flight board.
  *
- * Answers the controller's first question: what is broken, and how bad is it?
+ * Lifted from the Phase 1 Ops Board, which becomes a zone rather than a route. The Phase 1
+ * behaviour is preserved exactly — sortable rows arrive from the parent already ordered, the
+ * risk popover is the same `flightRiskDerivation`, and every count still comes from the payload.
  *
- * Owner: Stream E. Wave 0 ships the network strip and flight board against fixtures so the
- * layout, density and token usage are settled before features land on top.
+ * Owner: Stream D.
  */
 
-import { useQuery } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 
-import { api } from '@/api/client';
 import type { AirportConditions, FlightRow } from '@/api/types';
 import {
   AgeIndicator,
   EmptyState,
-  ErrorState,
-  LoadingState,
   MonoValue,
-  Panel,
   ProvenanceDot,
   RiskChip,
   StateBadge,
   WhyPopover,
 } from '@/components/ui/primitives';
-import { ApiError } from '@/api/client';
 import { flightRiskDerivation } from '@/components/ui/derivation';
 
 function timeOf(iso: string | null): string {
@@ -33,7 +28,7 @@ function timeOf(iso: string | null): string {
   return new Date(iso).toISOString().slice(11, 16);
 }
 
-function AirportTile({ airport }: { airport: AirportConditions }) {
+export function AirportTile({ airport }: { airport: AirportConditions }) {
   return (
     <div className="flex min-w-[168px] flex-col gap-1.5 rounded border border-border-subtle bg-surface p-2">
       <div className="flex items-center justify-between">
@@ -74,7 +69,7 @@ function AirportTile({ airport }: { airport: AirportConditions }) {
   );
 }
 
-function FlightBoard({
+export function FlightBoard({
   flights,
   network,
 }: {
@@ -218,47 +213,13 @@ function FlightBoard({
   );
 }
 
-export function OpsBoard() {
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['flights'],
-    queryFn: api.flights,
-    refetchInterval: 15_000,
-  });
-
-  if (isLoading) return <LoadingState label="Loading operations" />;
-
-  if (error) {
-    const apiError = error instanceof ApiError ? error : null;
-    return (
-      <ErrorState
-        code={apiError?.code ?? 'INTERNAL_ERROR'}
-        message={apiError?.message ?? 'Could not load the flight board'}
-        correlationId={apiError?.correlationId ?? null}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
-
+/** The airport strip. Data arrives from the Command Center; this zone only renders. */
+export function NetworkStrip({ network }: { network: AirportConditions[] }) {
   return (
-    <div className="flex flex-col gap-3">
-      <Panel title="Network">
-        <div className="flex gap-2 overflow-x-auto p-2">
-          {data?.network.map((airport) => (
-            <AirportTile key={airport.airport_icao} airport={airport} />
-          ))}
-        </div>
-      </Panel>
-
-      <Panel
-        title="Flight board"
-        actions={
-          <span className="text-caption text-fg-muted">
-            {api.usingFixtures ? 'fixture data' : 'live API'}
-          </span>
-        }
-      >
-        <FlightBoard flights={data?.flights ?? []} network={data?.network ?? []} />
-      </Panel>
+    <div className="flex gap-2 overflow-x-auto p-2">
+      {network.map((airport) => (
+        <AirportTile key={airport.airport_icao} airport={airport} />
+      ))}
     </div>
   );
 }

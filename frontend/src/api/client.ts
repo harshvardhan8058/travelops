@@ -14,6 +14,9 @@ import type {
   FlightsResponse,
   IncidentDetail,
   IncidentGroupDetail,
+  IncidentGroupsResponse,
+  ReportResponse,
+  SourcesResponse,
   PolicyResponse,
   ReadyStatus,
   RunResponse,
@@ -112,14 +115,15 @@ export const api = {
   systemMode: () => request<SystemMode>('/system/mode'),
   ready: () => request<ReadyStatus>('/health/ready'),
   flights: () => request<FlightsResponse>('/flights'),
-  sources: () => request<unknown>('/sources'),
+  sources: () => request<SourcesResponse>('/sources'),
+  incidentGroups: () => request<IncidentGroupsResponse>('/incident-groups'),
 
   incident: (id: string) => request<IncidentDetail>(`/incidents/${id}`),
   timeline: (id: string) => request<TimelineResponse>(`/incidents/${id}/timeline`),
   assurance: (id: string) => request<AssuranceResponse>(`/incidents/${id}/assurance`),
   policy: (id: string) => request<PolicyResponse>(`/incidents/${id}/policy`),
   incidentGroup: (id: string) => request<IncidentGroupDetail>(`/incident-groups/${id}`),
-  report: (id: string) => request<unknown>(`/reports/${id}`),
+  report: (id: string) => request<ReportResponse>(`/reports/${id}`),
 
   /**
    * Advance the workflow. Stopping at `awaiting_approval` is a SUCCESS response with

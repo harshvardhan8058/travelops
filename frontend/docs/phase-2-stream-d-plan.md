@@ -703,3 +703,83 @@ Four claims a reviewer should be able to test in under a minute each, on any sur
 
 The console is the argument. If a judge believes the interface, they believe the audit trail behind
 it — which is the only reason any of this styling matters.
+
+
+---
+
+## 18. Answers to Stream A's open confirmations (D-3, D-5, D-7)
+
+`docs/34-phase2-contract-alignment.md` §4 leaves three rows addressed to Stream D. Answering them
+here rather than in a PR comment, so the answer is versioned next to the plan it constrains.
+
+### D-7 — one group assurance endpoint, not client fan-out. **Confirmed.**
+
+`GET /api/v1/incident-groups/{ref}/assurance` returning `GroupAssuranceSummary`. A read the plan
+correctly. Client-side fan-out over eight incidents is wrong for a reason beyond request count: a
+partial failure would render as a smaller set of blocked actions, which reads as *better* news than
+the truth. A group approval screen that under-reports blockers because one request failed is worse
+than one that refuses to render. One endpoint fails once, visibly.
+
+### D-3 — A5's plan-comparison contract satisfies D's what-if surface. **Confirmed, with the boundary named.**
+
+P2-D2 grants a **plan-comparison** what-if, not an operational one. Concretely, what the UI will and
+will not offer:
+
+| Offered | Not offered |
+| --- | --- |
+| Re-evaluate the **same recorded evidence** under a different candidate plan, and show the six checks for each | Edit a delay, a passenger count or a weather value and ask what would happen |
+| Show the **recorded cause** versus an **alternative cause the engine already computes**, as the policy screen does today | Project a world state, an outcome, or a cost that no stored fact supports |
+| State on screen that nothing was written | Any wording that implies a simulation engine or a twin |
+
+C2-8 is **not** deferred to Phase 3. The plan's earlier note contemplating that predates the
+one-increment delivery model and is superseded by this section.
+
+The structural guarantee matters more than the wording: A5's `basis: Literal["recorded_evidence"]`
+means a response that is not a re-evaluation of stored facts cannot be represented in the contract
+at all. The UI should render `basis` rather than assert the boundary in prose — a label the server
+sends is auditable, and a sentence in a component is not.
+
+**Precondition D depends on:** the comparison endpoint must be zero-write in the HTTP sense as well
+as the domain sense — no `Idempotency-Key`, and safe to call on every keystroke of a filter. The
+current verification asserts zero `POST`/`PUT`/`PATCH`/`DELETE` during read-only browsing; a
+what-if that POSTs would break that assertion by design, so it needs to be a `GET`, or a `POST`
+explicitly exempted and documented as such.
+
+### D-5 — exact shape for `warn_permitted_by_config`. **Per check, not per evaluation.**
+
+A asks for the shape and notes it is on no model today. It belongs on `CheckResult`, not on the
+evaluation, because permission is per check by configuration: a `WARN` on `freshness` may be
+tolerated while a `WARN` on `policy` is not, and a single evaluation-level boolean cannot express
+that. The current `CheckResult` is `{name, state, reason_code, reason, tier, evidence_refs}`.
+
+Requested addition:
+
+```jsonc
+{
+  "name": "freshness",
+  "state": "warn",
+  "reason_code": "observation_age_within_tolerance",
+  "reason": "Observation is 41 minutes old; tolerance is 60.",
+  "tier": "medium",
+  "evidence_refs": [],
+
+  // NEW — both keys always present, never inferred by the client.
+  "warn_permitted_by_config": true,
+  "warn_permitted_by": "checks.freshness.warn_permitted"   // null when the field is false
+}
+```
+
+Two properties this shape has that a bare boolean does not:
+
+1. **The UI can cite the rule instead of asserting it.** `warn_permitted_by` gives the popover a
+   config key to name, alongside the `config_version` and `config_hash` already displayed. Without
+   it the interface would be claiming "this warning is acceptable" on its own authority, which is
+   exactly the kind of unsourced claim the rest of this plan exists to prevent.
+2. **`false` is distinguishable from "not evaluated".** Both keys always present means a missing
+   field is a contract violation rather than a silent `false`. A permitted warning and an
+   unpermitted one look different on screen; a client-side default would make them look the same.
+
+Rendering: a permitted `WARN` shows as `WARN · permitted` with the config key in its popover and
+does **not** appear in the blocking list. An unpermitted `WARN` appears in the blocking list with
+the other blockers. Per P2-D3, neither can be cleared by a plan approval — approval covers risk,
+never failed or unpermitted evidence.
