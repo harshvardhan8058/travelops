@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/primitives';
 import { elapsedDerivation } from '@/components/ui/derivation';
 import { AssurancePanel } from '@/features/assurance/AssurancePanel';
+import { PlanAssuranceMatrix } from '@/features/assurance/PlanAssuranceMatrix';
 import { EvidenceColumn } from './EvidenceColumn';
 import { PlanColumn } from './PlanColumn';
 import { ActionsStrip } from './ActionsStrip';
@@ -475,6 +476,22 @@ export function RecoveryWorkspace() {
           )}
         </div>
       </div>
+
+      {/*
+       * Plan-level assurance: the gate across the whole plan, not one task at a time. D1 scopes
+       * this to the incident group; the group view needs FE-8, so this is the per-incident matrix
+       * the group view will compose.
+       */}
+      {incident.plan && (
+        <PlanAssuranceMatrix
+          tasks={incident.plan.tasks}
+          evaluations={assuranceQuery.data?.evaluations ?? []}
+          configVersion={assuranceQuery.data?.config_version}
+          configHash={assuranceQuery.data?.config_hash}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={setSelectedTaskId}
+        />
+      )}
 
       <ActionsStrip incident={incident} />
     </div>

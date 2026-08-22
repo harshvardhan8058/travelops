@@ -30,12 +30,19 @@
 
   --fg-primary: #e7edf4;
   --fg-secondary: #9aa8b6;
-  /* Contrast floor, and it has to hold on the DARKEST surface muted text sits on, not just on
-   * --bg-base. The previous #66757f measured 4.01:1 on --bg-base and only 3.74:1 on
-   * --bg-surface, where most muted text actually renders — below the 4.5:1 AA threshold, and
-   * the projector rehearsal made it obvious. This value measures 5.53:1 on --bg-base,
-   * 5.16:1 on --bg-surface, 4.70:1 on --bg-raised and 5.65:1 on --bg-inset. */
-  --fg-muted: #7e8b96;
+  /* Contrast floor, and it has to hold on the LIGHTEST background muted text sits on — which is
+   * not a --bg-* surface at all but a translucent state tint composited over one.
+   *
+   * History, because this token has now been wrong twice for the same reason: #66757f measured
+   * 4.01:1 on --bg-base and 3.74:1 on --bg-surface. #7e8b96 fixed every flat surface (5.53:1
+   * base, 5.16:1 surface, 4.70:1 raised, 5.65:1 inset) but still failed inside tinted bands,
+   * where the tint lightens the background and so REDUCES contrast for light text: 4.09:1 on
+   * accent-subtle over surface (#172d38) and 4.16:1 on the warn tint over surface (#2c2921).
+   *
+   * This value measures 6.35:1 on --bg-base, 5.92:1 on --bg-surface, 5.38:1 on --bg-raised,
+   * 6.51:1 on --bg-inset, 4.73:1 on #172d38 and 4.86:1 on #2c2921 — so the floor now holds
+   * everywhere muted text actually renders, including over a tint. */
+  --fg-muted: #8896a2;
   --fg-inverse: #0b0f14;
 
   /* ------------------------------------------------- accent: instrument cyan */

@@ -1,11 +1,11 @@
 /**
  * Route table and shell wiring.
  *
- * Wave 0 implements the Ops Board and the Decision Timeline. Every other route renders a
- * placeholder naming its owning stream and its specification section, so nobody has to
- * guess what belongs where.
+ * The Decision Timeline and the blocked-actions bar live above the router outlet and follow the
+ * incident named in the path, so a rail showing one incident beside a workspace showing another
+ * is impossible.
  *
- * Owner: Stream E.
+ * Owner: Stream D.
  */
 
 import { useEffect, useState } from 'react';
@@ -14,20 +14,18 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/api/client';
 import { AppShell } from '@/components/ui/AppShell';
-import { OpsBoard } from '@/features/ops-board/OpsBoard';
+import { CommandCenter } from '@/features/command-center/CommandCenter';
+import { CascadeExplorer } from '@/features/cascade/CascadeExplorer';
 import { RecoveryWorkspace } from '@/features/incident/RecoveryWorkspace';
+import { PolicyScreen } from '@/features/policy-citation/PolicyScreen';
+import { ReplayScreen } from '@/features/replay/ReplayScreen';
+import { SourcesLedger } from '@/features/sources/SourcesLedger';
 import { DecisionTimeline } from '@/features/timeline/DecisionTimeline';
 import { StreamPlaceholder } from '@/features/placeholder/StreamPlaceholder';
 
-/** Used only when the current route names no incident, e.g. the Ops Board. */
+/** Used only when the current route names no incident, e.g. the Command Center. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
-/**
- * The Decision Timeline and the blocked-actions bar live in the shell, above the router
- * outlet, so they cannot read route params. Matching the path keeps them following whatever
- * incident the operator is actually looking at — a timeline showing a different incident from
- * the workspace beside it would be actively misleading.
- */
 function useRouteIncidentId(fallback: string): string {
   const { pathname } = useLocation();
   const match = /^\/(?:incidents|policy|replay|reports)\/([^/]+)/.exec(pathname);
@@ -54,8 +52,6 @@ export function App() {
     refetchInterval: 30_000,
   });
 
-  // Drives the persistent blocked-actions bar. Shares its cache key with the workspace, so a
-  // recorded decision refreshes both.
   const { data: assurance } = useQuery({
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
@@ -70,45 +66,24 @@ export function App() {
       timeline={<DecisionTimeline incidentId={incidentId} />}
     >
       <Routes>
-        <Route path="/" element={<OpsBoard />} />
-        <Route
-          path="/cascade/:groupId"
-          element={
-            <StreamPlaceholder
-              screen="Cascade view"
-              owner="Stream D"
-              spec="docs/27-ui-specification.md screen 3"
-            />
-          }
-        />
+        <Route path="/" element={<CommandCenter />} />
+        <Route path="/cascade/:groupId" element={<CascadeExplorer />} />
         <Route path="/incidents/:incidentId" element={<RecoveryWorkspace />} />
+        <Route path="/policy/:incidentId" element={<PolicyScreen />} />
+        <Route path="/replay/:incidentId" element={<ReplayScreen />} />
+        <Route path="/sources" element={<SourcesLedger />} />
+        {/*
+         * Not yet built, and blocked on backend contracts rather than on effort:
+         *   /assurance      group-scoped approval queue — needs FE-8 and FE-10
+         *   /reports/:id    executive report — buildable, sequenced after C2-8
+         */}
         <Route
           path="/assurance"
           element={
             <StreamPlaceholder
-              screen="Approval queue"
+              screen="Group approval queue"
               owner="Stream D"
-              spec="docs/27-ui-specification.md screen 4"
-            />
-          }
-        />
-        <Route
-          path="/policy/:incidentId"
-          element={
-            <StreamPlaceholder
-              screen="Policy and citation"
-              owner="Stream D"
-              spec="docs/27-ui-specification.md screen 5"
-            />
-          }
-        />
-        <Route
-          path="/replay/:incidentId"
-          element={
-            <StreamPlaceholder
-              screen="Timeline replay"
-              owner="Stream D"
-              spec="docs/27-ui-specification.md screen 6"
+              spec="Phase 2 C2-5: blocked on FE-8 (group-scoped assurance) and FE-10 (plan decision contract)"
             />
           }
         />
@@ -118,17 +93,7 @@ export function App() {
             <StreamPlaceholder
               screen="Executive report"
               owner="Stream D"
-              spec="docs/27-ui-specification.md screen 7"
-            />
-          }
-        />
-        <Route
-          path="/sources"
-          element={
-            <StreamPlaceholder
-              screen="Provenance ledger"
-              owner="Stream D"
-              spec="docs/27-ui-specification.md screen 8"
+              spec="docs/27-ui-specification.md screen 7, sequenced after C2-8"
             />
           }
         />

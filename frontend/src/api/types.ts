@@ -451,6 +451,49 @@ export interface CrewPairingImpact {
   at_risk: boolean;
 }
 
+/** One row of `GET /incident-groups`. Rollups are counts computed server-side. */
+export interface IncidentGroupSummary {
+  id: number;
+  reference: string;
+  root_cause: string;
+  airport_icao: string;
+  severity: string;
+  state: IncidentState;
+  opened_at: string;
+  rollups: Record<string, number>;
+  awaiting_approval_count: number;
+  provenance: Provenance;
+}
+
+export interface IncidentGroupsResponse {
+  groups: IncidentGroupSummary[];
+}
+
+/** One row of the provenance ledger. The definitive answer to "is any of this real?". */
+export interface SourceRow {
+  name: string;
+  kind: ProvenanceKind;
+  provider: string;
+  current_mode: string;
+  last_checked?: string | null;
+  licence: string;
+  attribution_required?: boolean;
+  health: string;
+  note?: string;
+}
+
+export interface SourcesResponse {
+  sources: SourceRow[];
+}
+
+/** Metrics are derived from recorded rows. An absent metric is absent, never estimated. */
+export interface ReportResponse {
+  incident_reference: string;
+  metrics: Record<string, number | string | null>;
+  narrative: { generated_by: string | null; text: string | null; note?: string };
+  caveats?: string[];
+}
+
 export interface IncidentGroupDetail {
   id: number;
   reference: string;
