@@ -28,7 +28,7 @@ rest of the project cites when deciding what may be claimed.
 | Claim | Observed |
 | --- | --- |
 | The whole chain on the demo machine | `docker compose` on Windows / Docker Desktop 29.x (WSL2), 21 August: healthy datastores → migrations → seed → inject → run → hold → approve → run → `resolved` |
-| `alembic upgrade head`, `make seed`, `make demo` | Also inside the built API image against PostgreSQL 16; seed is 2083 rows at digest `70fbdf8947c638e5` |
+| `alembic upgrade head`, `make seed`, `make demo` | Also inside the built API image against PostgreSQL 16; seed is 2093 rows at digest `fa9564fc4afefc5d` |
 | `POST /run` → `awaiting_approval` → approve → `POST /run` → `resolved` | Real Uvicorn process over HTTP, Redis deliberately unreachable, to prove the bus is optional |
 | Risk 80 / `severe`, six named factors with observed values | `GET /incidents/{ref}` |
 | 8 of 10 connections, 2 rotations, 0 real / 174 simulated notifications | Recorded `action` rows |
@@ -80,8 +80,8 @@ checks in `30-project-status.md` and every UI box in this file remain the demo m
 - [x] Health endpoint confirms database/Redis/provider state. With Redis unreachable,
       `/health/ready` returns 503 and names `redis: down` per dependency rather than failing
       opaquely; `/system/mode` reports modes with no secret in the payload.
-- [x] One command seeds/reset the fixed dataset. `make seed` → 2083 rows, digest
-      `70fbdf8947c638e5`; `make demo-reset` is repeatable and leaves no orphaned rows.
+- [x] One command seeds/reset the fixed dataset. `make seed` → 2093 rows, digest
+      `fa9564fc4afefc5d`; `make demo-reset` is repeatable and leaves no orphaned rows.
 - [x] Startup works without Groq, SMTP or internet. Observed with no `GROQ_API_KEY`,
       `NOTIFICATION_MODE=console` and Redis pointed at an unreachable port.
 

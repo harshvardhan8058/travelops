@@ -91,6 +91,26 @@ class AffectedFlightSpec(BaseModel):
     state: str
     #: Passengers on this flight whose onward segment breaks. Sums to the target of 22.
     at_risk_connections: int
+    #: The flight the disruption group is named for. Declared, because "primary" is an
+    #: editorial fact about the scenario and cannot be recovered from the schedule. Exactly
+    #: one affected flight sets it, and a partial unique index enforces that in the database.
+    is_primary: bool = False
+
+    @property
+    def membership_role(self) -> str:
+        """`incident_group_flight.role` for this flight.
+
+        Arrival versus departure IS a fact about the flight — the group's airport is its
+        destination rather than its origin — so it is derived. Membership itself is not:
+        this method is only ever called for flights already listed in `_AFFECTED`.
+        """
+        if self.is_primary:
+            return "primary"
+        return (
+            "affected_arrival"
+            if self.flight.destination_icao == ROOT_AIRPORT_ICAO
+            else "affected_departure"
+        )
 
 
 class CascadeScenario(BaseModel):
@@ -118,6 +138,21 @@ class CascadeScenario(BaseModel):
         return {
             flight.flight_id: flight for flight in [*self.affected_flights, *self.support_flights]
         }
+
+    @property
+    def membership(self) -> list[tuple[int, str, int]]:
+        """`(flight_id, role, delay_minutes)` for every member flight, ordered by flight id.
+
+        This is the whole declaration of which flights the group covers. Nothing derives
+        membership from `origin_icao == airport_icao`: that query returns seven of the eight,
+        because UK 705 arrives into VOBL rather than departing it. Seven flights still yield
+        nine pairings, so the count looks right while the `onward_duty` mechanism silently
+        vanishes — a wrong answer wearing the right number.
+        """
+        return sorted(
+            (spec.flight.flight_id, spec.membership_role, spec.flight.delay_minutes)
+            for spec in self.affected
+        )
 
     @property
     def at_risk_connections_by_flight(self) -> dict[int, int]:
@@ -148,6 +183,7 @@ _AFFECTED: tuple[AffectedFlightSpec, ...] = (
         ),
         state="executing",
         at_risk_connections=8,
+        is_primary=True,
     ),
     AffectedFlightSpec(
         flight=ScheduledFlight(

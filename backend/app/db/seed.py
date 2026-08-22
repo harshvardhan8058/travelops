@@ -49,6 +49,7 @@ from typing import Any
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.cascade import IncidentGroupFlight
 from app.models.crew import (
     CrewMember,
     CrewPairingAssignment,
@@ -108,6 +109,7 @@ TABLE_ORDER: tuple[str, ...] = (
     "booking",
     "booking_segment",
     "incident_group",
+    "incident_group_flight",
 )
 
 
@@ -436,6 +438,22 @@ def build_seed_plan() -> dict[str, list[dict[str, Any]]]:
         }
     )
 
+    # ---------------------------------------------- group membership, declared not inferred
+    # One row per affected flight, so the eight-flight cascade opens from data rather than
+    # from a query over departure origins that would silently return seven.
+    for row_id, (flight_id, role, delay_minutes) in enumerate(scenario.membership, start=1):
+        plan["incident_group_flight"].append(
+            {
+                "id": row_id,
+                "incident_group_id": 1,
+                "flight_id": flight_id,
+                "role": role,
+                "delay_minutes_at_injection": delay_minutes,
+                "provenance_kind": ProvenanceKind.synthetic,
+                "source_ref": f"cascade_spec:{scenario.scenario_key}",
+            }
+        )
+
     return plan
 
 
@@ -489,6 +507,7 @@ _MODEL_BY_TABLE = {
     "booking": Booking,
     "booking_segment": BookingSegment,
     "incident_group": IncidentGroup,
+    "incident_group_flight": IncidentGroupFlight,
 }
 
 

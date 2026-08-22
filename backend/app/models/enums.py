@@ -148,6 +148,42 @@ class PairingMechanism(StrEnum):
     onward_duty = "onward_duty"
     second_pairing = "second_pairing"
     positioning = "positioning"
+    #: Phase 2. Reached at depth 2: a pairing on a flight that became at risk only because an
+    #: earlier pairing's onward leg failed. Counted separately from the direct set so the
+    #: headline "9 rotations" cannot move when expansion is enabled.
+    downstream_flight = "downstream_flight"
+
+
+#: The mechanisms reachable at depth 1 — a pairing touching an affected flight directly.
+#: The headline "9 rotations" is counted over exactly these, so enabling second-order
+#: expansion can add rows but can never move that number.
+DIRECT_PAIRING_MECHANISMS = frozenset(
+    {
+        PairingMechanism.operating,
+        PairingMechanism.onward_duty,
+        PairingMechanism.second_pairing,
+        PairingMechanism.positioning,
+    }
+)
+
+#: Reachable only at depth >= 2, via bounded expansion.
+EXPANSION_PAIRING_MECHANISMS = frozenset({PairingMechanism.downstream_flight})
+
+
+class PriorityBand(StrEnum):
+    """Band for the deterministic passenger priority index. Not a probability, and not a
+    judgement about whose journey matters more — it records who is most constrained."""
+
+    routine = "routine"
+    elevated = "elevated"
+    high = "high"
+    critical = "critical"
+
+
+class PlanSelectionState(StrEnum):
+    candidate = "candidate"
+    selected = "selected"
+    discarded = "discarded"
 
 
 class ProvenanceKind(StrEnum):

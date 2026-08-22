@@ -26,7 +26,7 @@ from data.generators.build_incident_group_fixture import (
 )
 
 from app.config import REPO_ROOT
-from app.models.enums import PairingMechanism
+from app.models.enums import DIRECT_PAIRING_MECHANISMS, PairingMechanism
 
 TOP_LEVEL_KEYS = {
     "generated_by",
@@ -41,6 +41,10 @@ TOP_LEVEL_KEYS = {
     "rollups",
     "flights",
     "crew_pairings",
+    # Phase 2, additive. Kept in the same frozen-shape test as everything else so a future
+    # addition is a deliberate edit here rather than a drift the console discovers at runtime.
+    "graph",
+    "blast_radius",
     "mechanism_legend",
     "why_nine_not_eight",
     "provenance",
@@ -117,9 +121,11 @@ def test_pairing_row_shape_matches_the_frontend_interface():
         assert set(pairing) == PAIRING_KEYS
 
 
-def test_mechanism_legend_covers_exactly_the_enum():
+def test_mechanism_legend_covers_exactly_the_direct_enum():
+    """The legend documents what the projected cascade can actually show. `downstream_flight`
+    is deliberately absent: the fixture is the unexpanded direct set."""
     legend = _committed()["mechanism_legend"]
-    assert set(legend) == {mechanism.value for mechanism in PairingMechanism}
+    assert set(legend) == {mechanism.value for mechanism in DIRECT_PAIRING_MECHANISMS}
     assert all(text for text in legend.values())
 
 
@@ -196,10 +202,10 @@ def test_mechanism_distribution_is_the_documented_identity():
     }
 
 
-def test_all_four_mechanisms_appear_as_edge_labels():
+def test_all_four_direct_mechanisms_appear_as_edge_labels():
     body = _committed()
     present = {pairing["mechanism"] for pairing in body["crew_pairings"]}
-    assert present == {mechanism.value for mechanism in PairingMechanism}
+    assert present == {mechanism.value for mechanism in DIRECT_PAIRING_MECHANISMS}
 
 
 # --------------------------------------------------------------------------- honesty
@@ -223,3 +229,164 @@ def test_no_pairing_detail_claims_a_legality_decision():
 
 def test_payload_builder_is_deterministic():
     assert build_payload() == build_payload()
+
+
+# ------------------------------------------------------ Phase 2: graph and blast radius
+#
+# The Phase 2 keys are additive. These tests assert both halves of that: the new blocks are
+# present and correct, AND every key the console already read is still there. A fixture change
+# that silently dropped a key Stream D depends on would break the console with no failing test
+# to point at it.
+
+
+def test_the_phase_one_keys_all_survive():
+    """Additive means additive. This is the guard against a helpful refactor."""
+    body = _committed()
+    for key in (
+        "id",
+        "reference",
+        "root_cause",
+        "airport_icao",
+        "severity",
+        "state",
+        "opened_at",
+        "rollups",
+        "flights",
+        "crew_pairings",
+        "mechanism_legend",
+        "why_nine_not_eight",
+        "provenance",
+    ):
+        assert key in body, key
+
+
+def test_the_rollups_are_unchanged_by_the_phase_two_additions():
+    """The five headline numbers are the demo. Adding a graph must not move any of them."""
+    rollups = _committed()["rollups"]
+    assert rollups["flights_affected"] == 8
+    assert rollups["passengers_affected"] == 604
+    assert rollups["connections_at_risk"] == 22
+    assert rollups["candidate_hotels"] == 11
+    assert rollups["crew_pairings_affected"] == 9
+
+
+def test_the_graph_has_one_node_per_declared_flight_and_per_rotation():
+    body = _committed()
+    graph = body["graph"]
+    flight_nodes = [n for n in graph["nodes"] if n["kind"] == "flight"]
+    pairing_nodes = [n for n in graph["nodes"] if n["kind"] == "pairing"]
+    event_nodes = [n for n in graph["nodes"] if n["kind"] == "event"]
+
+    assert len(event_nodes) == 1
+    assert len(flight_nodes) == len(body["flights"]) == 8
+    assert len(pairing_nodes) == len(body["crew_pairings"]) == 9
+
+
+def test_every_graph_node_ref_is_kind_colon_id():
+    """The same addressing as `evidence_refs`, because there is no node table and a node is the
+    row it names. A bare integer id would make the two vocabularies diverge."""
+    for node in _committed()["graph"]["nodes"]:
+        kind, _, identifier = node["ref"].partition(":")
+        assert kind == node["kind"]
+        assert identifier
+
+
+def test_every_graph_edge_connects_two_declared_nodes():
+    """A dangling edge is the classic graph-rendering bug and produces a floating box on
+    screen with no explanation attached to it."""
+    graph = _committed()["graph"]
+    refs = {node["ref"] for node in graph["nodes"]}
+    for edge in graph["edges"]:
+        assert edge["source_ref"] in refs, edge
+        assert edge["target_ref"] in refs, edge
+
+
+def test_one_root_cause_edge_per_flight_and_one_crew_edge_per_rotation():
+    graph = _committed()["graph"]
+    assert graph["edge_counts_by_kind"] == {"root_cause": 8, "crew": 9}
+    assert sum(graph["edge_counts_by_kind"].values()) == len(graph["edges"])
+
+
+def test_every_crew_edge_carries_a_mechanism_and_root_cause_edges_do_not():
+    """The mechanism is the edge label. A crew edge without one is an arrow with no reason."""
+    for edge in _committed()["graph"]["edges"]:
+        if edge["edge_kind"] == "crew":
+            assert edge["mechanism"]
+            assert edge["detail"]
+        if edge["edge_kind"] == "root_cause":
+            assert edge["mechanism"] is None
+
+
+def test_exactly_one_flight_node_is_primary_and_exactly_one_is_an_arrival():
+    """The membership decision, visible in the fixture. UK 705 arrives into VOBL; a
+    departure-origin query would have produced seven departures and no arrival at all."""
+    flight_nodes = [n for n in _committed()["graph"]["nodes"] if n["kind"] == "flight"]
+    roles = [node["role"] for node in flight_nodes]
+    assert roles.count("primary") == 1
+    assert roles.count("affected_arrival") == 1
+    assert roles.count("affected_departure") == 6
+
+
+def test_the_fixture_marks_its_edge_provenance_as_a_fixture():
+    """A fixture edge must not be mistakable for recorded evidence. The live projection carries
+    a real `action:` or `prediction:` reference; this says plainly that it does not."""
+    graph = _committed()["graph"]
+    assert all(edge["derived_from"] == "fixture" for edge in graph["edges"])
+    assert "not a row id" in graph["note"]
+
+
+def test_blast_radius_repeats_the_rollups_and_calculates_nothing():
+    """Composition only. Every dimension must be findable in `rollups`."""
+    body = _committed()
+    rollups = body["rollups"]
+    values = {d["key"]: d["value"] for d in body["blast_radius"]["dimensions"]}
+    assert values == {
+        "flights": rollups["flights_affected"],
+        "passengers": rollups["passengers_affected"],
+        "connections": rollups["connections_at_risk"],
+        "crew_pairings": rollups["crew_pairings_affected"],
+        "candidate_hotels": rollups["candidate_hotels"],
+    }
+
+
+def test_blast_radius_states_completeness_and_never_confidence():
+    """Completeness is countable; confidence would be a probability nothing here is calibrated
+    to produce. One uncheckable figure discredits the checkable ones beside it."""
+    radius = _committed()["blast_radius"]
+    assert radius["basis"] == "composed_from_recorded_findings"
+    assert radius["completeness"]["is_complete"] is True
+    assert radius["completeness"]["ratio"] == "8/8"
+    # Checked over keys rather than the whole document: the prose is allowed to explain *why*
+    # there is no confidence value, and a substring match over it would forbid saying so.
+    for dimension in radius["dimensions"]:
+        assert "confidence" not in dimension
+        assert "probability" not in dimension
+    assert "confidence" not in radius["completeness"]
+
+
+def test_every_blast_radius_dimension_names_what_measured_it():
+    for dimension in _committed()["blast_radius"]["dimensions"]:
+        assert dimension["measured_by"]
+        assert dimension["unit"]
+        assert dimension["note"]
+
+
+def test_the_group_list_rollups_stay_typeable_as_number_or_string():
+    """Stream D types `rollups` as `Record<string, number | string>`.
+
+    Phase 2 needed to say whether a rollup is complete, and a boolean inside `rollups` would
+    have broken that type for a cosmetic gain. `rollup_status` is a sibling instead, which also
+    reads better: completeness is a property of the computation, not one of the figures.
+    """
+    groups = json.loads(
+        (REPO_ROOT / "fixtures" / "api" / "incident_groups.json").read_text(encoding="utf-8")
+    )["groups"]
+    assert groups
+    for group in groups:
+        for key, value in group["rollups"].items():
+            assert isinstance(value, (int, str)) and not isinstance(value, bool), (key, value)
+
+        status = group["rollup_status"]
+        assert isinstance(status["is_complete"], bool)
+        assert status["computed_at"]
+        assert "render as partial" in status["note"]

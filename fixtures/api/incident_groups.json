@@ -1,22 +1,31 @@
 {
-  "generated_by": "wave0-fixture",
-  "groups": [
-    {
-      "id": 1,
-      "reference": "GRP-2026-0820-VOBL",
-      "root_cause": "weather",
-      "airport_icao": "VOBL",
-      "severity": "high",
-      "state": "executing",
-      "opened_at": "2026-08-20T15:36:00Z",
-      "rollups": {
-        "flights_affected": 8,
-        "passengers_affected": 604,
-        "connections_at_risk": 22,
-        "crew_pairings_affected": 9
-      },
-      "awaiting_approval_count": 2,
-      "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:cascade" }
-    }
-  ]
+ "generated_by": "wave0-fixture",
+ "groups": [
+  {
+   "id": 1,
+   "reference": "GRP-2026-0820-VOBL",
+   "root_cause": "weather",
+   "airport_icao": "VOBL",
+   "severity": "high",
+   "state": "executing",
+   "opened_at": "2026-08-20T15:36:00Z",
+   "rollups": {
+    "flights_affected": 8,
+    "passengers_affected": 604,
+    "connections_at_risk": 22,
+    "crew_pairings_affected": 9
+   },
+   "awaiting_approval_count": 2,
+   "provenance": {
+    "kind": "fixture",
+    "provider": "fixture",
+    "source_ref": "fixture:bengaluru_storm:cascade"
+   },
+   "rollup_status": {
+    "is_complete": true,
+    "computed_at": "2026-08-20T16:04:00Z",
+    "note": "Derived from the recorded per-incident findings and never stored on the group. `is_complete` is false whenever a declared flight has no incident open or an incident has not been assessed, and a partial rollup must render as partial."
+   }
+  }
+ ]
 }

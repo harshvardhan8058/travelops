@@ -127,6 +127,10 @@ class PairingImpact(Base):
     mechanism: Mapped[str] = mapped_column(String(24), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
     is_at_risk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: Hops from the disruption. 1 = a pairing on an affected flight. 2 = reached only because
+    #: an earlier pairing's onward leg failed. Kept separate so enabling expansion cannot move
+    #: the headline count of direct impacts.
+    depth: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
 
     __table_args__ = (
         UniqueConstraint(
