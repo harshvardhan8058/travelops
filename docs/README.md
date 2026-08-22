@@ -28,6 +28,7 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | 6 | [`26-implementation-contracts.md`](26-implementation-contracts.md) | API, state, auth, security and observability baseline |
 | 7 | [`21-design-system.md`](21-design-system.md) | How the UI looks: tokens, density, motion. No purple |
 | 8 | [`27-ui-specification.md`](27-ui-specification.md) | What the UI does: every screen, feature and interaction |
+| 8b | [`36-integration-protocol.md`](36-integration-protocol.md) | **Shared-file seam register and the continuous-integration rule. Mandatory from Phase 3** |
 | 9 | [`28-parallel-workstreams.md`](28-parallel-workstreams.md) | Four Kiro accounts, exclusive file ownership, and which account burns the most tokens |
 | 10 | [`29-kickoff-prompts.md`](29-kickoff-prompts.md) | Wave sequencing, daily rhythm, ownership rationale |
 | 11 | [`kickoff/`](kickoff/README.md) | **Four ready-to-paste prompts, one per account. Nothing to edit** |
