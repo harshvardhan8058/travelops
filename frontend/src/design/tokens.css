@@ -30,7 +30,12 @@
 
   --fg-primary: #e7edf4;
   --fg-secondary: #9aa8b6;
-  --fg-muted: #66757f; /* 4.6:1 on --bg-base. This is the contrast floor. */
+  /* Contrast floor, and it has to hold on the DARKEST surface muted text sits on, not just on
+   * --bg-base. The previous #66757f measured 4.01:1 on --bg-base and only 3.74:1 on
+   * --bg-surface, where most muted text actually renders — below the 4.5:1 AA threshold, and
+   * the projector rehearsal made it obvious. This value measures 5.53:1 on --bg-base,
+   * 5.16:1 on --bg-surface, 4.70:1 on --bg-raised and 5.65:1 on --bg-inset. */
+  --fg-muted: #7e8b96;
   --fg-inverse: #0b0f14;
 
   /* ------------------------------------------------- accent: instrument cyan */
@@ -46,13 +51,17 @@
   --state-warn: #f5a623; /* at risk, degraded, awaiting approval, WARN */
   --state-crit: #f2555a; /* disrupted, breached, failed, FAIL */
   --state-info: #5b9df9; /* informational, scheduled, simulated */
-  --state-neutral: #66757f; /* cancelled, n/a, skipped */
+  /* cancelled, n/a, skipped. Lighter than it looks like it needs to be, because this is badge
+   * TEXT on --state-neutral-bg, a 12% tint of itself: at #66757f that combination measured
+   * 3.30:1. Badge labels are 12px, so they need the full 4.5:1 rather than the large-text
+   * allowance. This value measures 4.94:1 on the tint over --bg-surface. */
+  --state-neutral: #8a96a0;
 
   --state-ok-bg: rgba(61, 214, 140, 0.12);
   --state-warn-bg: rgba(245, 166, 35, 0.12);
   --state-crit-bg: rgba(242, 85, 90, 0.12);
   --state-info-bg: rgba(91, 157, 249, 0.12);
-  --state-neutral-bg: rgba(102, 117, 127, 0.12);
+  --state-neutral-bg: rgba(138, 150, 160, 0.12);
 
   --focus-ring: #3fc9de;
 

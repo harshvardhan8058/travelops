@@ -497,21 +497,6 @@ export function AssurancePanel({
         </p>
       )}
 
-      {evaluation.evidence_refs.length > 0 && (
-        <div className="border-b border-border-subtle px-3 py-2">
-          <h3 className="text-label uppercase text-fg-muted">Evidence</h3>
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {evaluation.evidence_refs.map((ref) => (
-              <li key={ref}>
-                <MonoValue muted className="break-all text-caption">
-                  {ref}
-                </MonoValue>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {/*
        * The gate authorised this, but the task is still waiting — because EXECUTION refused, not
        * because a human is needed. Without this the panel looks self-contradictory: an
@@ -559,6 +544,30 @@ export function AssurancePanel({
           canWrite={canWrite}
           onSubmit={(verdict, reason) => onSubmitDecision(evaluation.id, verdict, reason)}
         />
+      )}
+
+      {/*
+       * Evidence refs sit AFTER the decision control, not before it.
+       *
+       * With real payloads this list runs to six refs, which pushed Approve and Reject 7px below
+       * the fold at 1920x1080 — measured in the projector rehearsal. A presenter should never
+       * have to scroll to authorise an action. The order is also the better one: what the gate
+       * decided, why it is blocked, what to do about it, and then the references to check
+       * afterwards.
+       */}
+      {evaluation.evidence_refs.length > 0 && (
+        <div className="border-t border-border-subtle px-3 py-2">
+          <h3 className="text-label uppercase text-fg-muted">Evidence</h3>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {evaluation.evidence_refs.map((ref) => (
+              <li key={ref}>
+                <MonoValue muted className="break-all text-caption">
+                  {ref}
+                </MonoValue>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </Panel>
   );

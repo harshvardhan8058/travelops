@@ -313,39 +313,48 @@ export function entityCountDerivation(
  */
 export function elapsedDerivation(
   incident: IncidentDetail,
+  first: { at: string; label: string } | null,
   latest: { at: string; label: string } | null,
 ): Derivation {
-  if (!latest) {
+  if (!first || !latest) {
     return {
-      title: 'Elapsed · not derivable',
+      title: 'Workflow duration · not derivable',
       subtitle: incident.reference,
-      inputs: [{ label: 'opened at', value: incident.opened_at, provenance: incident.provenance }],
-      when: [{ label: 'opened', at: incident.opened_at }],
+      inputs: first
+        ? [{ label: 'only record', value: `${first.at} (${first.label})` }]
+        : [{ label: 'opened at', value: incident.opened_at, provenance: incident.provenance }],
+      when: [{ label: 'opened (disruption time)', at: incident.opened_at }],
       evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
       absences: [
         {
-          label: 'latest record',
+          label: 'second record',
           detail:
-            'no state transition or action carries a later timestamp than opened_at, so no duration can be derived from records',
+            'only one recorded transition exists, so there is no interval to measure. A figure would have to come from the browser clock, and this screen does not do that.',
         },
       ],
     };
   }
 
   return {
-    title: 'Elapsed between records',
+    title: 'Workflow duration',
     subtitle: incident.reference,
     inputs: [
-      { label: 'from', value: `${incident.opened_at} (opened)`, provenance: incident.provenance },
+      { label: 'from', value: `${first.at} (${first.label})`, provenance: incident.provenance },
       { label: 'to', value: `${latest.at} (${latest.label})`, provenance: incident.provenance },
+      {
+        label: 'opened at',
+        value: incident.opened_at,
+        detail:
+          "The disruption's own time, shown separately in the header. Deliberately NOT an end of this measurement: in an injected scenario it belongs to a different clock from the recorded transitions.",
+      },
     ],
     rule: {
       kind: 'formula',
-      formula: 'latest_recorded_timestamp − incident.opened_at',
-      note: 'Derived from records, not from the browser clock. Fixture timestamps are a committed snapshot, so a wall-clock elapsed figure would measure distance from that snapshot rather than the duration of the workflow.',
+      formula: 'latest_recorded_timestamp − earliest_recorded_timestamp',
+      note: 'Both ends are recorded transitions, so this measures the workflow. Measuring from opened_at instead mixed the scenario clock with the execution clock and reported 26h for a recovery that took seconds.',
     },
     when: [
-      { label: 'opened', at: incident.opened_at },
+      { label: first.label, at: first.at },
       { label: latest.label, at: latest.at },
     ],
     evidenceRefs: [incident.provenance.source_ref].filter(isPresent),
