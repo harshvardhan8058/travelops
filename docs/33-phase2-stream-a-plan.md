@@ -7,13 +7,17 @@ Written against `main` at `5052388`. Phase 1 is closed: the deterministic slice 
 on the demo machine, and an operator approval is attributed to a person.
 
 **Revised for the final Phase 2 architecture decisions P2-D1, P2-D2 and P2-D3**, recorded in
-[`DECISIONS.md`](DECISIONS.md#phase-2-architecture-decisions--final). A2.6 changed substantially and
-A2.5's boundary is now settled law rather than a recommendation; §0 records what moved.
+[`DECISIONS.md`](DECISIONS.md#phase-2-architecture-decisions--final). A6 changed substantially and
+A5's boundary is now settled law rather than a recommendation; §0 records what moved.
 
-> **Two `D` namespaces in this document.** `P2-D1/2/3` are the team's Phase 2 architecture decisions.
-> `D1`–`D7` in A2.9 are **Stream D's dependency asks** from their own plan (PR #40). They are
-> unrelated, and there is a third `D1`–`D6` in `DECISIONS.md`'s design-decision list. Always cite the
-> prefixed form.
+**Cross-stream contracts, scope terminology, the A1–A9 order and the confirmation checklist that
+gates implementation are in [`34-phase2-contract-alignment.md`](34-phase2-contract-alignment.md).**
+This document is the design; that one is what B, C and D sign off.
+
+> **Label hygiene.** Items here are **`A1`–`A9`** (renamed from `A2.1`–`A2.9`). `P2-D1/2/3` are the
+> team's Phase 2 architecture decisions. `D1`–`D7` in A9 are **Stream D's dependency asks** from
+> their plan (PR #40). `DECISIONS.md` separately carries design decisions `D1`–`D6` and assumptions
+> `A1`–`A4`. Four namespaces, two letters — always cite the prefixed form.
 
 ---
 
@@ -37,7 +41,7 @@ because a re-evaluation over recorded facts adds no new subsystem. What is now s
 | **Out of scope, still deferred** | Projected world state, predicted delay/cost/outcome, any figure not traceable to a stored fact, digital twin |
 | **Enforcement** | `basis: Literal["recorded_evidence"]` — the contract cannot express a projection — plus a row-count-unchanged test |
 
-Practically this ratifies the direction A2.5 was already written to, so **A2.5 does not grow**.
+Practically this ratifies the direction A5 was already written to, so **A5 does not grow**.
 Stream D's plan (PR #40) reached the same boundary from the response schemas, which is why the
 decision was cheap to make.
 
@@ -55,7 +59,7 @@ the work. Proposed mapping, for review:
 | --- | --- | --- |
 | Group lifecycle, cascade orchestration, blast radius | 2 | Yes — this is the Phase 2 gate |
 | Replay orchestration | 4, but "nearly free" per backlog | Yes — cheap, and D already has a route stub |
-| Candidate plan lifecycle and comparison | 4–5 | Yes — A2.5, per P2-D2 |
+| Candidate plan lifecycle and comparison | 4–5 | Yes — A5, per P2-D2 |
 | What-if as zero-write re-evaluation | not enumerated | **Yes** — P2-D2 |
 | What-if as projection / digital twin | Deferred | **No** — P2-D2 excludes it |
 
@@ -65,7 +69,7 @@ the work. Proposed mapping, for review:
 feature.** Recorded in
 [`DECISIONS.md` → Phase 2 cut order](DECISIONS.md#phase-2-cut-order). No Stream A item depends on
 forecast or historical retrieval, so this costs this plan nothing — the recorded METAR path already
-carries every figure A2.2 and A2.3 report.
+carries every figure A2 and A3 report.
 
 ---
 
@@ -81,7 +85,7 @@ Concretely, and non-negotiably:
 - Group figures are **derived by union**, never by summing per-incident counts. Stream C already
   established this: 22 distinct at-risk bookings across the group, not eight incidents each
   claiming 22, which would imply 176.
-- **The gate authorises actions, not groups and not plans.** Nothing in A2.6 may become a second
+- **The gate authorises actions, not groups and not plans.** Nothing in A6 may become a second
   path to execution.
 
 ## 2. What already exists, and must not be rebuilt
@@ -100,7 +104,7 @@ Naming this explicitly because the last two waves lost time to two streams build
 
 ---
 
-## A2.1 — Disruption-group lifecycle
+## A1 — Disruption-group lifecycle
 
 The `incident_group.state` column exists and **nothing drives it**. C's seed writes `detected` and
 it never moves. A group that is 8 flights deep and still says `detected` is a broken audit surface.
@@ -186,7 +190,7 @@ see rather than a caption.
 
 ---
 
-## A2.2 — Network-level cascade orchestration
+## A2 — Network-level cascade orchestration
 
 Phase 1 opens one incident on the worst-affected departure. Phase 2 opens the whole affected set
 and drives it.
@@ -194,7 +198,7 @@ and drives it.
 ### Files
 - `backend/app/orchestrator/group.py` — `open_group()`, `advance_group()`.
 - `backend/app/cli.py` — `inject --cascade` to open all affected flights, default off.
-- `backend/app/api/incident_groups.py` — **new** router (A2.8).
+- `backend/app/api/incident_groups.py` — **new** router (A8).
 
 ### Public contracts
 
@@ -251,7 +255,7 @@ one of them individually auditable."
 
 ---
 
-## A2.3 — Blast-radius calculation
+## A3 — Blast-radius calculation
 
 **Stream A computes nothing here.** C's `cascade_rollup` already derives every figure by union with
 completeness flags. Stream A's job is banding and exposure.
@@ -309,7 +313,7 @@ line where an uncalibrated percentage would have been easy and wrong.
 
 ---
 
-## A2.4 — Candidate recovery-plan lifecycle
+## A4 — Candidate recovery-plan lifecycle
 
 Today one incident has one plan, and `_current_plan` takes the latest by id. Comparison needs
 several plans to coexist with a recorded selection.
@@ -341,7 +345,7 @@ empty in the mode the demo runs in.
   is C's alone. **Fallback if C declines:** infer selection from which plan's tasks were assured.
   That is fragile — a plan with no assured task yet is indistinguishable from a discarded one — so
   the columns are strongly preferred.
-- **B:** none for the lifecycle. Comparison uses B via A2.6.
+- **B:** none for the lifecycle. Comparison uses B via A6.
 
 ### Database
 One migration, **owned by C**: two nullable columns plus one enum-ish string with a CHECK, and an
@@ -362,18 +366,18 @@ index on `(incident_id, selection_state)`.
 3. No behaviour change for a single-plan incident.
 
 ### Integration risks
-- **The migration is the critical path.** If C cannot land it early, A2.4 and A2.5 slip together.
+- **The migration is the critical path.** If C cannot land it early, A4 and A5 slip together.
   Raise it in the first Phase 2 sync.
 - **`_current_plan` is load-bearing.** It is called from the run loop, the API and the CLI.
   Changing its meaning risks a Phase 1 regression; the fallback keeps it identical when nothing is
   selected, and the regression test above locks that.
 
 ### Demo value
-**Moderate.** Valuable mainly as the substrate for A2.5.
+**Moderate.** Valuable mainly as the substrate for A5.
 
 ---
 
-## A2.5 — What-if as plan comparison
+## A5 — What-if as plan comparison
 
 **This is what-if under [P2-D2](DECISIONS.md#p2-d2--what-if-is-in-scope-bounded-to-zero-write-deterministic-re-evaluation):
 a bounded, zero-write, deterministic re-evaluation.** Compare candidate plans against the **same
@@ -382,7 +386,7 @@ recorded facts**. No projected world state, no simulation engine, nothing persis
 P2-D2's three properties map onto this item exactly, which is worth stating so a reviewer can check
 them one by one:
 
-| P2-D2 property | How A2.5 satisfies it |
+| P2-D2 property | How A5 satisfies it |
 | --- | --- |
 | **Re-evaluation** of the same recorded facts | Calls B's existing `gate.evaluate` over evidence already stored; computes no new facts |
 | **Zero-write** | Persists no `assurance_evaluation`, no `action`, no state change, no `decision_log` row. Asserted by a row-count test |
@@ -416,7 +420,7 @@ would be refused.
 - **B:** `gate.evaluate` as it already exists, called in a read-only path. **No new B contract.**
   Worth confirming with B that a dry-run evaluation carries no side effect — it currently does not,
   since `AssuranceResult` is returned rather than persisted, and Stream A must not persist it.
-- **C:** none beyond A2.4's migration.
+- **C:** none beyond A4's migration.
 
 ### Database
 **None.** A dry-run evaluation is deliberately **not** persisted as an `assurance_evaluation`. Only
@@ -448,7 +452,7 @@ prediction.
 
 ---
 
-## A2.6 — Group-level assurance invocation boundary, and plan approval
+## A6 — Group-level assurance invocation boundary, and plan approval
 
 **The most dangerous item in this plan, and the one the team's decisions changed most.** Handle
 with care.
@@ -489,10 +493,19 @@ class GroupAssuranceSummary(BaseModel):
 
 1. `result.risk_tier in {low, medium}` — high always needs its own action-level approval; and
 2. **no** check in `result.checks` has `state == failed` — approval covers risk, never failed
-   evidence.
+   evidence, stale sources, unresolved entities or policy failure.
 
 Everything else still requires an action-level approval against **its own** persisted
 `assurance_evaluation`, exactly as in Phase 1.
+
+> **The full mechanism lives in
+> [`34-phase2-contract-alignment.md` §2](34-phase2-contract-alignment.md#2-single-source-of-truth-for-plan-approval-and-human-decision-scope),
+> which is the citable source.** In short: `human_decision`, one row per evaluation, remains the
+> **only** thing `execute()` consults — it never learns that plan approvals exist. A plan approval
+> **partitions the evaluations already awaiting** a human, using one predicate in
+> `approval_scope.py`, and writes one ordinary `human_decision` per covered evaluation; the excluded
+> ones are returned with a reason and stay awaiting. It never covers an evaluation produced later in
+> the run — forward coverage would be a blank cheque. That is what keeps a single path to execution.
 
 **A finding the team should see before this is built.** Reading `gate.py:274–316`, a low or medium
 tier action currently reaches `needs_human` by only two routes:
@@ -510,20 +523,22 @@ than "plan approval covers low/medium actions" sounds, and if the team meant som
 click-reduction rather than a permission), that is a different feature and needs saying. **Listed
 as an open question in §4.**
 
-Because plan approval now grants something, `execute()` must record *what* covered each action.
-Reuse the Phase 1 attribution model: the covering `human_decision` id is stamped on the action just
-as an action-level approval is, with the decision's own `actor_kind=human`. No second audit model.
+Because a materialised decision is an ordinary `human_decision`, the Phase 1 attribution model
+carries through untouched: the covering id is stamped on the action exactly as an action-level
+approval is, and reads as `actor_kind=human`. **No second audit model, and no change to
+`execute()`.**
 
 ### Dependencies
 - **B:** existing `gate.evaluate`. No new contract. Confirm repeated evaluation is side-effect free.
-- **C:** none beyond A2.4's migration.
+- **C:** none beyond A4's migration.
 
 ### Database
-The summary itself persists **nothing** (P2-D2). But a plan *approval* is a real authorisation and
-**must** persist — as a `human_decision`, reusing the existing table. Whether it needs a
-`scope` column (`action` | `plan`) to distinguish the two is a **question for C**, and the honest
-answer is that it probably does: an auditor must be able to tell a per-action signature from a
-plan-wide one. Recorded in §4.
+The summary itself persists **nothing** (P2-D2). A plan *approval* does, and it needs a Stream C
+migration: a `plan_approval` table plus `human_decision.scope` and `plan_approval_id` with two CHECK
+constraints. **Full DDL in
+[`34-phase2-contract-alignment.md` §2.5](34-phase2-contract-alignment.md#25-database-changes-required-owned-by-stream-c).**
+`human_decision.assurance_id` stays `UNIQUE NOT NULL` — Phase 2 does not relax the constraint that
+makes the Phase 1 audit trail trustworthy.
 
 ### Tests — `backend/tests/unit/orchestrator/test_group_assurance.py`
 - **The load-bearing test:** a high-risk task is **never** in `approvable_task_ids`, and executing
@@ -543,11 +558,13 @@ plan-wide one. Recorded in §4.
 4. Every Phase 1 assurance invariant still holds, existing suite unchanged.
 
 ### Integration risks
-- **This is the one place in Phase 2 where a real second authorisation path is being added
-  deliberately.** The mitigation is no longer structural, so it must be behavioural: the two-part
-  predicate lives in one function with one name, and every excluded task carries its reason. If a
-  reviewer sees the tier check without the failed-check check, or either of them inlined at a call
-  site, that is a finding.
+- **There is still exactly one path to execution**, and that is deliberate. `execute()` reads only
+  `human_decision`; a plan approval can do nothing but cause such a row to exist. If a reviewer sees
+  `execute()` — or anything other than `approval_scope.py` — import `PlanApproval`, that is a
+  finding regardless of the surrounding code. An AST guard test asserts it.
+- **The predicate is the whole risk surface.** It lives in one function with one name, and every
+  excluded task carries a reason token. If the tier check appears without the failed-check check, or
+  either is inlined at a call site, that is a finding.
 - **Blast radius of getting the predicate wrong.** A bug here silently executes something a person
   did not authorise — the worst failure this system can have. It deserves the hardest review in
   Phase 2 and should not be the item that gets rushed if time runs short (hence its late position
@@ -560,7 +577,7 @@ P2-D3 makes the boundary visible rather than theoretical.
 
 ---
 
-## A2.7 — Replay orchestration
+## A7 — Replay orchestration
 
 Cheapest high-value item in the plan. `decision_log` already holds the full chronology, so replay
 is a read, not a subsystem — exactly as `08-blueprint-backlog.md` concluded.
@@ -643,7 +660,7 @@ how any of this is auditable.
 
 ---
 
-## A2.8 — The group, plan and replay endpoints
+## A8 — The group, plan and replay endpoints
 
 Two of the six remaining fixture routes become real, plus six new ones. The other four fixture
 routes (`/flights`, `/sources`, `/incidents/{id}/policy`, `/reports/{id}`) are **not** Stream A's
@@ -689,7 +706,7 @@ their agreement.
 - **D:** the new types, and a note that `/incident-groups/{ref}` gains a blast-radius block.
 
 ### Database
-**None** beyond A2.4's migration.
+**None** beyond A4's migration.
 
 ### Tests
 - `backend/tests/e2e/test_cascade_api.py` — every endpoint, typed response, error envelope,
@@ -714,7 +731,7 @@ their agreement.
 
 ---
 
-## A2.9 — Stream D's dependency asks (PR #40)
+## A9 — Stream D's dependency asks (PR #40)
 
 Stream D published their Phase 2 plan as **PR #40** (`frontend/docs/phase-2-stream-d-plan.md`).
 Five of their seven dependency asks are Stream A's. Answering them here rather than discovering
@@ -722,12 +739,12 @@ them mid-implementation, because three are small and unblock four of D's seven f
 
 | D's ask | Verdict | Where in this plan |
 | --- | --- | --- |
-| **D1** `payload` on `ActionSummary`, or an action-detail endpoint | **Yes — the endpoint, not the field.** See below | A2.9 |
-| **D2** Wire `/incident-groups/*` to `cascade_rollup()` | **Yes, already planned** | A2.3, A2.8 |
-| **D4** A plan-alternatives contract | **Yes** | A2.4, A2.5 |
-| **D5** A what-if contract | **Partly — and D and I independently reached the same limit** | §0.1, A2.5 |
-| **D6** `incident_reference` on the group's `flights[]` | **Yes. Trivial and clearly right** | A2.9 |
-| **D7** `reason_code` on `ActionSummary` | **Yes, and it is nearly free** | A2.9 |
+| **D1** `payload` on `ActionSummary`, or an action-detail endpoint | **Yes — the endpoint, not the field.** See below | A9 |
+| **D2** Wire `/incident-groups/*` to `cascade_rollup()` | **Yes, already planned** | A3, A8 |
+| **D4** A plan-alternatives contract | **Yes** | A4, A5 |
+| **D5** A what-if contract | **Partly — and D and I independently reached the same limit** | §0.1, A5 |
+| **D6** `incident_reference` on the group's `flights[]` | **Yes. Trivial and clearly right** | A9 |
+| **D7** `reason_code` on `ActionSummary` | **Yes, and it is nearly free** | A9 |
 
 ### D1 — expose the recorded payload, but not on `ActionSummary`
 
@@ -763,7 +780,7 @@ Agreed without reservation. D wants to click a cascade node and land on that fli
 without the reference there is no join. The group's `flights[]` currently carries
 `id, flight_number, route, delay_minutes, passengers, state` and no incident reference.
 
-Note this is a **fixture-shape change and therefore a Stream C conversation** (A2.8), and it is
+Note this is a **fixture-shape change and therefore a Stream C conversation** (A8), and it is
 additive, so D's existing type keeps compiling. Nullable, because a flight in the group's blast
 radius may have no incident open yet — and that null is meaningful, not missing: it means
 "affected, not yet being worked".
@@ -792,8 +809,8 @@ break "the UI never calculates", recommending the existing **policy-cause compar
 different evidence — D from the response schemas, A from the scope records — landed where the
 decision landed.
 
-**The caveat:** P2-D2 gives D a *plan-comparison* what-if (A2.5), not the operational what-if their
-UI sketch would need. Those are different screens. D should confirm A2.5's contract satisfies their
+**The caveat:** P2-D2 gives D a *plan-comparison* what-if (A5), not the operational what-if their
+UI sketch would need. Those are different screens. D should confirm A5's contract satisfies their
 what-if surface, because "what-if is in scope" could easily be read as more than P2-D2 grants.
 
 ### Files
@@ -837,82 +854,56 @@ show a single real per-passenger figure.
 
 ## 3. Sequencing
 
-Ordered by dependency, then by demo value per unit of effort.
+**The order and the per-item C/B dependency mapping now live in
+[`34-phase2-contract-alignment.md` §3](34-phase2-contract-alignment.md#3-a1a9--canonical-items-dependencies-and-order),
+which is the single source of truth for both.** Kept there rather than here so there is one table to
+confirm and no chance of two orders drifting apart.
 
-| # | Item | Blocked by | Notes |
-| --- | --- | --- | --- |
-| 1 | A2.9 D's contracts (D1, D6, D7) | nothing | **Start here.** Smallest item, unblocks four of D's seven features, and D is otherwise idle-blocked on it |
-| 2 | A2.7 Replay | nothing | No dependencies, no schema, and D's `/replay/:incidentId` route is a placeholder today |
-| 3 | A2.1 Group lifecycle | nothing | Foundation for everything cascade |
-| 4 | A2.2 Cascade orchestration | A2.1, C's flight-id helper | The Phase 2 gate |
-| 5 | A2.3 Blast radius | A2.2 | Thin once the rollup is wired |
-| 6 | A2.8 Group APIs | A2.1–A2.3, C's fixture shape | Unblocks D's cascade screen |
-| 7 | A2.4 Candidate lifecycle | **C's migration** | Slips if the migration slips |
-| 8 | A2.6 Plan assurance boundary | A2.4 | Review this one hardest |
-| 9 | A2.5 Comparison | A2.4, A2.6 | The reduced what-if |
-
-A2.9 goes first for a scheduling reason, not a technical one: it is the only item where **another
-stream is blocked on Stream A right now**. Everything else in this plan blocks only me.
-
-A2.6 is deliberately late. Under P2-D3 it is the only item that can execute something a person did
-not individually authorise, so it should be built when the surrounding invariants are already
-covered by tests — never as the rushed last item.
-
-### The mandated critical order — **cannot be applied yet**
-
-The team handed down a critical implementation order:
+The summary:
 
 ```
-C2-3 → C2-1/C2-2 → C2-5/C2-6 → C2-4 → C2-7 → C2-8 → C2-9
+A9  →  A7  →  A1  →  A2  →  A3  →  A8  →  A4  →  A6  →  A5
 ```
 
-**I cannot map `C2-N` onto anything in this repository, and I am not going to guess.**
-`grep -rn "C2-1\|C2-3\|C2-9" --include=*.md .` returns nothing: no stream plan, doc or issue in
-`main` uses these labels. Stream C has not published a Phase 2 plan (their most recent PR is #36).
+- **A9 first** for a scheduling reason, not a technical one: it is the only item where another stream
+  is blocked on Stream A right now. Everything else here blocks only me.
+- **A6 deliberately late.** Under P2-D3 it is the only item that can execute something a person did
+  not individually authorise, so it is built once the surrounding invariants are already under test —
+  never as the rushed last item.
+- **Only three Stream C artefacts gate Stream A:** one query helper (A2) and two migrations
+  (A4, A6). Enumerated in §3.1 of that document.
+- **Cut from the bottom:** A5, A6, A4 — and before any of them, the Open-Meteo/historical provider
+  expansion (§0.3), already designated first out. **A9→A8 alone deliver the documented Phase 2
+  gate.**
 
-Two readings are plausible and they imply **different work**:
+**The `C2-N` labels are resolved.** Stream D's merged plan (#44) binds them as shared Phase 2
+*feature slots* — not Stream C's items, and not a renumbering of A1–A9. The mapping, and the
+reconciliation of A's order with the mandated `C2-N` order, are at
+[§3.3](34-phase2-contract-alignment.md#33-c2-n--resolved-they-are-shared-phase-2-feature-slots-published-by-stream-d)
+and [§3.4](34-phase2-contract-alignment.md#34-reconciling-as-order-with-the-mandated-c2-n-order).
 
-1. **Stream C's own item numbering**, handed to every stream as the shared critical path. Most
-   likely, given the `C` prefix and that A2.4 already waits on a C migration. If so, Stream A's
-   order is unchanged and this sequence tells me *when C's dependencies land*.
-2. **A renumbering of this plan's nine items** — a coincidence worth noting, since this plan happens
-   to have exactly nine. But it does not survive checking: it would place blast radius (A2.3) before
-   the cascade orchestration (A2.2) it derives from, which cannot be built in that order.
-
-Reading 2 failing is *evidence for* reading 1, not proof of it. Since the same instruction says
-**"do not implement until the ownership/dependency contracts are aligned across streams"**, this is
-exactly such a misalignment, and it is the top item in §4. One line resolves it: either C's plan, or
-a mapping table.
-
-Until then the dependency-ordered sequence above is what Stream A would follow, and it is
-**provisional**.
-
-**If Phase 2 has to be cut**, cut from the bottom: 9, 8, 7 — and before any of them, cut the
-Open-Meteo/historical provider expansion (§0.3), which is already designated first out. Items 1–6
-deliver the documented Phase 2 gate — "one weather event at BLR produces a traceable multi-flight,
-multi-pairing impact set" — on their own. Losing 7–9 costs the comparison screen, not the cascade
-story.
+The consequence to know: **the mandate front-loads A6 to its third slot**, so the highest-risk item
+in Phase 2 is built early rather than last. Guard-tests-first is the mitigation.
 
 ## 4. What I need from the other streams before writing code
 
+**The full confirmation checklist — 17 rows across B, C, D and the team — is
+[`34-phase2-contract-alignment.md` §4](34-phase2-contract-alignment.md#4-confirmations-required-before-implementation).**
+Implementation is authorised only once those are ticked, so that list is the gate and this is a
+pointer to it.
+
+The four that block the most:
+
 | Stream | Ask | Blocks |
 | --- | --- | --- |
-| **C** | `group_affected_flight_ids(session, group_id)`, or permission to derive scope in Stream A | A2.2 |
-| **C** | Migration: `plan.selection_state`, `plan.selected_at`, `plan.selected_by` | A2.4, and therefore A2.5–A2.6 |
-| **C** | Confirm `fixtures/api/incident_group_detail.json` shape, and whether `why_nine_not_eight` may be derived | A2.8 |
-| **B** | Confirm `gate.evaluate` is side-effect free so it is safe to call in a dry run | A2.5, A2.6 |
-| **C** | `flights[]` in the group fixture gains a nullable `incident_reference` (D6) | A2.9 |
-| **D** | Confirm the group detail response may gain a blast-radius block | A2.8 |
-| **D** | Choose D1: action-detail endpoint (recommended) or inline `payload` on `ActionSummary` | A2.9 |
-| **D** | Confirm A2.5's plan-comparison contract satisfies their what-if surface. P2-D2 grants a plan-comparison what-if, not an operational one | A2.5, A2.9 |
-| **C** | Does `human_decision` need a `scope` column (`action` \| `plan`)? P2-D3 creates two kinds of signature and an auditor must tell them apart | A2.6 |
-| **Team** | **Map the mandated `C2-N` order onto stream items** — see §3. The labels do not exist in this repo | **all implementation** |
-| **Team** | Confirm the P2-D3 authorising domain — see A2.6. Under today's gate it is "unpermitted warning on a low/medium action", which may be narrower than intended | A2.6 |
-| **Team** | Agree §0.2 — what "Phase 2" covers, so the readiness gates match the work | all |
+| **C** | Fill the `C2-N` binding table, or confirm the three A-gating artefacts land before A slots 4, 7 and 8 | **all implementation** |
+| **C** | The `plan_approval` + `human_decision.scope` migration, with both CHECK constraints | A6 |
+| **B** | `gate.evaluate` is side-effect free, and the P2-D3 predicate is correctly stated against the gate | A5, A6 |
+| **Team** | The single source of truth in §2 of that document: `human_decision` per evaluation is the sole authority | A6 |
 
 **Settled since the first draft:** §0.1 what-if (P2-D2), the group scope of plan-level assurance
-(P2-D1), plan-approval risk coverage (P2-D3), and the Open-Meteo cut (§0.3). Those rows are gone
-from this table because they are decisions now, not asks.
+(P2-D1), plan-approval risk coverage (P2-D3), the Open-Meteo cut (§0.3), and the incident-vs-group
+scope contradiction (§1 of the alignment doc). Those are decisions now, not asks.
 
 ## 5. Invariants a reviewer should check first
 

@@ -403,6 +403,9 @@ subsystem**. It reuses the gate and the services that already exist, which is wh
 [`08-blueprint-backlog.md`](08-blueprint-backlog.md) could call replay "nearly free" and the twin
 expensive. What-if under P2-D2 is on the cheap side of that line.
 
+> Cross-stream contracts, scope terminology and the confirmation checklist that gates
+> implementation: [`34-phase2-contract-alignment.md`](34-phase2-contract-alignment.md).
+
 ### P2-D3 — plan approval covers low/medium risk only, and never failed evidence
 
 An operator may approve a plan, and that approval may authorise its **low and medium** risk actions.
