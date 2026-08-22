@@ -25,7 +25,7 @@ cd .. && python3 scripts/verify_docs.py
 | # | Item | Blocks | Who to ask | Fallback if it never arrives |
 | --- | --- | --- | --- | --- |
 | 1 | **Groq API key** | Live reasoning (Phase 3) | Create at [console.groq.com](https://console.groq.com/) | `LLM_MODE=fixture` and `off` both work. Demo survives |
-| 2 | **Run the stack once on the demo laptop** — ✅ API confirmed 21 Aug on Windows/Docker Desktop 29.x. Console and migration still to confirm | Confidence the stack starts on your hardware | You | None. This must actually be done |
+| 2 | **Open the console on the demo laptop and confirm it renders** — ✅ the backend chain is done: 21 Aug on Windows/Docker Desktop 29.x the full recovery ran to `resolved` through `docker compose`. Only `:5173` in the browser is still unreported | Confidence the demo is showable, not just runnable | You | None. The API is proven; the console is what a judge looks at |
 | 3 | **Aviation/legal SME to sign off the policy rules** | `POLICY_MODE=verified` | Mentor, or Arcolab/CIMS architecture lead, or `TechCon.x@Coforge.com` | `POLICY_MODE=charter` shows real cited figures behind a dated badge |
 
 **The Groq key goes in `backend/.env` as `GROQ_API_KEY=`. Never paste it into chat, a commit,
@@ -189,11 +189,14 @@ deferred service, never the demo.
 
 ### Not verified, and I will not claim otherwise
 
-- **`docker compose up` partly confirmed** on Windows with Docker Desktop 29.x (WSL2) on
-  21 August: the stack builds, starts, and `/docs` serves. Still unconfirmed on that machine:
-  postgres/redis health, `alembic upgrade head`, `make seed`, `make demo`, the recovery calls,
-  and the console at `:5173`. This is the only open Stage 2 readiness box — see
+- **`docker compose up` confirmed on the demo machine**, Windows with Docker Desktop 29.x (WSL2),
+  21 August: healthy datastores, migrations, seed, injection at risk 80, two deterministic actions
+  executed, the high-risk notification held by the gate, operator approval persisted, notification
+  executed, incident `resolved`. Stage 2's cold-start and vertical-slice boxes are closed — see
   [`25-evaluation-readiness.md`](25-evaluation-readiness.md).
+- **The console at `:5173` has not been reported rendering on that machine.** The stack serves it
+  and the frontend builds in CI, but nobody has looked at it there. This is the last open Phase 1
+  item and it is a five-minute check, not a build task.
 - **The `make` targets do not run on Windows.** PowerShell equivalents are in
   [`31-team-actions.md`](31-team-actions.md).
 - **The remaining fixture endpoints have no response models.** `/flights`, `/sources`,
