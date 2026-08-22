@@ -1,0 +1,129 @@
+# Decision Assurance Gate configuration — version 2
+#
+# Phase 2 adds a PLAN level above the action level. Everything in v1 is carried forward
+# unchanged, because an action is still authorised one action at a time; v2 only adds the
+# questions that are invisible when you look at one action at a time.
+#
+# This is a NEW FILE rather than an edit to assurance.v1.yaml. Every Phase 1 evaluation
+# recorded `assurance-v1` and its hash, and those records must stay interpretable against the
+# semantics that applied when they were made. v1 stays on disk permanently.
+#
+# Owner: Stream B.
+
+version: "assurance-v2"
+
+# ---------------------------------------------------------------- freshness limits
+# Unchanged from v1. Minutes unless stated.
+freshness:
+  metar_minutes: 60
+  taf_minutes: 360
+  flight_status_minutes: 5
+  policy_pack_days: 3650
+
+# ---------------------------------------------------------------- action risk tiers
+# Unchanged from v1. An action type absent from this map is treated as HIGH.
+risk_tiers:
+  check_connections: low
+  assess_crew_impact: low
+  find_hotel_options: low
+  prepare_notifications: low
+  record_outcome: low
+
+  reserve_hotel_block: medium
+  arrange_ground_transport: medium
+  reassign_gate: medium
+  rebook_passengers: medium
+
+  evaluate_entitlements: high
+  notify_passengers: high
+
+high_risk_requires_human: true
+
+# ---------------------------------------------------------------- warning tolerance
+# Unchanged from v1. The ONLY route to `execute_flagged` at action level.
+warn_allowed_actions:
+  check_connections:
+    - sources_fresh
+  find_hotel_options:
+    - sources_fresh
+  assess_crew_impact:
+    - sources_fresh
+
+# ================================================================ PLAN LEVEL — new in v2
+#
+# A plan is group-scoped: one disruption group, many flights, many tasks. These limits exist
+# because forty individually-medium actions can commit an amount no single action reveals.
+plan:
+  # -------------------------------------------------------------- aggregate budgets
+  # A plan breaching any of these is refused until a human accepts the aggregate.
+  # An exposure figure that is UNKNOWN is treated as a breach, never as zero.
+  limits:
+    max_total_exposure_inr: 250000
+    max_passengers_affected: 400
+    max_rooms_committed: 80
+    max_high_risk_actions: 6
+    max_external_effects: 4
+    max_tasks: 60
+
+  # -------------------------------------------------------------- risk escalation
+  # A plan whose parts are all low or medium can still be a high-risk plan. Crossing any
+  # fraction below escalates the plan tier to high, which forces a human decision on the
+  # aggregate even though no single action would have.
+  escalation:
+    exposure_fraction: 0.6
+    passengers_fraction: 0.6
+    high_risk_action_count: 3
+    external_effect_count: 2
+
+  # -------------------------------------------------------------- warning tolerance
+  # Same discipline as the action level: absence means a WARN blocks. Deliberately empty —
+  # no plan-level warning has yet been argued for.
+  warn_allowed_checks: []
+
+  # -------------------------------------------------------------- consistency rules
+  # Two actions of these types must never target the same entity inside one plan. Generic
+  # pairs only; nothing here names a jurisdiction or a provider.
+  mutually_exclusive_actions:
+    - [rebook_passengers, arrange_ground_transport]
+    - [reserve_hotel_block, arrange_ground_transport]
+
+  # -------------------------------------------------------------- approval scope
+  # What a single plan approval is permitted to release.
+  #
+  # A plan approval releases the PLAN-LEVEL risk block and nothing else. It never converts an
+  # action's needs_human into executable — every action still passes its own gate at execution
+  # time. See app/assurance/approval.py.
+  approval:
+    covers_tiers: [low, medium]
+    # High risk is money, cancellation or a bulk external effect. It gets its own decision,
+    # with its own record and its own actor, every time. Turning this off would let one click
+    # authorise a bulk notification, which is exactly what the gate exists to prevent.
+    high_risk_always_separate: true
+    # An approval is bound to the plan hash. Any edit to any task voids it rather than
+    # migrating it.
+    bound_to_plan_hash: true
+
+# ================================================================ WHAT-IF — new in v2
+#
+# Bounded, zero-write, deterministic re-evaluation of candidate plans against ALREADY RECORDED
+# facts. This is explicitly NOT a simulation engine or a digital twin: no world model, no
+# projected weather, no invented future state, and no writes of any kind.
+what_if:
+  enabled: true
+  max_candidates: 4
+  # A re-evaluation that cannot be reproduced is not evidence.
+  require_deterministic_seed: true
+  # Refuse outright if any provider is live. A comparison must not be able to touch a real API.
+  refuse_when_provider_live: true
+  # A figure produced during comparison is never authoritative. Only the policy engine
+  # authorises an entitlement.
+  figures_are_non_authoritative: true
+
+# ---------------------------------------------------------------- notes for reviewers
+# 1. The plan limits are policy, not measurements. They are starting values chosen to make the
+#    Bengaluru cascade demonstrate a real refusal; a reviewer should expect to tune them and
+#    should do so by publishing v3, not by editing v2.
+# 2. `max_rooms_committed` and `max_passengers_affected` are counted from figures Stream C
+#    supplies. Stream B never derives an operational count.
+# 3. There is deliberately no global switch that relaxes plan-level blocking. The only tunable
+#    is where the thresholds sit.
