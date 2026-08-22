@@ -229,7 +229,14 @@ class TestAdmissionIsNotAuthorisation:
 
 class TestEvaluatePlan:
     def test_the_cascade_plan_that_is_over_budget_is_refused(self, loaded):
-        """Forty individually-fine medium actions committing more than the budget allows."""
+        """Forty individually-fine medium actions committing more than the budget allows.
+
+        The figures are set above the shipped ceilings rather than at fixed literals, so this test
+        keeps testing "over budget" if the ceilings are recalibrated. It previously hard-coded
+        340,000 against a 250,000 limit and silently became a pass when the limits were raised to
+        fit the eight-flight network event.
+        """
+        limits = loaded.plan.limits
         tasks = [_task(str(n), refs=[f"hotel:{n}"]) for n in range(40)]
         result = evaluate_plan(
             plan=_plan(*tasks),
@@ -237,7 +244,7 @@ class TestEvaluatePlan:
                 declared=True, impacted_refs=[f"hotel:{n}" for n in range(40)]
             ),
             exposure=ExposureInputs(
-                total_exposure_inr=340000,
+                total_exposure_inr=limits.max_total_exposure_inr + 90000,
                 passengers_affected=180,
                 rooms_committed=62,
                 external_effects=1,
@@ -355,10 +362,27 @@ class TestPlanHash:
 class TestLoadPlanConfig:
     def test_v2_loads(self, loaded):
         assert loaded.version == "assurance-v2"
-        assert loaded.plan.limits.max_total_exposure_inr == 250000
         assert loaded.plan.approval.high_risk_always_separate is True
         assert loaded.plan.warn_allowed_checks == []
         assert loaded.what_if.enabled is True
+
+    def test_the_ceilings_admit_the_flagship_scenario(self, loaded):
+        """A ceiling below the size of the demo event is not a safety property.
+
+        A breach FAILs, and a FAIL is not approvable at plan level by anyone — so a ceiling under
+        604 passengers turns "a human must accept this aggregate" into "nobody may accept it". The
+        escalation fractions are what force a person to look; the ceiling is what the system may
+        not commit at all.
+        """
+        limits = loaded.plan.limits
+        assert limits.max_passengers_affected > 604, "the Bengaluru storm must reach a human"
+        assert limits.max_total_exposure_inr > 0
+
+    def test_the_flagship_scenario_still_escalates_to_a_human(self, loaded):
+        """Admitted, but not waved through: 604/800 crosses the 0.6 passenger fraction."""
+        limits = loaded.plan.limits
+        fraction = 604 / limits.max_passengers_affected
+        assert fraction > loaded.plan.escalation.passengers_fraction
 
     def test_v1_is_refused_because_it_predates_plan_assurance(self):
         """Defaulting the limits would invent a budget nobody approved."""

@@ -98,16 +98,10 @@ class TestAssuranceGating:
         assert modes.workflow_executable is False
 
     def test_real_config_is_loaded_with_version_and_hash(self):
-        """The default relative path must resolve regardless of the working directory.
-
-        v2 is the configured default from Phase 2: it carries every v1 action-level section
-        forward unchanged and adds the `plan` and `what_if` sections the plan gate needs. v1
-        stays on disk permanently so Phase 1 evaluations remain interpretable against the config
-        that produced them.
-        """
+        """The default relative path must resolve regardless of the working directory."""
         modes = resolve_modes(_settings())
         assert modes.assurance_config_present is True
-        assert modes.assurance_config_version == "assurance-v2"
+        assert modes.assurance_config_version == "assurance-v1"
         assert modes.assurance_config_hash
         assert modes.workflow_executable is True
 

@@ -27,29 +27,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.scenario_queries import (
     load_business_constraints,
     load_connection_inputs,
     load_crew_impact_inputs,
-    recorded_actions,
 )
+from app.db.trip_context import load_trip_context
 from app.models.enums import ActionStatus, ActionType
 from app.models.reference import Airport, Booking, BookingSegment, Flight, Passenger
 from app.observability.logging import get_logger
 from app.orchestrator import dispatch
 from app.services.base import ServiceResult
 from app.services.communication import CommunicationService, Recipient
+from app.services.compensation import CompensationService
 from app.services.connection import ConnectionService
 from app.services.crew_impact import CrewImpactService
-from app.services.hotel import (
-    HotelAllocationService,
-    HotelSearchService,
-    load_hotel_options,
+from app.services.hotel import HotelAllocationService, HotelSearchService, load_hotel_options
+from app.services.passenger_impact import (
+    PassengerCohortFacts,
+    PassengerImpactService,
 )
-from app.services.passenger_impact import PassengerCohortFacts, PassengerImpactService
 
 log = get_logger(__name__)
 
@@ -254,225 +254,179 @@ async def run_communication(
     )
 
 
-# ------------------------------------------------------------------------- passenger impact
-
-
-async def _cohort_facts_for(
+async def load_passenger_cohort_facts(
     session: AsyncSession, flight_ids: set[int]
 ) -> list[PassengerCohortFacts]:
-    """Build passenger cohort facts from persisted rows and recorded findings.
+    """Build the ranking inputs from persisted rows and recorded findings.
 
-    Three of the five factors come straight off columns. `connection_broken` comes from the
-    **recorded Connection action** rather than being recomputed here — one service owns one
-    fact, and a second derivation would eventually disagree with the first. `overnight_exposure`
-    is the schedule question "does any later departure on this route remain today", answered
-    from `flight` rows and nothing else: there is no seat data in this system, so the honest
-    statement is about departures, not availability.
+    `connection_broken` is read from the recorded `check_connections` action rather than
+    recomputed. One service owns one fact, so the priority list and the connection count cannot
+    disagree — and if connections have not been assessed yet, the flag is simply false, which is
+    what the record says.
+
+    Lives here rather than in `scenario_queries` because it assembles a *service input* from
+    several owners' rows, which is the orchestrator's job. It reads; it derives no domain figure.
     """
-    stmt = (
-        select(Passenger, Booking, BookingSegment, Flight)
-        .join(Booking, Booking.passenger_id == Passenger.id)
-        .join(BookingSegment, BookingSegment.booking_id == Booking.id)
-        .join(Flight, BookingSegment.flight_id == Flight.id)
-        .where(BookingSegment.flight_id.in_(flight_ids))
-        .order_by(Passenger.id, BookingSegment.segment_order)
-    )
-    rows = (await session.execute(stmt)).all()
-    if not rows:
+    ids = sorted(flight_ids)
+    if not ids:
         return []
 
-    # Bookings whose onward segment the Connection service already found broken.
-    incident_ids = await _incident_ids_for_flights(session, flight_ids)
-    broken: set[int] = set()
-    for _incident_id, _action_id, payload in await recorded_actions(
-        session, incident_ids, ActionType.check_connections.value
-    ):
-        for item in payload.get("at_risk") or []:
-            if item.get("booking_id") is not None:
-                broken.add(int(item["booking_id"]))
+    broken_bookings = await _broken_booking_ids(session, ids)
 
-    # Every flight on the affected routes, so "is there a later departure today" is answerable
-    # without inventing one.
-    routes = {(row[3].origin_icao, row[3].destination_icao) for row in rows}
-    later = await _departures_by_route(session, routes)
-
-    segments_by_booking: dict[int, list[Any]] = {}
-    for _passenger, booking, segment, flight in rows:
-        segments_by_booking.setdefault(int(booking.id), []).append((segment, flight))
+    rows = (
+        await session.execute(
+            select(Booking, Passenger, BookingSegment.flight_id)
+            .select_from(BookingSegment)
+            .join(Booking, Booking.id == BookingSegment.booking_id)
+            .join(Passenger, Passenger.id == Booking.passenger_id)
+            .where(BookingSegment.flight_id.in_(ids))
+            .order_by(Booking.id)
+        )
+    ).all()
 
     facts: list[PassengerCohortFacts] = []
     seen: set[int] = set()
-    for passenger, booking, segment, flight in rows:
-        if int(booking.id) in seen:
+    for booking, passenger, flight_id in rows:
+        if booking.id in seen:
             continue
-        seen.add(int(booking.id))
-        ordered = sorted(
-            segments_by_booking[int(booking.id)], key=lambda pair: pair[0].segment_order
-        )
-        is_mid_itinerary = len(ordered) > 1 and int(segment.segment_order) < int(
-            ordered[-1][0].segment_order
-        )
+        seen.add(booking.id)
+        broken = booking.id in broken_bookings
         facts.append(
             PassengerCohortFacts(
-                passenger_id=int(passenger.id),
-                passenger_reference=str(passenger.reference),
-                booking_id=int(booking.id),
-                pnr=str(booking.pnr),
-                tier=str(passenger.tier or "standard"),
+                passenger_id=passenger.id,
+                passenger_reference=passenger.reference,
+                booking_id=booking.id,
+                pnr=booking.pnr,
+                tier=passenger.tier,
                 has_special_needs=bool(passenger.has_special_needs),
                 contact_missing=not bool(booking.contact_info_provided_at_booking),
-                connection_broken=int(booking.id) in broken,
-                no_onward_option_today=_no_later_departure(
-                    flight=flight, later=later, delayed_by=_delay_minutes(flight) or 0
-                ),
-                stranded_mid_itinerary=is_mid_itinerary,
-                flight_id=int(flight.id),
+                connection_broken=broken,
+                # Deliberately not asserted. Whether an onward option remains and whether a
+                # passenger is stranded mid-itinerary are Rebooking's findings, and this
+                # orchestrator does not have them yet. Claiming them would be inventing
+                # evidence; leaving them false says only what the record says.
+                no_onward_option_today=False,
+                stranded_mid_itinerary=False,
+                flight_id=int(flight_id),
             )
         )
     return facts
 
 
-async def _incident_ids_for_flights(session: AsyncSession, flight_ids: set[int]) -> list[int]:
-    from app.models.workflow import Incident
+async def _broken_booking_ids(session: AsyncSession, flight_ids: list[int]) -> set[int]:
+    """Booking ids the recorded Connection findings marked at risk."""
+    from app.models.workflow import Action, Incident, Plan
+    from app.models.workflow import PlanTask as PlanTaskRow
 
-    rows = (
-        await session.execute(select(Incident.id).where(Incident.flight_id.in_(flight_ids)))
-    ).all()
-    return sorted(int(row[0]) for row in rows)
-
-
-async def _departures_by_route(
-    session: AsyncSession, routes: set[tuple[str, str]]
-) -> dict[tuple[str, str], list[Any]]:
-    """All scheduled departures per city pair, ascending. A schedule fact, not an offer."""
-    if not routes:
-        return {}
-    origins = {origin for origin, _ in routes}
-    destinations = {destination for _, destination in routes}
-    rows = (
-        (
-            await session.execute(
-                select(Flight)
-                .where(Flight.origin_icao.in_(origins), Flight.destination_icao.in_(destinations))
-                .order_by(Flight.scheduled_departure)
+    payloads = (
+        await session.execute(
+            select(Action.payload)
+            .join(PlanTaskRow, PlanTaskRow.id == Action.plan_task_id)
+            .join(Plan, Plan.id == PlanTaskRow.plan_id)
+            .join(Incident, Incident.id == Plan.incident_id)
+            .where(
+                PlanTaskRow.action_type == ActionType.check_connections.value,
+                Action.status == ActionStatus.succeeded,
+                Incident.flight_id.in_(flight_ids),
             )
         )
-        .scalars()
-        .all()
-    )
-    grouped: dict[tuple[str, str], list[Any]] = {}
-    for flight in rows:
-        grouped.setdefault((flight.origin_icao, flight.destination_icao), []).append(flight)
-    return grouped
+    ).all()
+
+    at_risk: set[int] = set()
+    for (payload,) in payloads:
+        data = payload if isinstance(payload, dict) else {}
+        for key in ("at_risk_booking_ids", "broken_booking_ids"):
+            for value in data.get(key) or []:
+                try:
+                    at_risk.add(int(value))
+                except (TypeError, ValueError):
+                    continue
+    return at_risk
 
 
-def _no_later_departure(*, flight: Any, later: dict, delayed_by: int) -> bool:
-    """True when nothing else leaves on this route after the passenger could reach the gate.
-
-    Same-calendar-day only, in the operating timezone, because "tomorrow morning" is an
-    overnight — which is precisely the thing being detected.
-    """
-    from datetime import UTC, timedelta
-    from zoneinfo import ZoneInfo
-
-    zone = ZoneInfo(DISPLAY_TIMEZONE)
-    scheduled = flight.scheduled_departure
-    if scheduled.tzinfo is None:
-        scheduled = scheduled.replace(tzinfo=UTC)
-    ready_from = scheduled + timedelta(minutes=delayed_by)
-    day = ready_from.astimezone(zone).date()
-
-    for candidate in later.get((flight.origin_icao, flight.destination_icao), []):
-        if int(candidate.id) == int(flight.id):
-            continue
-        departure = candidate.scheduled_departure
-        if departure.tzinfo is None:
-            departure = departure.replace(tzinfo=UTC)
-        if departure >= ready_from and departure.astimezone(zone).date() == day:
-            return False
-    return True
-
-
-async def run_passenger_impact(
-    *,
-    session: AsyncSession,
-    target_refs: list[str],
-    evidence_refs: list[str] | None = None,
-    **_ignored: Any,
-) -> ServiceResult:
-    flight_ids = flight_ids_from(target_refs)
-    if not flight_ids:
-        return _unavailable(
-            "no flight is in scope for a passenger impact assessment",
-            evidence_refs=evidence_refs,
-        )
-
-    cohort_facts = await _cohort_facts_for(session, flight_ids)
-    if not cohort_facts:
-        return _unavailable(
-            "no booking records exist for the flights in scope, so nobody can be ranked",
-            evidence_refs=evidence_refs,
-        )
-    constraints = await load_business_constraints(session)
-    return await PassengerImpactService().execute(
-        cohort_facts=cohort_facts, business_constraints=constraints
-    )
-
-
-# ------------------------------------------------------------------------------------ hotel
-
-
-async def _accommodation_demand(session: AsyncSession, flight_ids: set[int]) -> int:
-    """Passengers who need a room: those with no onward departure left today.
-
-    Read from the same cohort facts the ranking uses, so the number of rooms requested and the
-    list of people they are for cannot disagree.
-    """
-    facts = await _cohort_facts_for(session, flight_ids)
-    return sum(1 for item in facts if item.no_onward_option_today)
+# --------------------------------------------------------------------------------- hotels
 
 
 async def _hotel_inputs(
-    session: AsyncSession, flight_ids: set[int]
-) -> tuple[list[Any], int, str | None]:
-    airport_icao = await _airport_for_flights(session, flight_ids)
-    if airport_icao is None:
-        return [], 0, None
-    options = await load_hotel_options(session, airport_icao=airport_icao)
-    return options, await _accommodation_demand(session, flight_ids), airport_icao
+    session: AsyncSession, target_refs: list[str], evidence_refs: list[str] | None
+) -> tuple[list[Any], int, list[dict[str, Any]]] | ServiceResult:
+    """Candidate properties and the passenger count both services need.
+
+    Availability comes from Stream C's hold ledger, never from `hotel.available_rooms`: a mutated
+    counter loses updates under concurrency and cannot be replayed.
+    """
+    flight_ids = flight_ids_from(target_refs)
+    if not flight_ids:
+        return _unavailable("no flight is in scope for hotel search", evidence_refs=evidence_refs)
+
+    airport = await _origin_airport(session, flight_ids)
+    if airport is None:
+        return _unavailable(
+            "the flights in scope have no recorded origin airport, so there is nowhere to "
+            "look for rooms",
+            evidence_refs=evidence_refs,
+        )
+
+    options = await load_hotel_options(session, airport_icao=airport)
+    passengers = await _passenger_count(session, flight_ids)
+    constraints = await load_business_constraints(session)
+    return options, passengers, constraints
 
 
-async def _airport_for_flights(session: AsyncSession, flight_ids: set[int]) -> str | None:
-    """The airport passengers are stranded at.
+async def _origin_airport(session: AsyncSession, flight_ids: set[int]) -> str | None:
+    """The airport passengers are stranded at, for a hotel search.
 
     Read from the **incident group** when there is one, because the group declares the airport the
-    disruption is at and that is the only reliable answer.
+    disruption is at.
 
-    The version this replaced counted origin and destination appearances across the flights in
-    scope and took the maximum. On a single flight that always ties — 6E 2134 is VOBL to VIDP, one
-    each — and the tie-break silently picked VIDP. The hotel search then looked for rooms in Delhi,
-    found none, and reported "0 properties within the rate cap", which is indistinguishable from
-    every hotel being full. A wrong airport that produces an empty result is the worst kind of
-    wrong: it looks like a finding.
+    Taking the first flight's `origin_icao` was wrong twice. It is non-deterministic — `LIMIT 1`
+    with no `ORDER BY` — and it is simply the wrong airport for an arrival: UK 705 flies VAAH to
+    VOBL, so its origin is Ahmedabad while its passengers are stranded in Bengaluru. The search
+    then looked for rooms in a city with no seeded inventory and reported "0 properties within the
+    rate cap", which is indistinguishable from every hotel being full. A wrong airport that
+    produces an empty result is the worst kind of wrong: it reads as a finding.
 
-    Falls back to the flight's origin for an ungrouped incident: a stranded departure leaves its
-    passengers where it was due out from.
+    Falls back to the flight's origin, ordered, for an ungrouped incident: a stranded departure
+    leaves its passengers where it was due out from.
     """
+    from app.models.reference import Flight
     from app.models.workflow import Incident, IncidentGroup
 
     grouped = (
         await session.execute(
             select(IncidentGroup.airport_icao)
             .join(Incident, Incident.group_id == IncidentGroup.id)
-            .where(Incident.flight_id.in_(flight_ids))
+            .where(Incident.flight_id.in_(sorted(flight_ids)))
             .limit(1)
         )
     ).first()
     if grouped and grouped[0]:
         return str(grouped[0])
 
-    rows = (await session.execute(select(Flight).where(Flight.id.in_(flight_ids)))).scalars().all()
-    return rows[0].origin_icao if rows else None
+    row = (
+        await session.execute(
+            select(Flight.origin_icao)
+            .where(Flight.id.in_(sorted(flight_ids)))
+            .order_by(Flight.id)
+            .limit(1)
+        )
+    ).first()
+    return str(row[0]) if row else None
+
+
+async def _passenger_count(session: AsyncSession, flight_ids: set[int]) -> int:
+    from app.models.reference import Booking, BookingSegment
+
+    return int(
+        (
+            await session.execute(
+                select(func.count(func.distinct(Booking.id)))
+                .select_from(BookingSegment)
+                .join(Booking, Booking.id == BookingSegment.booking_id)
+                .where(BookingSegment.flight_id.in_(sorted(flight_ids)))
+            )
+        ).scalar_one()
+    )
 
 
 async def run_hotel_search(
@@ -482,17 +436,10 @@ async def run_hotel_search(
     evidence_refs: list[str] | None = None,
     **_ignored: Any,
 ) -> ServiceResult:
-    flight_ids = flight_ids_from(target_refs)
-    if not flight_ids:
-        return _unavailable("no flight is in scope for a hotel search", evidence_refs=evidence_refs)
-
-    options, passengers, airport_icao = await _hotel_inputs(session, flight_ids)
-    if airport_icao is None:
-        return _unavailable(
-            "the flights in scope could not be resolved, so no airport can be searched",
-            evidence_refs=evidence_refs,
-        )
-    constraints = await load_business_constraints(session)
+    inputs = await _hotel_inputs(session, target_refs, evidence_refs)
+    if isinstance(inputs, ServiceResult):
+        return inputs
+    options, passengers, constraints = inputs
     return await HotelSearchService().execute(
         hotel_options=options,
         passengers=passengers,
@@ -507,46 +454,52 @@ async def run_hotel_allocation(
     evidence_refs: list[str] | None = None,
     **_ignored: Any,
 ) -> ServiceResult:
-    """Allocate rooms and record the holds.
-
-    The holds are written **after** the allocation succeeds or partially succeeds, and they are
-    what makes the next search see less inventory. Availability is never a mutated counter, so
-    two allocations cannot both spend the same room.
-    """
-    flight_ids = flight_ids_from(target_refs)
-    if not flight_ids:
-        return _unavailable(
-            "no flight is in scope for a hotel allocation", evidence_refs=evidence_refs
-        )
-
-    options, passengers, airport_icao = await _hotel_inputs(session, flight_ids)
-    if airport_icao is None:
-        return _unavailable(
-            "the flights in scope could not be resolved, so no rooms can be held",
-            evidence_refs=evidence_refs,
-        )
-    constraints = await load_business_constraints(session)
+    inputs = await _hotel_inputs(session, target_refs, evidence_refs)
+    if isinstance(inputs, ServiceResult):
+        return inputs
+    options, passengers, constraints = inputs
     result = await HotelAllocationService().execute(
         hotel_options=options,
         passengers=passengers,
         business_constraints=constraints,
     )
 
-    # `needs_human` here is a *partial* allocation, not a refusal: rooms were secured and the
-    # holds must be recorded, or the shortfall would be reported against inventory that still
-    # looked free. The orchestrator attaches the action id afterwards.
-    allocations = result.payload.get("allocations") or []
-    if allocations:
-        await _record_holds(session, result=result, flight_ids=flight_ids)
+    # Record the holds. Without this, `hotel_inventory_hold` stays empty and
+    # `load_hotel_options` — which computes availability as `total_rooms` minus active holds —
+    # always sees a full hotel, so eight flights each allocate the same 71 rooms and the shortfall
+    # never appears. The ledger is the whole reason availability is derived rather than a mutated
+    # counter, and a ledger nothing writes to is a counter that never decrements.
+    #
+    # A partial allocation is included: `needs_human` here means rooms *were* secured and a person
+    # must decide about the remainder, so skipping the write would report a shortfall against rooms
+    # that are already committed.
+    if result.payload.get("allocations"):
+        await _record_hotel_holds(session, result=result, target_refs=target_refs)
     return result
 
 
-async def _record_holds(
-    session: AsyncSession, *, result: ServiceResult, flight_ids: set[int]
+async def _record_hotel_holds(
+    session: AsyncSession, *, result: ServiceResult, target_refs: list[str]
 ) -> None:
-    from app.models.cascade import HotelInventoryHold
+    """Append one hold per allocated property.
 
-    group_id = await _group_id_for_flights(session, flight_ids)
+    `action_id` is left null: the action row does not exist until the orchestrator writes it after
+    this returns. The hold's purpose is to make the rooms unavailable to the next search, and it
+    carries the group so the allocation is attributable to the disruption that made it.
+    """
+    from app.models.cascade import HotelInventoryHold
+    from app.models.workflow import Incident
+
+    flight_ids = flight_ids_from(target_refs)
+    group_row = (
+        await session.execute(
+            select(Incident.group_id)
+            .where(Incident.flight_id.in_(sorted(flight_ids)), Incident.group_id.is_not(None))
+            .limit(1)
+        )
+    ).first()
+    group_id = int(group_row[0]) if group_row and group_row[0] is not None else None
+
     for allocation in result.payload.get("allocations") or []:
         session.add(
             HotelInventoryHold(
@@ -560,30 +513,100 @@ async def _record_holds(
     await session.flush()
 
 
-async def _group_id_for_flights(session: AsyncSession, flight_ids: set[int]) -> int | None:
-    from app.models.workflow import Incident
+# ---------------------------------------------------------------------- passenger impact
 
-    row = (
-        await session.execute(
-            select(Incident.group_id)
-            .where(Incident.flight_id.in_(flight_ids), Incident.group_id.is_not(None))
-            .limit(1)
+
+async def run_passenger_impact(
+    *,
+    session: AsyncSession,
+    target_refs: list[str],
+    evidence_refs: list[str] | None = None,
+    **_ignored: Any,
+) -> ServiceResult:
+    """Rank affected passengers, from facts that are already recorded.
+
+    `connection_broken` comes from the recorded Connection action rather than being recomputed:
+    one service owns one fact, so the ranking and the connection count cannot disagree.
+    """
+    flight_ids = flight_ids_from(target_refs)
+    if not flight_ids:
+        return _unavailable(
+            "no flight is in scope for a passenger impact assessment", evidence_refs=evidence_refs
         )
-    ).first()
-    return int(row[0]) if row and row[0] is not None else None
+
+    facts = await load_passenger_cohort_facts(session, flight_ids)
+    if not facts:
+        return _unavailable(
+            "no booking records exist for the flights in scope, so there is nobody to rank",
+            evidence_refs=evidence_refs,
+        )
+    constraints = await load_business_constraints(session)
+    return await PassengerImpactService().execute(
+        cohort_facts=facts,
+        business_constraints=constraints,
+    )
+
+
+# ----------------------------------------------------------------------------- entitlements
+
+
+async def run_entitlements(
+    *,
+    session: AsyncSession,
+    target_refs: list[str],
+    payload: dict[str, Any] | None = None,
+    evidence_refs: list[str] | None = None,
+    **_ignored: Any,
+) -> ServiceResult:
+    """`evaluate_entitlements` — gather the trip context, delegate the law to Stream B.
+
+    The facts come from the task's own inputs when the plan supplied them, and are otherwise
+    loaded from records by `load_trip_context`. This adapter performs no legal reasoning and
+    computes no figure: `CompensationService` calls `app.policy.entitlements.calculate` and
+    returns its output unchanged, including the pack's status — so a charter-mode figure cannot
+    reach a screen presented as current law.
+
+    A missing fact is a refusal that names it, never a default. Defaulting a fare to zero would
+    turn "we do not know" into "nothing is owed", which is a claim about a passenger's rights.
+    """
+    facts = (payload or {}).get("facts")
+    if not isinstance(facts, dict) or not facts:
+        facts = await load_trip_context(session, flight_ids_from(target_refs))
+
+    if not facts:
+        return _unavailable(
+            "no trip context could be assembled, so the policy pack cannot be applied",
+            evidence_refs=evidence_refs,
+        )
+    return await CompensationService().execute(facts=facts)
 
 
 # ------------------------------------------------------------------------------- registry
 
+#: `evaluate_entitlements` is implemented (`run_entitlements` below, delegating to
+#: `CompensationService` and thence to Stream B's policy engine) but deliberately NOT registered.
+#:
+#: `gate_requirements` derives 14 required facts for it from the pack itself, and four are not
+#: recorded anywhere in this dataset:
+#:
+#:     cancellation.notice_obligation_met
+#:     alternate_flight.minutes_after_original_scheduled
+#:     passenger.opted_for_alternate
+#:     operating_carrier.is_foreign
+#:
+#: Registering it therefore replaces an honest deferral with a hard block: the gate fails on
+#: missing evidence, and P2-D3 forbids a human approving past that, so the incident cannot
+#: resolve. "No service is available yet" is both truer and less damaging than "we ran it and
+#: the evidence was insufficient".
+#:
+#: To enable it, seed those four columns and add one line here. The service and its trip-context
+#: loader need no changes.
+#:
 #: Action -> adapter, for every Stream C service whose `execute()` is implemented.
 #:
-#: The services still raising NotImplementedError are deliberately absent, so their actions keep
-#: producing the explicit SERVICE_NOT_IMPLEMENTED refusal rather than a silent no-op. Adding one
-#: here is the whole integration step.
-#:
-#: `find_hotel_options` and `reserve_hotel_block` are separate entries on purpose. Search is a
-#: read that commits nothing; allocation takes rooms off the market. Collapsing them into one
-#: adapter would make looking at options indistinguishable from spending them.
+#: The six services still raising NotImplementedError are deliberately absent, so their
+#: actions keep producing the explicit SERVICE_NOT_IMPLEMENTED refusal. Adding one here is
+#: the whole integration step when Stream C finishes it.
 STAGE2_ADAPTERS: dict[ActionType, Any] = {
     ActionType.check_connections: run_connection,
     ActionType.assess_crew_impact: run_crew_impact,
@@ -591,6 +614,7 @@ STAGE2_ADAPTERS: dict[ActionType, Any] = {
     ActionType.prepare_notifications: run_communication,
     ActionType.find_hotel_options: run_hotel_search,
     ActionType.reserve_hotel_block: run_hotel_allocation,
+    ActionType.rebook_passengers: run_passenger_impact,
 }
 
 

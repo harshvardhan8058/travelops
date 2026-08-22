@@ -50,19 +50,7 @@ async def list_sources() -> Any:
     return _load("sources")
 
 
-# /incidents/{id}, /incidents/{id}/timeline and /incidents/{id}/assurance were served from
-# here in Wave 0. They are now real, in app/api/incidents.py and app/api/assurance_router.py,
-# and their fixture routes were deleted in the same commit so there is never a period where
-# two implementations of one path exist.
-#
-# /incident-groups and /incident-groups/{id} followed in Phase 2 and are now real, in
-# app/api/groups.py, together with the group run, plan-assurance, plan-approval, what-if and
-# replay routes. Their fixture routes were deleted in the same commit for the same reason. The
-# committed fixture JSON stays on disk: the frontend uses it for its offline mode and the
-# contract tests assert the real payload keeps the same shape.
-
-
-# ---------------------------------------------------------------- Stream B
+# ---------------------------------------------------------------- Stream A
 @router.get("/incidents/{incident_id}/policy", summary="Policy evaluation [fixture]")
 async def get_policy(incident_id: str) -> Any:
     payload = _load("policy")

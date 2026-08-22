@@ -13,6 +13,12 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // The console verifier drives a real browser: code inside `page.evaluate` executes in the
+    // page, so it legitimately references `document` and `window` while the file itself is Node.
+    files: ['scripts/verify-console.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,

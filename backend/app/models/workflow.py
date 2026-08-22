@@ -287,10 +287,26 @@ class HumanDecision(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+    #: How this decision was made: per action, or covered by a plan approval (P2-D3).
+    #:
+    #: Both are a person's act. An auditor still has to be able to tell them apart, because
+    #: "the operator approved this cash payout" and "this refund was covered by the operator's
+    #: plan-wide signature" are different facts about the same column.
+    scope: Mapped[str] = mapped_column(String(8), nullable=False, default="action")
+    plan_approval_id: Mapped[int | None] = mapped_column(ForeignKey("plan_approval.id"))
+
     evaluation: Mapped[AssuranceEvaluation] = relationship(back_populates="human_decision")
 
     __table_args__ = (
         CheckConstraint("decision IN ('approved','rejected')", name="human_decision_valid"),
+        CheckConstraint("scope IN ('action','plan')", name="human_decision_scope_valid"),
+        # A plan-scoped decision must name the approval that produced it. An unattributable
+        # authorisation is precisely the defect Phase 1 closed.
+        CheckConstraint(
+            "(scope = 'action' AND plan_approval_id IS NULL) OR "
+            "(scope = 'plan' AND plan_approval_id IS NOT NULL)",
+            name="human_decision_scope_provenance",
+        ),
     )
 
 

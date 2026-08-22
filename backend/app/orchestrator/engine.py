@@ -72,7 +72,7 @@ from app.models.workflow import (
 )
 from app.models.workflow import PlanTask as PlanTaskRow
 from app.observability.logging import correlation_id_var, get_logger
-from app.orchestrator import assurance_adapter, dispatch, plan_lifecycle
+from app.orchestrator import assurance_adapter, dispatch
 from app.orchestrator.limits import Limits, check_step_budget
 from app.orchestrator.playbook import (
     FALLBACK_GENERATOR,
@@ -468,11 +468,6 @@ class Orchestrator:
             rows[task.action.value] = row
         await self._session.flush()
 
-        # Stamp the plan's identity now that its tasks exist. A hash over an empty task list
-        # would be a signature on nothing that later appeared to cover whatever got added.
-        # `PlanUnderReview.hash()` is the one implementation — the same value the approval gate
-        # compares — so `plan.plan_hash` and `plan_approval.plan_hash` cannot disagree.
-        #
         # Resolve action-name dependencies to persisted task IDs, so the stored plan holds
         # no dangling references. Matches the fixture, which stores task-id strings.
         for task in tasks:
@@ -482,12 +477,6 @@ class Orchestrator:
 
         ctx.plan_id = plan.id
         task_ids = [rows[task.action.value].id for task in tasks]
-
-        # The plan's identity, and the fact that it is the one being worked. `selection_state`
-        # goes straight to `selected` because the playbook produces a single plan; when candidate
-        # generation arrives, that is the only line that changes.
-        plan_hash = await self._stamp_plan_identity(ctx, plan)
-
         await self._journal(
             ctx,
             stage=STAGE_PLAN,
@@ -496,8 +485,6 @@ class Orchestrator:
             summary=f"{len(tasks)} tasks proposed by the deterministic playbook",
             detail={
                 "plan_id": plan.id,
-                "plan_hash": plan_hash,
-                "selection_state": plan_lifecycle.SELECTION_SELECTED,
                 "generator": FALLBACK_GENERATOR,
                 "prompt_version": None,
                 "model_self_report": None,
@@ -878,17 +865,14 @@ class Orchestrator:
         """Dispatch to the owning deterministic service, under two hard preconditions.
 
         1. `assurance.executable` is False -> refuse. No side effect without authorisation.
-        2. The gate said `needs_human` -> authorisation is required, and it may come from
-           exactly one of two places:
-           * an `approved` human decision for **that same evaluation**; or
-           * a **plan approval** whose scope covers this task (Phase 2, P2-D3).
+        2. The gate said `needs_human` -> an `approved` human decision for **that same
+           evaluation** is required. A rejected decision cannot be reused, and an approval
+           for a different evaluation does not transfer.
 
-        A rejected decision cannot be reused, and an approval for a different evaluation does
-        not transfer. The plan-approval route is deliberately narrow: Stream B's
-        `plan_approval_covers` re-checks the plan hash, the task's membership in the approved
-        set, the tier, and whether the task is blocked on evidence rather than risk. A high-risk
-        task is refused there whatever the plan approval says, so no code path in this engine can
-        widen it.
+           A plan approval satisfies this without any special case: the approval service writes a
+           `human_decision` with `scope='plan'` for each evaluation it covers, so it arrives here
+           as an ordinary decision. The engine therefore never needs to know that plan approvals
+           exist, and `test_phase2_guards` asserts it does not.
 
         A replay of an already-recorded idempotency key returns the original result rather
         than acting a second time.
@@ -897,28 +881,20 @@ class Orchestrator:
         evaluation = await self._resolve_evaluation(task_row.id, evaluation_id)
 
         human_decision_id: int | None = None
-        plan_approval_id: int | None = None
         if assurance.requires_human:
             decision = await self._human_decision(evaluation.id)
             if decision is None:
-                # No decision on this evaluation. Before refusing, check whether a plan
-                # approval covers the task — that is the only other authorisation this engine
-                # recognises, and it recognises it through Stream B's rules, not its own.
-                plan_approval_id = await self._plan_approval_authorising(ctx, task_row)
-                if plan_approval_id is None:
-                    raise AssuranceBlocked(
-                        "action requires operator approval",
-                        details={
-                            "assurance_id": evaluation.id,
-                            "action_type": task.action.value,
-                            "blocking_checks": [name.value for name in assurance.blocking],
-                        },
-                    )
-            elif decision.decision is not HumanDecisionType.approved and (
+                raise AssuranceBlocked(
+                    "action requires operator approval",
+                    details={
+                        "assurance_id": evaluation.id,
+                        "action_type": task.action.value,
+                        "blocking_checks": [name.value for name in assurance.blocking],
+                    },
+                )
+            if decision.decision is not HumanDecisionType.approved and (
                 str(decision.decision) != HumanDecisionType.approved.value
             ):
-                # An explicit rejection is final and a plan approval does not override it. The
-                # operator said no to this specific action; a broader signature cannot undo that.
                 raise AssuranceBlocked(
                     "operator rejected this action; a rejected decision cannot be reused",
                     details={
@@ -927,8 +903,7 @@ class Orchestrator:
                         "human_decision": str(decision.decision),
                     },
                 )
-            else:
-                human_decision_id = decision.id
+            human_decision_id = decision.id
         elif not assurance.executable:
             raise AssuranceBlocked(
                 f"assurance decision '{assurance.decision.value}' does not authorise execution",
@@ -981,9 +956,6 @@ class Orchestrator:
             plan_task_id=task_row.id,
             assurance_id=evaluation.id,
             human_decision_id=human_decision_id,
-            # Exactly one of these is set when the gate held the task, so the record always
-            # names which authorisation released it.
-            plan_approval_id=plan_approval_id,
             actor=ACTOR_ORCHESTRATOR,
             idempotency_key=key,
             status=result.status,
@@ -1010,7 +982,6 @@ class Orchestrator:
                 "plan_task_id": task_row.id,
                 "assurance_id": evaluation.id,
                 "human_decision_id": human_decision_id,
-                "plan_approval_id": plan_approval_id,
                 "idempotency_key": key,
                 "provenance_kind": result.provenance_kind,
                 **result.payload,
@@ -1037,116 +1008,6 @@ class Orchestrator:
             human_decision_id=human_decision_id,
             idempotency_key=key,
         )
-
-    async def _stamp_plan_identity(self, ctx: WorkflowContext, plan: Plan) -> str | None:
-        """Set `plan.plan_hash` and mark the plan selected. Returns the hash.
-
-        Returns None for an incident with no group: a plan hash is scoped to a disruption, and
-        inventing a group reference so the hash could be computed would produce an identity that
-        looked meaningful and was not.
-        """
-        from app.orchestrator import plan_lifecycle
-
-        group_reference = await self._group_reference(ctx)
-        if group_reference is None:
-            plan.selection_state = plan_lifecycle.SELECTION_SELECTED
-            plan.selected_at = self._now()
-            plan.selected_by = ACTOR_ORCHESTRATOR
-            await self._session.flush()
-            return None
-
-        plan_hash = await plan_lifecycle.stamp_plan_hash(
-            self._session, plan_id=int(plan.id), group_reference=group_reference
-        )
-        await plan_lifecycle.mark_selected(
-            self._session,
-            plan_id=int(plan.id),
-            actor_id=ACTOR_ORCHESTRATOR,
-            selected_at=self._now(),
-        )
-        return plan_hash
-
-    async def _plan_approval_authorising(
-        self, ctx: WorkflowContext, task_row: PlanTaskRow
-    ) -> int | None:
-        """The plan approval id that covers this task, or None.
-
-        The decision itself is Stream B's: `plan_approval_covers` re-checks the plan hash, task
-        membership, the tier and the blocking kind. This method only supplies the persisted
-        values and records the outcome, so there is one implementation of P2-D3 rather than a
-        second one living in the orchestrator.
-
-        A refusal is journalled rather than swallowed. "The plan was approved but this action
-        still waited" is the single most confusing thing this feature can do to an operator, so
-        the reason is on the timeline before they have to ask.
-        """
-        from app.orchestrator import plan_lifecycle
-
-        group_reference = await self._group_reference(ctx)
-        if group_reference is None or task_row.plan_id is None:
-            return None
-
-        approval, check = await plan_lifecycle.plan_approval_for_task(
-            self._session,
-            plan_id=int(task_row.plan_id),
-            plan_task_id=int(task_row.id),
-            group_reference=group_reference,
-        )
-        if approval is None or check is None:
-            return None
-        if check.permitted:
-            await self._journal(
-                ctx,
-                stage=STAGE_EXECUTE,
-                actor=ACTOR_GATE,
-                event_type="PLAN_APPROVAL_APPLIED",
-                summary=(
-                    f"{task_row.action_type} authorised by the plan approval for "
-                    f"{approval.plan_hash}"
-                ),
-                detail={
-                    "plan_approval_id": approval.id,
-                    "plan_task_id": task_row.id,
-                    "plan_hash": approval.plan_hash,
-                    "approved_by": approval.actor_id,
-                },
-            )
-            return int(approval.id)
-
-        await self._journal(
-            ctx,
-            stage=STAGE_EXECUTE,
-            actor=ACTOR_GATE,
-            event_type="PLAN_APPROVAL_NOT_APPLICABLE",
-            summary=(f"{task_row.action_type} still needs its own decision: {check.reason}"),
-            detail={
-                "plan_approval_id": approval.id,
-                "plan_task_id": task_row.id,
-                "refusal": check.refusal.value if check.refusal else None,
-                "reason": check.reason,
-                "unresolved": list(check.unresolved),
-            },
-        )
-        return None
-
-    async def _group_reference(self, ctx: WorkflowContext) -> str | None:
-        """The incident's group reference, cached on the context.
-
-        Needed because a plan hash is computed over `(group_reference, tasks)` — an approval is
-        scoped to a disruption, not to a bare task list.
-        """
-        cached = ctx.metadata.get("group_reference")
-        if cached is not None:
-            return str(cached)
-
-        incident = await self._session.get(Incident, ctx.incident_id)
-        if incident is None or incident.group_id is None:
-            return None
-        group = await self._session.get(IncidentGroup, int(incident.group_id))
-        if group is None:
-            return None
-        ctx.metadata["group_reference"] = group.reference
-        return str(group.reference)
 
     def _idempotency_key(self, ctx: WorkflowContext, task: PlanTask, plan_task_id: int) -> str:
         """Scope: action type + target entities + incident + intended version.
@@ -1557,32 +1418,12 @@ class Orchestrator:
 
         decision = await self._human_decision(int(evaluation_id))
         if decision is None:
-            # No decision on this evaluation. A plan approval may already cover the task, in
-            # which case waiting would be asking twice for the same authorisation.
-            task_row = await self._session.get(PlanTaskRow, int(plan_task_id))
-            covered = (
-                await self._plan_approval_authorising(ctx, task_row)
-                if task_row is not None
-                else None
-            )
-            if covered is not None:
-                task_row.state = TaskState.assured
-                await self._session.flush()
-                await self._transition(
-                    ctx,
-                    IncidentState.executing,
-                    stage=STAGE_EXECUTE,
-                    summary=(
-                        f"Proceeding under the plan approval covering evaluation {evaluation_id}"
-                    ),
-                    detail={
-                        "assurance_id": evaluation_id,
-                        "plan_task_id": plan_task_id,
-                        "plan_approval_id": covered,
-                    },
-                )
-                return
             # Not an error. Waiting for a person is a legitimate resting state.
+            #
+            # A plan approval needs no special case here: Stream A's approval service writes a
+            # `human_decision` with `scope='plan'` for every evaluation it covers, so this lookup
+            # finds it exactly as it finds an action-scoped one. The engine stays unaware that
+            # plan approvals exist, which is what `test_phase2_guards` asserts.
             ctx.steps_taken -= 1
             ctx.last_note = f"waiting for an operator decision on evaluation {evaluation_id}"
             return
@@ -1736,7 +1577,32 @@ class Orchestrator:
     # ------------------------------------------------------------------------- plan reads
 
     async def _current_plan(self, incident_id: int) -> Plan | None:
-        stmt = select(Plan).where(Plan.incident_id == incident_id).order_by(Plan.id.desc()).limit(1)
+        """The plan this incident is being driven by.
+
+        Order matters, and it is not "the latest".
+
+        1. **The selected plan**, when an operator chose one (migration 0005). That is an explicit,
+           attributed decision and it wins.
+        2. Otherwise **the earliest** plan — the one the run started with.
+
+        Taking the latest was correct while an incident could only have one plan. It stopped being
+        correct when candidates arrived: opening the comparison screen creates sibling plans, and
+        "latest" then silently switches a *running* incident onto a fresh plan whose tasks have
+        never been assured. The operator's approval still points at the old plan's task, so the
+        incident asks for approval again and blocks — which is exactly what happened to the primary
+        flight before this was fixed. A read must never re-route a live run.
+        """
+        stmt = (
+            select(Plan)
+            .where(Plan.incident_id == incident_id, Plan.selection_state == "selected")
+            .order_by(Plan.id)
+            .limit(1)
+        )
+        selected = (await self._session.execute(stmt)).scalars().first()
+        if selected is not None:
+            return selected
+
+        stmt = select(Plan).where(Plan.incident_id == incident_id).order_by(Plan.id).limit(1)
         return (await self._session.execute(stmt)).scalars().first()
 
     async def _plan_tasks(self, ctx: WorkflowContext) -> list[PlanTaskRow]:
@@ -2099,43 +1965,8 @@ def _task_state_for(status: ActionStatus) -> TaskState:
 
 
 def _result_from_row(row: AssuranceEvaluation) -> AssuranceResult:
-    """Reconstruct the decision that authorised a task, from its immutable row.
+    """Delegates to the adapter, which is the one place this reconstruction lives.
 
-    Replay must use the semantics recorded at decision time, which is why the evaluation
-    stores its own config version and hash rather than reading today's config.
+    Kept as a module-level name because tests and the replay path already import it.
     """
-    from app.assurance.contract import CheckName, CheckResult, ReasonCode
-    from app.models.enums import CheckState, RiskTier
-
-    checks: list[CheckResult] = []
-    for name, payload in (row.check_results or {}).items():
-        try:
-            check_name = CheckName(name)
-        except ValueError:
-            continue
-        data = payload if isinstance(payload, dict) else {}
-        checks.append(
-            CheckResult(
-                name=check_name,
-                state=CheckState(data.get("state", CheckState.failed.value)),
-                reason_code=ReasonCode(data.get("reason_code", ReasonCode.OK.value)),
-                reason=data.get("reason"),
-                tier=RiskTier(data["tier"]) if data.get("tier") else None,
-            )
-        )
-    blocking = []
-    for name in row.blocking_reasons or []:
-        try:
-            blocking.append(CheckName(name))
-        except ValueError:
-            continue
-    return AssuranceResult(
-        decision=AssuranceDecision(row.decision),
-        risk_tier=RiskTier(row.risk_tier),
-        checks=checks,
-        blocking=blocking,
-        evidence_refs=list(row.evidence_refs or []),
-        config_version=row.config_version,
-        config_hash=row.config_hash,
-        evaluated_at=row.evaluated_at,
-    )
+    return assurance_adapter.result_from_row(row)

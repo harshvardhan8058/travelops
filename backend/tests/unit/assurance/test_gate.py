@@ -395,18 +395,11 @@ class TestLoadConfig:
             load_config(str(empty))
 
     def test_gate_digest_matches_what_system_mode_reports(self):
-        """An evaluation and /system/mode must never disagree about the config in force.
-
-        Read from the *configured* path rather than a hardcoded filename. Hardcoding v1 made this
-        test assert which file was in force rather than that the two readers agree — so it failed
-        when the configured file changed, which is precisely when agreement matters most.
-        """
-        settings = Settings(_env_file=None)
-        configured = str(settings.assurance_config_path)
-        _, digest = load_config_with_digest(configured)
-        modes = resolve_modes(settings)
+        """An evaluation and /system/mode must never disagree about the config in force."""
+        _, digest = load_config_with_digest("./config/assurance.v1.yaml")
+        modes = resolve_modes(Settings(_env_file=None))
         assert digest == modes.assurance_config_hash
-        assert load_config(configured).version == modes.assurance_config_version
+        assert load_config("./config/assurance.v1.yaml").version == modes.assurance_config_version
 
 
 # ---------------------------------------------------------------------------- evaluate

@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Scale,
+  GitCompare,
   ShieldCheck,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -30,6 +31,7 @@ const NAV = [
   { to: '/cascade/current', icon: GitFork, label: 'Cascade' },
   { to: '/incidents/INC-2026-0820-VOBL-01', icon: ListChecks, label: 'Recovery workspace' },
   { to: '/assurance', icon: ShieldCheck, label: 'Approval queue' },
+  { to: '/plans/INC-2026-0820-VOBL-01', icon: GitCompare, label: 'Plan comparison' },
   { to: '/policy/INC-2026-0820-VOBL-01', icon: Scale, label: 'Policy & citations' },
   { to: '/replay/INC-2026-0820-VOBL-01', icon: History, label: 'Replay' },
   { to: '/reports/INC-2026-0820-VOBL-01', icon: FileText, label: 'Report' },

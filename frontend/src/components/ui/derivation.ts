@@ -26,6 +26,8 @@
 
 import type {
   AirportConditions,
+  BlastRadiusDimension,
+  CandidateComparisonRow,
   AssuranceEvaluation,
   CheckResult,
   CrewPairingImpact,
@@ -34,6 +36,7 @@ import type {
   Provenance,
   RiskEvidence,
   WeatherObservation,
+  WhatIfDelta,
 } from '@/api/types';
 
 // ---------------------------------------------------------------- contract
@@ -654,5 +657,88 @@ export function planAssuranceDerivation(
       note: 'Counts by decision only. No aggregate score: a fail-closed, ordered gate has no meaningful average, so one number would invite exactly the trust the gate replaces.',
     },
     evidenceRefs: evaluations.flatMap((evaluation) => evaluation.evidence_refs).slice(0, 8),
+  };
+}
+
+// ---------------------------------------------------------------- Phase 2: comparison
+
+/**
+ * One candidate plan's figure, in a comparison.
+ *
+ * The rule is the plan gate's own config version and hash, because that is what judged the
+ * candidate. `basis` is stated verbatim from the response: the server pins it to a literal so the
+ * contract cannot express a projection, and the popover says so rather than the screen implying it.
+ */
+export function candidateDerivation(
+  row: CandidateComparisonRow,
+  basis: string,
+  seed: number | null,
+): Derivation {
+  return {
+    title: `Candidate ${row.variant_key}`,
+    inputs: [
+      { label: 'tasks', value: String(row.task_count) },
+      { label: 'high-risk actions', value: String(row.high_risk_actions) },
+      { label: 'approvals required', value: String(row.approvals_required) },
+      { label: 'uncovered entities', value: String(row.uncovered_entities) },
+      { label: 'plan hash', value: row.plan_hash },
+    ],
+    rule: {
+      kind: 'config',
+      id: 'plan gate re-evaluation',
+      version: basis,
+      refs: seed === null ? [] : [`seed ${seed}`],
+      note: 'Re-evaluated against evidence already recorded for this incident. Nothing was simulated, projected or written, and no candidate is ranked.',
+    },
+    evidenceRefs: [],
+  };
+}
+
+/**
+ * A what-if delta.
+ *
+ * Both figures are shown because they answer different questions — "what did we find" and "what do
+ * the rules say under these inputs". Presenting one as the other is how a what-if starts to look
+ * like a correction to the live figures.
+ */
+export function whatIfDerivation(delta: WhatIfDelta, ruleVersion: string): Derivation {
+  return {
+    title: delta.label,
+    inputs: [
+      { label: 'recorded', value: String(delta.baseline) },
+      { label: 're-evaluated', value: String(delta.scenario) },
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'deterministic re-evaluation',
+      version: ruleVersion,
+      refs: [],
+      note: 'The same deterministic rules the live services use, over substituted inputs. Not a forecast, and no rows were written.',
+    },
+    evidenceRefs: [],
+  };
+}
+
+/** One dimension of the server-composed blast radius. */
+export function blastDimensionDerivation(
+  dimension: BlastRadiusDimension,
+  ratio: string,
+): Derivation {
+  return {
+    title: dimension.label,
+    inputs: [
+      { label: 'value', value: String(dimension.value), detail: dimension.note || null },
+      { label: 'flights assessed', value: ratio },
+    ],
+    rule: {
+      kind: 'rule',
+      id: `measured by ${dimension.measured_by || 'declared data'}`,
+      version: dimension.is_complete ? 'complete' : 'partial',
+      refs: [],
+      note: dimension.is_complete
+        ? 'Every declared flight contributed to this figure.'
+        : 'Not every declared flight has been assessed, so this is a floor rather than a total.',
+    },
+    evidenceRefs: [],
   };
 }

@@ -17,11 +17,17 @@ const KIND_CLASS: Record<CascadeNode['kind'], string> = {
   event: 'fill-inset stroke-accent',
   flight: 'fill-surface stroke-border-strong',
   pairing: 'fill-surface stroke-border',
-  booking: 'fill-inset stroke-border',
-  hotel: 'fill-surface stroke-border',
+  // Present because the server projection reaches passengers and rooms, quiet because they are
+  // numerous and individually unremarkable: they must not compete with the flights and rotations
+  // an operator actually acts on.
+  booking: 'fill-inset stroke-border-subtle',
+  hotel: 'fill-inset stroke-border',
 };
 
 const STATE_STROKE: Record<string, string> = {
+  // Declared but not yet assessed. Dashed rather than omitted, because a node quietly dropped
+  // makes an unfinished cascade look finished.
+  unassessed: 'stroke-border-subtle [stroke-dasharray:3_2]',
   executing: 'stroke-state-info',
   assuring: 'stroke-state-info',
   planning: 'stroke-state-info',
@@ -41,7 +47,10 @@ export function GraphEdge({
   /** 'on' when this edge belongs to the selected hop or node; 'off' when something else is. */
   emphasis: 'on' | 'off' | 'neutral';
 }) {
-  // Mechanism is carried by the label, never by the line style alone.
+  // Mechanism is carried by the caption, never by the line style alone — but the caption is drawn
+  // only when this edge is the one being looked at. Every edge captioned at once produced a solid
+  // band of overlapping text rather than a readable label, and the mechanism remains available on
+  // selection, in the node detail panel, and in the crew table below.
   return (
     <g
       className={clsx(
@@ -59,9 +68,7 @@ export function GraphEdge({
           emphasis === 'on' ? 'stroke-2' : 'stroke-1',
         )}
       />
-      {/* Only labelled when the edge carries a mechanism and is being looked at. A root-cause edge
-       * has no mechanism, and 45 permanent labels is noise rather than information. */}
-      {edge.mechanism && emphasis === 'on' && (
+      {emphasis === 'on' && edge.mechanism !== edge.edgeKind && (
         <text
           x={(edge.fromX + edge.toX) / 2}
           y={(edge.fromY + edge.toY) / 2 - 4}
@@ -82,6 +89,7 @@ export function GraphNode({
   onSelect,
   itemProps,
   showLabel,
+  showSublabel,
 }: {
   node: CascadeNode;
   selected: boolean;
@@ -94,18 +102,26 @@ export function GraphNode({
    */
   itemProps?: { tabIndex: number; 'data-active'?: true };
   /**
-   * Whether to draw the text label.
+   * Whether to draw the text caption.
    *
-   * Off for the dense consequence clusters. With 22 bookings and 9 rotations on one row the labels
-   * overlapped into an unreadable smear, which is worse than no label: it looks like data and reads
-   * as noise, and at projector distance it made the whole layer look broken. The name is still on
-   * the node's `aria-label`, appears on selection, and every record is in the table below — so
-   * nothing is lost except the illegible part.
+   * Off for the dense rows. With 22 booking nodes and 9 rotations sharing one depth layer the
+   * captions overlapped into an unreadable smear — worse than no caption, because it looks like
+   * data and reads as noise, and at projector distance it made the whole layer look broken. The
+   * name stays on `aria-label`, appears when the node is selected, and every record is in the
+   * table below, so nothing is lost except the illegible part.
    */
   showLabel?: boolean;
+  /**
+   * Whether to draw the second line under the caption.
+   *
+   * Separate from `showLabel` because density bites the two differently: eight flight numbers fit
+   * across 1080px, but eight `VOBL -> VIDP, +420 min` sublabels run into each other. The route and
+   * delay are both in the blast-radius hop expansion and in the flights table.
+   */
+  showSublabel?: boolean;
 }) {
   const label = node.sublabel ? `${node.label}, ${node.sublabel}` : node.label;
-  const labelled = showLabel ?? true;
+  const captioned = (showLabel ?? true) || selected;
   return (
     <g
       {...itemProps}
@@ -136,7 +152,7 @@ export function GraphNode({
           selected ? 'stroke-2' : 'stroke-1',
         )}
       />
-      {(labelled || selected) && (
+      {captioned && (
         <text
           x={node.x}
           y={node.y + node.radius + 12}
@@ -146,7 +162,7 @@ export function GraphNode({
           {node.label}
         </text>
       )}
-      {node.sublabel && (labelled || selected) && (
+      {node.sublabel && captioned && (showSublabel ?? true) && (
         <text
           x={node.x}
           y={node.y + node.radius + 23}

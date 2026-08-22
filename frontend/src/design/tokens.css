@@ -56,7 +56,17 @@
   /* ------------------------------------------- semantic: operational state ONLY */
   --state-ok: #3dd68c; /* on time, resolved, executed, PASS */
   --state-warn: #f5a623; /* at risk, degraded, awaiting approval, WARN */
-  --state-crit: #f2555a; /* disrupted, breached, failed, FAIL */
+  /* disrupted, breached, failed, FAIL.
+   *
+   * Lighter than it looks like it should be, for the same reason as --state-neutral below: this
+   * is badge TEXT on --state-crit-bg, a 12% tint of itself, and on a `bg-raised` row that tint
+   * composites lighter still. Measured on the "blocking" badge, which is 12px and so needs the
+   * full 4.5:1 rather than the large-text allowance: #f2555a gave 4.00:1 and #f56b70 gave
+   * 4.41:1, both short. This value measures 4.98:1 on the tint over --bg-raised.
+   *
+   * Third token corrected for this same reason, so the pattern is worth naming: a state colour
+   * used as text on a tint of ITSELF loses far more contrast than it appears to. */
+  --state-crit: #f77d82;
   --state-info: #5b9df9; /* informational, scheduled, simulated */
   /* cancelled, n/a, skipped. Lighter than it looks like it needs to be, because this is badge
    * TEXT on --state-neutral-bg, a 12% tint of itself: at #66757f that combination measured
@@ -66,7 +76,7 @@
 
   --state-ok-bg: rgba(61, 214, 140, 0.12);
   --state-warn-bg: rgba(245, 166, 35, 0.12);
-  --state-crit-bg: rgba(242, 85, 90, 0.12);
+  --state-crit-bg: rgba(247, 125, 130, 0.12);
   --state-info-bg: rgba(91, 157, 249, 0.12);
   --state-neutral-bg: rgba(138, 150, 160, 0.12);
 

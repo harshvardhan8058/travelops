@@ -125,7 +125,13 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
                 "mechanism": None,
                 "detail": "Delay risk assessed against the recorded weather and runway state.",
                 "depth": 1,
-                "derived_from": "fixture",
+                "is_at_risk": True,
+                # Null on both, because a fixture edge names no recorded row. Stated as null rather
+                # than given a plausible-looking id: an invented `action:57` would be provenance
+                # that turns out not to exist, which is worse than an honest absence. The live
+                # projection fills exactly one of these, and a CHECK constraint enforces that.
+                "derived_from_action_id": None,
+                "derived_from_prediction_id": None,
             }
         )
 
@@ -155,7 +161,9 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
                 "mechanism": impact.mechanism.value,
                 "detail": impact.detail,
                 "depth": 2,
-                "derived_from": "fixture",
+                "is_at_risk": True,
+                "derived_from_action_id": None,
+                "derived_from_prediction_id": None,
             }
         )
 
@@ -187,8 +195,9 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
         },
         "note": (
             "Nodes are references to rows that already exist; there is no node table. Edge "
-            "provenance is a fixture marker, not a row id — the live projection carries a real "
-            "action or prediction reference."
+            "provenance is null here because a fixture edge names no recorded row — the live "
+            "projection carries a real action or prediction id, and a CHECK constraint requires "
+            "exactly one of them."
         ),
     }
 
@@ -335,20 +344,20 @@ def build_payload(scenario: CascadeScenario = BENGALURU_STORM) -> dict:
         # Completeness is a property of the computation, so it sits beside `rollups` rather than in
         # it. The fixture declares a complete cascade because it is a fully worked scenario; the
         # live payload computes it, and a contract test asserts the two shapes match.
+        # Exactly Stream A's `RollupStatus`, field for field. A contract test compares the two,
+        # because the console reads this shape in fixtures mode and the API's shape live.
         "rollup_status": {
             "is_complete": True,
             "computed_at": opened_at,
-            "incidents_in_group": len(flights),
-            "incidents_assessed_connections": len(flights),
-            "incidents_assessed_crew": len(flights),
-            "member_flight_ids": sorted(flight["id"] for flight in flights),
-            "flights_without_incident": [],
-            "membership_is_declared": True,
             "note": (
                 f"All {len(flights)} incidents across {len(flights)} declared flights have been "
                 "assessed for both connections and crew."
             ),
+            "flights_without_incident": [],
+            "membership_is_declared": True,
         },
+        # Zero because this fixture describes a fully worked cascade: nothing is still held.
+        "awaiting_approval_count": 0,
         "flights": flights,
         "crew_pairings": crew_pairings,
         # Phase 2, additive. Every key above is unchanged, so the existing console keeps

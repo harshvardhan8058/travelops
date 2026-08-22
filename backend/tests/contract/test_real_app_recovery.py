@@ -414,22 +414,28 @@ def test_no_second_registry_module_remains():
 def test_unimplemented_actions_still_refuse(registered):
     """An action with no service must refuse explicitly rather than silently doing nothing.
 
-    Hotel search and allocation moved out of this list in Phase 2 because they are now real. The
-    ones left have no implementation, and the point of the test is unchanged: the registry must not
-    quietly grow an entry that dispatches to nothing.
+    Hotel search and allocation left this list when Phase 2 made them real, so what remains is the
+    genuinely unimplemented set. `evaluate_entitlements` is the interesting one: it *is* implemented
+    and deliberately left unregistered, because its gate requirements name facts the seed does not
+    carry, and registering it would hard-block resolution rather than refuse cleanly.
     """
     for action in (
         ActionType.evaluate_entitlements,
         ActionType.record_outcome,
         ActionType.arrange_ground_transport,
-        ActionType.rebook_passengers,
         ActionType.reassign_gate,
     ):
         assert not dispatch.is_implemented(action)
 
-    # And the ones that are now implemented really are dispatchable, so this test cannot pass by
-    # the registry having been emptied.
-    for action in (ActionType.find_hotel_options, ActionType.reserve_hotel_block):
+    # And the converse, so this test cannot pass by the registry having been emptied.
+    for action in (
+        ActionType.check_connections,
+        ActionType.assess_crew_impact,
+        ActionType.notify_passengers,
+        ActionType.find_hotel_options,
+        ActionType.reserve_hotel_block,
+        ActionType.rebook_passengers,
+    ):
         assert dispatch.is_implemented(action)
 
 

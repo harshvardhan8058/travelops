@@ -97,17 +97,23 @@ class TestRun:
         assert "operator decision" in (body["note"] or "")
 
     def test_the_low_risk_tasks_really_executed(self, client, incident):
-        """Not refused, not faked: real Stream C services ran and recorded a result.
+        """Not refused, not faked: three Stream C services ran and recorded a result.
 
-        This fixture is a single flight with no bookings, so the figures are legitimately zero.
-        What is asserted is that each action *ran* a service — a `SERVICE_NOT_IMPLEMENTED` refusal
-        and a genuine zero look identical in a count and are opposite in meaning.
+        `find_hotel_options` and `reserve_hotel_block` joined this set when Phase 2 registered the
+        hotel services. Allocation is planned as well as registered, or no room is ever held. It is
+        listed explicitly rather than asserted loosely, because "some services ran" would still
+        pass if one silently stopped running.
         """
         client.post(f"{PREFIX}/incidents/{incident}/run")
         body = client.get(f"{PREFIX}/incidents/{incident}").json()
 
         done = {a["action_type"]: a for a in body["actions"]}
-        assert set(done) == {"check_connections", "find_hotel_options"}
+        assert set(done) == {
+            "check_connections",
+            "find_hotel_options",
+            "reserve_hotel_block",
+            "assess_crew_impact",
+        }
         for action in done.values():
             assert action["status"] == "success"
             assert "SERVICE_NOT_IMPLEMENTED" not in action["reason"]
@@ -124,9 +130,8 @@ class TestRun:
     def test_the_plan_proposes_only_what_can_be_executed(self, client, incident):
         """A plan that proposes work nothing can do stops dead and overstates the system.
 
-        `evaluate_entitlements` has no deterministic service, so it is deferred rather than
-        proposed-and-failed, and the omission is written into the rationale rather than left for a
-        reader to notice.
+        The two Stage 3 actions are deferred rather than proposed-and-failed, and the
+        omission is written into the rationale rather than left for a reader to notice.
         """
         client.post(f"{PREFIX}/incidents/{incident}/run")
         plan = client.get(f"{PREFIX}/incidents/{incident}").json()["plan"]
@@ -138,15 +143,21 @@ class TestRun:
             "assess_crew_impact",
             "notify_passengers",
         ]
+        # One deferral left. `evaluate_entitlements` still has no registered service, and the
+        # omission is written into the rationale rather than left for a reader to notice.
         assert "evaluate_entitlements" in plan["rationale"]
         assert "no deterministic service is available" in plan["rationale"]
+        # And the converse: a registered action must NOT be described as deferred.
+        assert "find_hotel_options" not in plan["rationale"]
 
     def test_the_deferral_is_on_the_timeline_too(self, client, incident):
         client.post(f"{PREFIX}/incidents/{incident}/run")
         entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
 
         proposed = next(e for e in entries if e["event_type"] == "PLAN_PROPOSED")
-        # Only entitlements remain unimplemented; hotel search and allocation are now real.
+        # One action still has no registered service. The list shrank when Phase 2 registered
+        # the hotel services, which is the point: a deferral is a statement about what exists,
+        # so it has to move when that changes.
         assert proposed["detail"]["deferred_actions"] == ["evaluate_entitlements"]
 
     def test_a_replayed_idempotency_key_returns_the_original_result(self, client, incident):

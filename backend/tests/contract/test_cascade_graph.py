@@ -228,9 +228,10 @@ async def worked(tmp_path):
                 payload={"at_risk": at_risk},
             )
 
-            # A recorded accommodation requirement, so the what-if has a room basis to
-            # re-evaluate. Without one, "rooms required" is legitimately zero and the lever tests
-            # below would be asserting against a figure no service ever produced.
+            # A recorded accommodation requirement, so the what-if levers below have a room basis
+            # to re-evaluate. The what-if reads the requirement the services established rather
+            # than recomputing it from `passengers_affected`; with no allocation recorded, zero
+            # rooms required is the honest answer, and a lever test against zero asserts nothing.
             await _record_action(
                 session,
                 incident_id=incident_id,

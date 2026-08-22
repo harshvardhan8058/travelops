@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -135,20 +134,6 @@ class AssuranceConfig(BaseModel):
     risk_tiers: dict[str, RiskTier] = Field(default_factory=dict)
     warn_allowed_actions: dict[str, list[CheckName]] = Field(default_factory=dict)
     high_risk_requires_human: bool = True
-
-    #: The plan-level and what-if sections, declared here but **never read by the action gate**.
-    #:
-    #: They are owned and validated by `app/assurance/plan_gate.py:load_plan_config`, which parses
-    #: them into `PlanConfig` and `WhatIfPolicy`. They are declared as opaque mappings rather than
-    #: left to `extra="forbid"` for a specific reason: from v2 onwards one file carries both
-    #: levels, and forbidding them would make the whole config unloadable for the action gate —
-    #: which fails closed, so every action in the system would refuse. Declaring them keeps
-    #: `extra="forbid"` doing its real job, which is catching a typo in a safety setting.
-    #:
-    #: Typed as `dict` rather than `PlanConfig` on purpose: if the action gate could see the plan
-    #: limits it could start consulting them, and the two levels would stop being independent.
-    plan: dict[str, Any] | None = None
-    what_if: dict[str, Any] | None = None
 
     def tier_for(self, action_type: str) -> RiskTier:
         """Unknown action types are treated as high risk, not low."""

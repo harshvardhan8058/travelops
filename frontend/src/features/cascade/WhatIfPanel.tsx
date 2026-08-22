@@ -1,18 +1,21 @@
 /**
  * What-If — a bounded, zero-write, deterministic re-evaluation. P2-D2.
  *
+ * The backend contract existed (`POST /incident-groups/{ref}/what-if`, exposed as `api.groupWhatIf`)
+ * with nothing calling it, so the journey's What-If step could not be driven from the console.
+ *
  * The design problem this panel has is credibility in the wrong direction: it is the one surface a
  * viewer is most likely to over-read as a prediction. So the boundary is not a footnote. The
- * server's own boundary note is rendered verbatim, `wrote_rows: false` is shown as a fact rather
- * than assumed, and every delta is phrased as "the same rules would have found", never "will".
+ * server's own `boundary_note` is rendered verbatim, `wrote_rows` and `permitted` are shown as facts
+ * rather than assumed, `seed` is displayed so a figure can be reproduced, and every delta is
+ * phrased as what the same rules would have found — never as what will happen.
  *
- * The levers are a closed set, published by the API. The controls below are built from
- * `levers_available` rather than hardcoded, so a lever the server does not accept cannot appear as
- * a control, and an undeclared one sent anyway comes back refused **by name** — shown, not
- * swallowed.
+ * Levers are the server's closed set: the controls are built from `levers_available`, so a lever the
+ * server does not accept cannot appear, and an undeclared one sent anyway comes back refused **by
+ * name** and is rendered.
  *
  * Nothing here is a slider. A continuous control invites dragging until the answer looks good; a
- * small set of declared, typed values keeps this a question an operator asks deliberately.
+ * small set of declared values keeps this a question an operator asks deliberately.
  *
  * Owner: Stream D.
  */
@@ -27,10 +30,10 @@ import type { WhatIfResponse } from '@/api/types';
 import { MonoValue, Panel, StateBadge } from '@/components/ui/primitives';
 
 /**
- * Discrete choices per lever. Values only — the labels and the set of levers come from the server.
+ * Discrete choices per lever. Values only — which levers exist comes from the server.
  *
  * Chosen to bracket the seeded scenario: the connection minimum either side of 45, occupancy either
- * side of 2, and a rate cap above the INR 6,000 that makes the shortfall real.
+ * side of 2, and a rate cap above the INR 6,000 that makes the room shortfall real.
  */
 const LEVER_CHOICES: Record<string, { label: string; value: number }[]> = {
   minimum_connection_minutes: [
@@ -53,21 +56,22 @@ const LEVER_CHOICES: Record<string, { label: string; value: number }[]> = {
     { label: 'one hop on', value: 2 },
     { label: 'two hops on', value: 3 },
   ],
+  delay_minutes_by_flight: [],
 };
 
-export function WhatIfPanel({ groupId }: { groupId: string }) {
+export function WhatIfPanel({ groupRef }: { groupRef: string }) {
   const [levers, setLevers] = useState<Record<string, number>>({});
   const [result, setResult] = useState<WhatIfResponse | null>(null);
 
   const run = useMutation({
-    mutationFn: () => api.whatIf(groupId, levers),
+    mutationFn: () => api.groupWhatIf(groupRef, levers),
     onSuccess: setResult,
   });
 
-  // Available levers come from the last response; before the first call the panel offers the ones
-  // it has choices for. Either way the server is the authority on what it will accept.
-  const available = result ? Object.keys(result.levers_available) : Object.keys(LEVER_CHOICES);
-  const offered = available.filter((lever) => LEVER_CHOICES[lever]);
+  // Before the first call the panel offers the levers it has choices for; afterwards it offers
+  // exactly what the server said it accepts. Either way the server is the authority.
+  const available = result ? result.levers_available : Object.keys(LEVER_CHOICES);
+  const offered = available.filter((lever) => (LEVER_CHOICES[lever] ?? []).length > 0);
   const error = run.error instanceof ApiError ? run.error : null;
 
   return (
@@ -91,13 +95,8 @@ export function WhatIfPanel({ groupId }: { groupId: string }) {
       <div className="flex flex-col gap-2 px-3 py-2">
         {offered.map((lever) => (
           <div key={lever}>
-            <div className="mb-1 flex items-baseline gap-1.5">
-              <span className="text-caption uppercase text-fg-secondary">
-                {lever.replace(/_/g, ' ')}
-              </span>
-              {result?.levers_available[lever] && (
-                <span className="text-caption text-fg-muted">{result.levers_available[lever]}</span>
-              )}
+            <div className="mb-1 text-caption uppercase text-fg-secondary">
+              {lever.replace(/_/g, ' ')}
             </div>
             <div className="flex flex-wrap gap-1" role="group" aria-label={lever}>
               {(LEVER_CHOICES[lever] ?? []).map((choice) => {
@@ -135,7 +134,7 @@ export function WhatIfPanel({ groupId }: { groupId: string }) {
           <button
             type="button"
             onClick={() => run.mutate()}
-            disabled={run.isPending || Object.keys(levers).length === 0}
+            disabled={run.isPending || Object.keys(levers).length === 0 || !api.canWrite}
             className={clsx(
               'rounded-sm border border-accent-border bg-accent-subtle px-2 py-1 text-caption uppercase text-accent',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
@@ -183,50 +182,89 @@ export function WhatIfPanel({ groupId }: { groupId: string }) {
               wrote rows <MonoValue muted>{result.wrote_rows ? 'yes' : 'no'}</MonoValue>
             </span>
             <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
+              {/* Shown so a figure can be reproduced. A deterministic re-evaluation whose seed is
+               * invisible is not reproducible in practice. */}
+              seed <MonoValue muted>{result.seed ?? 'none'}</MonoValue>
+            </span>
+            <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
               rules <MonoValue muted>{result.rule_version}</MonoValue>
             </span>
           </div>
 
           <p className="px-3 py-2 text-body text-fg">{result.headline}</p>
 
-          <table className="w-full border-collapse text-body">
-            <thead>
-              <tr className="border-y border-border-subtle bg-inset text-label uppercase text-fg-muted">
-                <th scope="col" className="px-3 py-1 text-left font-medium">
-                  Figure
-                </th>
-                <th scope="col" className="px-3 py-1 text-right font-medium">
-                  Same rules, now
-                </th>
-                <th scope="col" className="px-3 py-1 text-right font-medium">
-                  Substituted
-                </th>
-                <th scope="col" className="px-3 py-1 text-right font-medium">
-                  Change
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.deltas.map((delta) => (
-                <tr key={delta.key} className="border-b border-border-subtle">
-                  <td className="px-3 py-1 text-fg-secondary">{delta.label}</td>
-                  <td className="px-3 py-1 text-right">
-                    <MonoValue muted>{delta.baseline}</MonoValue>
-                  </td>
-                  <td className="px-3 py-1 text-right">
-                    <MonoValue>{delta.scenario}</MonoValue>
-                  </td>
-                  <td className="px-3 py-1 text-right">
-                    {/* Sign only. No colour: green for "fewer connections broken" would read as an
-                     * operational state, and state colours are reserved for operational state. */}
-                    <MonoValue muted>
-                      {delta.delta === 0 ? '—' : delta.delta > 0 ? `+${delta.delta}` : delta.delta}
-                    </MonoValue>
-                  </td>
+          {!result.permitted && (
+            /* The guard refused the request itself. Rendered before the figures, because a
+             * refused what-if has no figures worth reading. */
+            <div className="border-y border-state-warn/30 bg-state-warn-bg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle
+                  size={12}
+                  strokeWidth={1.5}
+                  className="text-state-warn"
+                  aria-hidden
+                />
+                <span className="text-label uppercase text-state-warn">
+                  Not permitted in this configuration
+                </span>
+              </div>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {result.refusals.map((refusal) => (
+                  <li key={refusal} className="text-caption text-state-warn">
+                    <MonoValue muted>{refusal}</MonoValue>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {result.deltas.length > 0 && (
+            <table className="w-full border-collapse text-body">
+              <caption className="sr-only">
+                Figures under the substituted inputs, against the same rules applied now
+              </caption>
+              <thead>
+                <tr className="border-y border-border-subtle bg-inset text-label uppercase text-fg-muted">
+                  <th scope="col" className="px-3 py-1 text-left font-medium">
+                    Figure
+                  </th>
+                  <th scope="col" className="px-3 py-1 text-right font-medium">
+                    Same rules, now
+                  </th>
+                  <th scope="col" className="px-3 py-1 text-right font-medium">
+                    Substituted
+                  </th>
+                  <th scope="col" className="px-3 py-1 text-right font-medium">
+                    Change
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {result.deltas.map((delta) => (
+                  <tr key={delta.key} className="border-b border-border-subtle">
+                    <td className="px-3 py-1 text-fg-secondary">{delta.label}</td>
+                    <td className="px-3 py-1 text-right">
+                      <MonoValue muted>{delta.baseline}</MonoValue>
+                    </td>
+                    <td className="px-3 py-1 text-right">
+                      <MonoValue>{delta.scenario}</MonoValue>
+                    </td>
+                    <td className="px-3 py-1 text-right">
+                      {/* Sign only, no colour. Green for "fewer connections broken" would read as an
+                       * operational state, and state colours are reserved for operational state. */}
+                      <MonoValue muted>
+                        {delta.delta === 0
+                          ? '—'
+                          : delta.delta > 0
+                            ? `+${delta.delta}`
+                            : delta.delta}
+                      </MonoValue>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
 
           {result.levers_rejected.length > 0 && (
             <div className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-2">
@@ -237,7 +275,7 @@ export function WhatIfPanel({ groupId }: { groupId: string }) {
                   className="text-state-warn"
                   aria-hidden
                 />
-                <span className="text-label uppercase text-state-warn">Refused</span>
+                <span className="text-label uppercase text-state-warn">Refused by name</span>
               </div>
               <ul className="mt-1 flex flex-col gap-0.5">
                 {result.levers_rejected.map((rejection) => (
@@ -249,8 +287,8 @@ export function WhatIfPanel({ groupId }: { groupId: string }) {
             </div>
           )}
 
-          {/* The server's own boundary statement, verbatim. Paraphrasing it here would put a second
-           * version of the most over-readable claim on the screen. */}
+          {/* The server's own boundary statement, verbatim. Paraphrasing would put a second version
+           * of the most over-readable claim in the product on the same screen. */}
           <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
             {result.boundary_note}
           </p>

@@ -42,6 +42,7 @@ from app.assurance.contract import (
     ReasonCode,
 )
 from app.models.enums import AssuranceDecision, CheckState, RiskTier
+from app.models.workflow import AssuranceEvaluation
 from app.observability.logging import get_logger
 
 log = get_logger(__name__)
@@ -214,3 +215,52 @@ async def evaluate(
             f"{GATE_ENTRY_POINT} returned {type(result).__name__}, not AssuranceResult",
         )
     return result
+
+
+#: What an unevaluated task reports to the plan gate. Fail-closed: a task the gate has not
+#: seen is not "probably fine", it is unauthorised, and it must not be approvable.
+NOT_EVALUATED_DECISION = AssuranceDecision.needs_human
+NOT_EVALUATED_TIER = RiskTier.high
+
+
+def result_from_row(row: AssuranceEvaluation) -> AssuranceResult:
+    """Reconstruct the decision that authorised a task, from its immutable row.
+
+    Replay must use the semantics recorded at decision time, which is why the evaluation
+    stores its own config version and hash rather than reading today's config.
+    """
+    from app.assurance.contract import CheckName, CheckResult, ReasonCode
+    from app.models.enums import CheckState, RiskTier
+
+    checks: list[CheckResult] = []
+    for name, payload in (row.check_results or {}).items():
+        try:
+            check_name = CheckName(name)
+        except ValueError:
+            continue
+        data = payload if isinstance(payload, dict) else {}
+        checks.append(
+            CheckResult(
+                name=check_name,
+                state=CheckState(data.get("state", CheckState.failed.value)),
+                reason_code=ReasonCode(data.get("reason_code", ReasonCode.OK.value)),
+                reason=data.get("reason"),
+                tier=RiskTier(data["tier"]) if data.get("tier") else None,
+            )
+        )
+    blocking = []
+    for name in row.blocking_reasons or []:
+        try:
+            blocking.append(CheckName(name))
+        except ValueError:
+            continue
+    return AssuranceResult(
+        decision=AssuranceDecision(row.decision),
+        risk_tier=RiskTier(row.risk_tier),
+        checks=checks,
+        blocking=blocking,
+        evidence_refs=list(row.evidence_refs or []),
+        config_version=row.config_version,
+        config_hash=row.config_hash,
+        evaluated_at=row.evaluated_at,
+    )

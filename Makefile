@@ -5,9 +5,9 @@ COMPOSE ?= docker compose
 BACKEND  := backend
 FRONTEND := frontend
 
-.PHONY: help doctor env up down logs ps migrate revision seed reset demo demo-reset \
-        test test-backend test-frontend lint fmt typecheck api-shell db-shell \
-        openapi verify-docs
+.PHONY: help doctor env up down logs ps migrate revision seed reset demo demo-cascade \
+        demo-reset test test-backend test-frontend lint fmt typecheck api-shell db-shell \
+        openapi verify-docs verify-demo verify-phase2 verify-console
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -58,11 +58,17 @@ db-shell: ## psql into the database (not host-published; goes through the contai
 
 # ---------------------------------------------------------------- demo
 
-demo: ## Inject the bengaluru_storm scenario
+demo: ## Inject the bengaluru_storm scenario (one flight)
 	$(COMPOSE) run --rm api python -m app.cli inject --scenario bengaluru_storm
+
+demo-cascade: ## Inject the whole network event: one incident per declared member flight
+	$(COMPOSE) run --rm api python -m app.cli inject --scenario bengaluru_storm --cascade
 
 demo-reset: ## Reset demo-owned records only, then re-inject
 	$(COMPOSE) run --rm api python -m app.cli demo-reset
+
+demo-reset-cascade: ## Reset demo-owned records, then re-inject the whole network event
+	$(COMPOSE) run --rm api python -m app.cli demo-reset --cascade
 
 # ---------------------------------------------------------------- quality
 
@@ -91,3 +97,14 @@ openapi: ## Write the OpenAPI document to docs/openapi.json
 
 verify-docs: ## Check every relative markdown link resolves
 	@python3 scripts/verify_docs.py
+
+# ---------------------------------------------------------------- verification
+
+verify-demo: ## Verify the Phase 1 single-incident path against the running stack
+	$(COMPOSE) exec -T api python - < scripts/verify_demo.py
+
+verify-phase2: ## Verify the whole Phase 2 network journey against the running stack
+	$(COMPOSE) exec -T api python - < scripts/verify_phase2.py
+
+verify-console: ## Drive the real console in a headless browser at 1920x1080
+	cd $(FRONTEND) && npm run verify:console -- http://127.0.0.1:5173

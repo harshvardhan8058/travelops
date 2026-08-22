@@ -147,7 +147,18 @@ async def incident(seeded) -> str:
     factory = async_sessionmaker(bind=seeded, expire_on_commit=False, autoflush=False)
     async with factory() as db:
         orchestrator = Orchestrator(db)
+        # `opened_at` is the incident's reference clock, and it must be the scenario anchor
+        # rather than the wall clock. Without it the fixture's 15:30 observation is however
+        # many days old the sandbox clock happens to be, so `sources_fresh` FAILs and the
+        # notification ends up blocked on evidence as well as risk.
+        #
+        # That masked a real defect: an operator could approve past a failed freshness check,
+        # which P2-D3 now forbids. The production path (`cli.inject`) has always passed the
+        # anchor; the test fixture simply did not.
         ctx = await orchestrator.open_incident(
-            1, "weather", evidence_refs=["fixture:bengaluru_storm:weather:VOBL"]
+            1,
+            "weather",
+            evidence_refs=["fixture:bengaluru_storm:weather:VOBL"],
+            opened_at=DEPARTURE,
         )
         return ctx.incident_reference

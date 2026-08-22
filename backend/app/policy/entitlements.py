@@ -31,7 +31,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.config import PolicyMode, Settings, get_settings
+from app.config import PolicyMode, Settings, get_settings, resolve_repo_path
 from app.policy.engine import (
     OUTCOME_NEEDS_HUMAN,
     EntitlementResult,
@@ -164,7 +164,11 @@ def load_active_pack(settings: Settings | None = None) -> LoadedPack:
     """
     active = settings or get_settings()
     return load_pack(
-        pack_dir=Path(active.policy_pack_dir),
+        # Resolved against the repo root when relative, exactly as the assurance config is.
+        # `POLICY_PACK_DIR=./policy_packs` otherwise means a different directory depending on
+        # whether the process started from the repo root, from `backend/`, or in the container,
+        # and the symptom is a legal pack "not found" rather than an obvious path error.
+        pack_dir=resolve_repo_path(Path(active.policy_pack_dir)),
         pack_id=active.policy_pack_id,
         version=active.policy_pack_version,
         mode=active.policy_mode,

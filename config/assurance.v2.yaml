@@ -57,12 +57,24 @@ plan:
   # -------------------------------------------------------------- aggregate budgets
   # A plan breaching any of these is refused until a human accepts the aggregate.
   # An exposure figure that is UNKNOWN is treated as a breach, never as zero.
+  #
+  # Calibration note. These are CEILINGS — a breach is a FAIL, and a FAIL is not approvable at
+  # plan level by anyone. So a ceiling set below the size of a real network event does not make
+  # the system safer; it makes the aggregate permanently unacceptable, which turns "a human must
+  # accept this" into "nobody may accept this". The escalation block below is the mechanism for
+  # "this is big, get a person" — the ceiling is for "this is beyond what the demo system is
+  # allowed to commit at all".
+  #
+  # The Bengaluru storm is 8 flights and 604 passengers. `max_passengers_affected` is set above
+  # that so the flagship scenario reaches a human rather than a wall, while
+  # `escalation.passengers_fraction: 0.6` still fires at 480 and forces the plan tier to high.
+  # 604/800 = 0.755, so the storm escalates and needs a person — which is the intended outcome.
   limits:
-    max_total_exposure_inr: 250000
-    max_passengers_affected: 400
-    max_rooms_committed: 80
-    max_high_risk_actions: 6
-    max_external_effects: 4
+    max_total_exposure_inr: 750000
+    max_passengers_affected: 800
+    max_rooms_committed: 200
+    max_high_risk_actions: 12
+    max_external_effects: 10
     max_tasks: 60
 
   # -------------------------------------------------------------- risk escalation

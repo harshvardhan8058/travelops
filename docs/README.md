@@ -18,7 +18,8 @@ Built by **Team SkyForge AI** · Registration ID 201 · TechCon 2026 (Coforge)
 | 0b | [`31-team-actions.md`](31-team-actions.md) | The three human actions, step by step, with fallbacks |
 | 0c | [`32-skills.md`](32-skills.md) | The eight agent skills in `.kiro/skills/` |
 | 0d | [`33-phase2-stream-a-plan.md`](33-phase2-stream-a-plan.md) | Phase 2 Full Disruption Intelligence, Stream A — the design |
-| 0e | [`34-phase2-contract-alignment.md`](34-phase2-contract-alignment.md) | **Phase 2 cross-stream contracts, scope terminology, A1–A9 order, and the B/C/D confirmations that gate implementation** |
+| 0e | [`34-phase2-contract-alignment.md`](34-phase2-contract-alignment.md) | Phase 2 cross-stream contracts, scope terminology, A1–A9 order |
+| 0f | [`35-phase2-delivery.md`](35-phase2-delivery.md) | **Phase 2 as built: the verified journey, the six defects real-stack verification found, and what still needs the demo machine** |
 | 1 | [`DECISIONS.md`](DECISIONS.md) | Canonical naming, scope, dates and settled choices |
 | 2 | [`09-requirements.md`](09-requirements.md) | What the product must and must not do |
 | 3 | [`14-hackathon-plan.md`](14-hackathon-plan.md) | Stage 2 through finals, with explicit gates/cuts |

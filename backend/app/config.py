@@ -99,10 +99,27 @@ class Settings(BaseSettings):
     policy_pack_id: str = "in-moca-charter-2019"
     policy_pack_version: str = "2019.02"
 
-    #: v2 carries every v1 action-level section forward unchanged and adds the `plan` and
-    #: `what_if` sections the Phase 2 gate requires. v1 stays on disk permanently so Phase 1
-    #: evaluations remain interpretable against the config that produced them.
-    assurance_config_path: Path = Path("./config/assurance.v2.yaml")
+    assurance_config_path: Path = Path("./config/assurance.v1.yaml")
+
+    #: Browser origins the API accepts. Loopback development ports only.
+    #:
+    #: A hardcoded list meant the console could only ever be served on 5173. Any other port — a
+    #: `vite preview`, a second instance, a rehearsal on a spare port — got a CORS failure that
+    #: renders as an empty screen with the reason only in the browser console. That is the worst
+    #: possible failure mode for a demo: it looks like the backend is down when it is answering.
+    cors_origins: str = (
+        "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
+    )
+
+    #: Plan-level (group-scoped) assurance config. A SEPARATE setting on purpose.
+    #:
+    #: v1 has no `plan:` section — it predates plan-level assurance — so loading it for the
+    #: plan gate raises. Pointing `assurance_config_path` at v2 instead would work for the
+    #: action gate, but it would silently change `config_version` on every new
+    #: `assurance_evaluation` row from `assurance-v1` to `assurance-v2`, and a Phase 1 record
+    #: must stay interpretable under the semantics it was decided by. Two paths, two
+    #: identities, each recorded on the decision it governed.
+    plan_config_path: Path = Path("./config/assurance.v2.yaml")
 
     max_workflow_steps: int = Field(default=20, ge=1, le=1000)
     action_timeout_seconds: int = Field(default=30, ge=1, le=600)

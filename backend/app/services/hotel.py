@@ -505,3 +505,66 @@ class HotelAllocationService:
 #: Phase 1 name, kept so nothing that imported it breaks. Search is the safe default: the read
 #: cannot take rooms off the market by accident.
 HotelService = HotelSearchService
+
+
+# ------------------------------------------------------------------- group-wide totals
+
+
+async def group_hotel_totals(session: AsyncSession, *, group_id: int) -> dict[str, Any] | None:
+    """Accommodation figures summed across a whole disruption, or None if none were recorded.
+
+    **Not the most recent allocation's payload.** Eight flights draw on one finite inventory, so the
+    last one to run sees only whatever is left. Reading its figures as the group's showed "9 rooms
+    required, 0 short" for a disruption needing 303 rooms against 71 available — and the gap is the
+    entire point of the scenario.
+
+    Lives here, in Stream C's service layer, rather than in the group API, for two reasons. The
+    aggregation is domain logic over recorded findings, which is what a service is for; and
+    `test_phase2_guards` forbids summing an action payload inside `app/api/`, because "just sum the
+    counts" is exactly how 22 distinct at-risk bookings become 176.
+
+    Partial allocations are included. A `needs_human` allocation that secured 71 rooms committed
+    real inventory, and excluding it would report a shortfall against rooms that are already held.
+    `None` — rather than a dictionary of zeros — when nothing has run, so an unknown requirement
+    never reads as no requirement.
+    """
+    from app.db.scenario_queries import group_affected_flights, recorded_actions
+    from app.models.enums import ActionType
+
+    members = await group_affected_flights(session, group_id=group_id)
+    incident_ids = [m.incident_id for m in members if m.incident_id is not None]
+    rows = await recorded_actions(
+        session,
+        incident_ids,
+        ActionType.reserve_hotel_block.value,
+        statuses=("success", "needs_human"),
+    )
+    if not rows:
+        return None
+
+    required = allocated = cost = 0
+    allocations: list[dict[str, Any]] = []
+    for _incident_id, _action_id, payload in rows:
+        required += int(payload.get("rooms_required") or 0)
+        allocated += int(payload.get("rooms_allocated") or 0)
+        cost += int(payload.get("total_cost_inr") or 0)
+        allocations.extend(payload.get("allocations") or [])
+
+    short = max(0, required - allocated)
+    return {
+        "rooms_required": required,
+        "rooms_allocated": allocated,
+        "shortfall_rooms": short,
+        "total_cost_inr": cost,
+        "allocations": allocations,
+        "is_complete": short == 0,
+        "shortfall_note": (
+            f"All {required} rooms secured across the group."
+            if short == 0
+            else (
+                f"{allocated} of {required} rooms secured across the group. {short} rooms short. "
+                "Every property within the rate cap is exhausted, so closing the gap needs a "
+                "decision: raise the cap, go further out, or accept that some passengers wait."
+            )
+        ),
+    }

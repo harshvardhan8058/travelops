@@ -21,6 +21,8 @@ import { PolicyScreen } from '@/features/policy-citation/PolicyScreen';
 import { ReplayScreen } from '@/features/replay/ReplayScreen';
 import { SourcesLedger } from '@/features/sources/SourcesLedger';
 import { DecisionTimeline } from '@/features/timeline/DecisionTimeline';
+import { GroupApprovalQueue } from '@/features/assurance/GroupApprovalQueue';
+import { PlanComparison } from '@/features/plans/PlanComparison';
 import { StreamPlaceholder } from '@/features/placeholder/StreamPlaceholder';
 
 /** Used only when the current route names no incident, e.g. the Command Center. */
@@ -28,7 +30,7 @@ const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
 function useRouteIncidentId(fallback: string): string {
   const { pathname } = useLocation();
-  const match = /^\/(?:incidents|policy|replay|reports)\/([^/]+)/.exec(pathname);
+  const match = /^\/(?:incidents|policy|replay|reports|plans)\/([^/]+)/.exec(pathname);
   const captured = match?.[1];
   return captured ? decodeURIComponent(captured) : fallback;
 }
@@ -73,20 +75,14 @@ export function App() {
         <Route path="/replay/:incidentId" element={<ReplayScreen />} />
         <Route path="/sources" element={<SourcesLedger />} />
         {/*
-         * Not yet built, and blocked on backend contracts rather than on effort:
-         *   /assurance      group-scoped approval queue — needs FE-8 and FE-10
-         *   /reports/:id    executive report — buildable, sequenced after C2-8
+         * `/assurance` and `/plans/:id` are real as of Phase 2: the group-scoped assurance endpoint
+         * and the plan decision contract landed, so neither is a placeholder any more.
+         *
+         * Still blocked on effort rather than contracts:
+         *   /reports/:id    executive report — buildable, sequenced last
          */}
-        <Route
-          path="/assurance"
-          element={
-            <StreamPlaceholder
-              screen="Group approval queue"
-              owner="Stream D"
-              spec="Phase 2 C2-5: blocked on FE-8 (group-scoped assurance) and FE-10 (plan decision contract)"
-            />
-          }
-        />
+        <Route path="/assurance" element={<GroupApprovalQueue />} />
+        <Route path="/plans/:incidentId" element={<PlanComparison />} />
         <Route
           path="/reports/:incidentId"
           element={

@@ -16,7 +16,8 @@
     "predev": "node scripts/sync-fixtures.mjs",
     "prebuild": "node scripts/sync-fixtures.mjs",
     "test": "vitest --run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify:console": "node scripts/verify-console.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

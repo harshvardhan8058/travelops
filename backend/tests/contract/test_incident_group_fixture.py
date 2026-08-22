@@ -44,6 +44,7 @@ TOP_LEVEL_KEYS = {
     # Phase 2, additive. Kept in the same frozen-shape test as everything else so a future
     # addition is a deliberate edit here rather than a drift the console discovers at runtime.
     "rollup_status",
+    "awaiting_approval_count",
     "graph",
     "blast_radius",
     "mechanism_legend",
@@ -331,12 +332,19 @@ def test_exactly_one_flight_node_is_primary_and_exactly_one_is_an_arrival():
     assert roles.count("affected_departure") == 6
 
 
-def test_the_fixture_marks_its_edge_provenance_as_a_fixture():
-    """A fixture edge must not be mistakable for recorded evidence. The live projection carries
-    a real `action:` or `prediction:` reference; this says plainly that it does not."""
+def test_the_fixture_names_no_recorded_row_for_its_edges():
+    """A fixture edge must not be mistakable for recorded evidence.
+
+    Both provenance columns are null, which the console renders as "not recorded". An invented
+    `action:57` would be provenance that turns out not to exist — worse than an honest absence,
+    because it survives a glance. The live projection fills exactly one of the two, and a CHECK
+    constraint on `disruption_edge` enforces that.
+    """
     graph = _committed()["graph"]
-    assert all(edge["derived_from"] == "fixture" for edge in graph["edges"])
-    assert "not a row id" in graph["note"]
+    for edge in graph["edges"]:
+        assert edge["derived_from_action_id"] is None
+        assert edge["derived_from_prediction_id"] is None
+    assert "names no recorded row" in graph["note"]
 
 
 def test_blast_radius_repeats_the_rollups_and_calculates_nothing():
@@ -407,16 +415,16 @@ def test_the_fixture_declares_every_field_the_real_endpoint_returns():
     model: the fixture legitimately carries `generated_by` and `note`, which the API does not, and a
     strict validation would force those out of the file for no benefit.
     """
-    from app.schemas.groups import GroupDetailResponse
+    from app.schemas.cascade import IncidentGroupDetailResponse
 
-    declared = set(GroupDetailResponse.model_fields)
+    declared = set(IncidentGroupDetailResponse.model_fields)
     present = set(_committed())
     missing = declared - present
     assert not missing, f"fixture is missing fields the API returns: {sorted(missing)}"
 
 
 def test_the_fixture_rollup_status_matches_the_api_shape():
-    from app.schemas.groups import RollupStatus
+    from app.schemas.cascade import RollupStatus
 
     assert set(_committed()["rollup_status"]) == set(RollupStatus.model_fields)
 
@@ -428,7 +436,7 @@ def test_the_fixture_graph_matches_the_api_shape():
     into one `derived_from` string, and the fixture does the same, because a renderer only needs to
     link to the evidence. The database keeps both columns and the CHECK that exactly one is set.
     """
-    from app.schemas.groups import CascadeGraphOut, GraphEdgeOut, GraphNodeOut
+    from app.schemas.cascade import CascadeGraphOut, GraphEdgeOut, GraphNodeOut
 
     graph = _committed()["graph"]
     assert set(CascadeGraphOut.model_fields) - set(graph) <= {"snapshot_hash"}
@@ -439,7 +447,7 @@ def test_the_fixture_graph_matches_the_api_shape():
 
 
 def test_the_fixture_blast_radius_matches_the_api_shape():
-    from app.schemas.groups import BlastRadiusDimensionOut, BlastRadiusOut
+    from app.schemas.cascade import BlastRadiusDimensionOut, BlastRadiusOut
 
     radius = _committed()["blast_radius"]
     assert set(BlastRadiusOut.model_fields) - set(radius) <= {"group_reference"}
