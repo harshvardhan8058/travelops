@@ -85,7 +85,7 @@ class ScheduledFlight(BaseModel):
 
     @property
     def route(self) -> str:
-        return f"{self.origin_icao} \u2192 {self.destination_icao}"
+        return f"{self.origin_icao} -> {self.destination_icao}"
 
 
 class RosterLeg(BaseModel):

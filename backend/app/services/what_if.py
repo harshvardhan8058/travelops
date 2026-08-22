@@ -32,6 +32,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.scenario_queries import (
@@ -82,9 +83,7 @@ class ScenarioDelta(BaseModel):
         if self.delta == 0:
             return f"{self.label}: unchanged at {self.baseline}."
         direction = "fewer" if self.delta < 0 else "more"
-        return (
-            f"{self.label}: {self.baseline} \u2192 {self.scenario} ({abs(self.delta)} {direction})."
-        )
+        return f"{self.label}: {self.baseline} -> {self.scenario} ({abs(self.delta)} {direction})."
 
 
 class WhatIfResult(BaseModel):
@@ -298,8 +297,13 @@ async def _re_evaluate(
             if key in levers
         }
     )
+    # The room basis is the passengers who actually need a bed — those with no onward departure
+    # left today — read from the recorded allocations. Using `passengers_affected` here would give
+    # the what-if a different definition of "rooms required" from the live allocation, and two
+    # definitions of one figure in one product is how a demo ends up contradicting itself on
+    # screen.
     allocation = allocate_rooms(
-        passengers=baseline.passengers_affected,
+        passengers=await _accommodation_basis(session, baseline=baseline),
         options=await load_hotel_options(session, airport_icao=baseline.airport_icao),
         constraints=constraints,
     )
@@ -310,6 +314,44 @@ async def _re_evaluate(
         "rooms_required": allocation.rooms_required,
         "rooms_short": allocation.shortfall_rooms,
     }
+
+
+async def _accommodation_basis(session: AsyncSession, *, baseline: CascadeRollup) -> int:
+    """Passengers needing a room, from the recorded allocations rather than recomputed.
+
+    `rooms_required * passengers_per_room` recovers the demand the live services already
+    established. Falls back to zero when no allocation has run: a what-if must not invent a
+    demand figure that no service produced.
+    """
+    from app.db.scenario_queries import load_business_constraints, recorded_actions
+    from app.models.enums import ActionType
+    from app.models.workflow import Incident
+    from app.services.hotel import load_constraints
+
+    incident_ids = [
+        int(row[0])
+        for row in (
+            await session.execute(
+                select(Incident.id).where(
+                    Incident.group_id.in_(
+                        select(Incident.group_id).where(
+                            Incident.flight_id.in_(baseline.member_flight_ids or [0])
+                        )
+                    )
+                )
+            )
+        ).all()
+    ]
+    rows = await recorded_actions(
+        session,
+        incident_ids,
+        ActionType.reserve_hotel_block.value,
+        statuses=("success", "needs_human"),
+    )
+    if not rows:
+        return 0
+    per_room = load_constraints(await load_business_constraints(session)).passengers_per_room
+    return sum(int(payload.get("rooms_required") or 0) for _i, _a, payload in rows) * per_room
 
 
 def what_if_payload(result: WhatIfResult) -> dict[str, Any]:

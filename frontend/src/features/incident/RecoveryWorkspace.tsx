@@ -3,7 +3,7 @@
  *
  * Where the actual work happens, and the middle of the demo path:
  *
- *   Ops Board → Recovery Workspace → assurance decision → approval → execution → Timeline
+ *   Ops Board -> Recovery Workspace -> assurance decision -> approval -> execution -> Timeline
  *
  * Three columns, one job each. LEFT is what the system knew (inputs, nothing editable).
  * CENTRE is what it decided to do and who produced that plan. RIGHT is what the gate made of
@@ -392,7 +392,7 @@ export function RecoveryWorkspace() {
             <span className="text-label uppercase text-fg-muted">Last run</span>
             <span className="flex items-center gap-1.5">
               <StateBadge status={lastRun.previous_state} />
-              <span className="text-fg-muted">→</span>
+              <span className="text-fg-muted">{'->'}</span>
               <StateBadge status={lastRun.state} />
             </span>
             <span className="text-caption uppercase text-fg-muted">

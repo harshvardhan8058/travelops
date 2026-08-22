@@ -786,7 +786,7 @@ export function AgeIndicator({ minutes, limit = 60 }: { minutes: number; limit?:
 // ---------------------------------------------------------------- StateRail
 /**
  * The incident state machine, rendered as a rail:
- * detected → assessing → planning → assuring → executing → resolved.
+ * detected -> assessing -> planning -> assuring -> executing -> resolved.
  *
  * Reached states carry a check, the current state carries a filled dot, and unreached states
  * stay muted — so the position in the workflow survives a projector washing out hue. The

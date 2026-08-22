@@ -8,17 +8,13 @@
  * Owner: Stream D.
  */
 
-import { ChevronDown, ChevronRight, CircleSlash } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 
 import type { IncidentGroupDetail, PairingMechanism } from '@/api/types';
 import { MonoValue, Panel, StateBadge } from '@/components/ui/primitives';
 import { Metric } from '@/components/ui/Metric';
-import {
-  arrayLengthDerivation,
-  pairingDerivation,
-  terminalDerivation,
-} from '@/components/ui/derivation';
+import { arrayLengthDerivation, pairingDerivation } from '@/components/ui/derivation';
 import { buildRadius } from './radius';
 
 export function BlastRadius({
@@ -39,24 +35,15 @@ export function BlastRadius({
   return (
     <Panel title="Blast radius" className="flex min-h-0 flex-col overflow-hidden">
       <div className="border-b border-border-subtle px-3 py-2">
-        <p className="text-body text-fg">
-          <MonoValue>{radius.trigger.cause}</MonoValue> at{' '}
-          <MonoValue>{radius.trigger.airport}</MonoValue> reaches{' '}
-          {radius.hops.map((hop, index) => (
-            <span key={hop.index}>
-              {index > 0 && ' → '}
-              <Metric
-                value={hop.count}
-                derivation={arrayLengthDerivation(hop.to, hop.count, {
-                  endpoint: 'GET /incident-groups/{id}',
-                  field: hop.countSource.replace('length of ', ''),
-                  provenance: group.provenance,
-                })}
-              />{' '}
-              {hop.to}
-            </span>
-          ))}
-          .
+        {/* The server's own headline, verbatim, including its completeness caveat. Rendered as one
+         * string on purpose: splitting the totals from the qualification invites a UI that shows
+         * the first and drops the second. */}
+        <p className="text-body text-fg">{radius.headline}</p>
+        <p className="mt-1 flex items-center gap-1.5 text-caption text-fg-muted">
+          <MonoValue muted>{radius.trigger.cause}</MonoValue> at{' '}
+          <MonoValue muted>{radius.trigger.airport}</MonoValue>
+          <span aria-hidden>·</span>
+          snapshot <MonoValue muted>{radius.snapshotHash}</MonoValue>
         </p>
         {radius.summary && (
           /* The backend's own explanation, verbatim. */
@@ -91,7 +78,7 @@ export function BlastRadius({
                   hop {hop.index}
                 </MonoValue>
                 <span className="min-w-0 flex-1 text-body text-fg">
-                  {hop.from} → {hop.to}
+                  {hop.from} {'->'} {hop.to}
                 </span>
                 <Metric
                   value={hop.count}
@@ -109,12 +96,17 @@ export function BlastRadius({
                     <dl className="mb-2 flex flex-col gap-1">
                       {hop.mechanismCounts.map(({ mechanism, count }) => {
                         const active = selectedMechanism === mechanism;
+                        const legend =
+                          group.mechanism_legend?.[mechanism as PairingMechanism] ??
+                          'no legend text returned';
                         return (
                           <div key={mechanism} className="flex items-start gap-2">
                             <dt className="w-[112px] shrink-0">
                               <button
                                 type="button"
-                                onClick={() => onSelectMechanism(active ? null : mechanism)}
+                                onClick={() =>
+                                  onSelectMechanism(active ? null : (mechanism as PairingMechanism))
+                                }
                                 aria-pressed={active}
                                 className={clsx(
                                   'rounded-sm border px-1.5 py-0.5 text-caption uppercase',
@@ -128,8 +120,7 @@ export function BlastRadius({
                               </button>
                             </dt>
                             <dd className="min-w-0 flex-1 text-caption text-fg-muted">
-                              <MonoValue muted>{count}</MonoValue>{' '}
-                              {group.mechanism_legend?.[mechanism] ?? 'no legend text returned'}
+                              <MonoValue muted>{count}</MonoValue> {legend}
                             </dd>
                           </div>
                         );
@@ -144,7 +135,15 @@ export function BlastRadius({
                       )
                       .map((record) => (
                         <li key={record.id} className="flex flex-col gap-0.5">
-                          <MonoValue>{record.label}</MonoValue>
+                          <span className="flex items-baseline gap-1.5">
+                            <MonoValue>{record.label}</MonoValue>
+                            {/* The recorded row this edge was read from. On screen rather than only
+                             * in the payload: "every figure names its source" is the product's
+                             * central claim, and an edge is a figure. */}
+                            <MonoValue muted className="text-caption">
+                              {record.derivedFrom}
+                            </MonoValue>
+                          </span>
                           {record.detail && (
                             <span className="text-caption text-fg-muted">{record.detail}</span>
                           )}
@@ -159,48 +158,82 @@ export function BlastRadius({
       </ol>
 
       {/*
-       * Terminal counts. These are real numbers with no records behind them, and saying so is the
-       * difference between this and a demo that draws 22 fictional connection nodes.
+       * The measured dimensions, each naming the service that measured it. A dimension whose
+       * `is_complete` is false is a floor rather than a total, and it is labelled as one — that
+       * label is the whole difference between an honest partial answer and an overstated one.
+       *
+       * There is deliberately no confidence figure here. Completeness is countable; confidence
+       * would be a probability nothing in this system is calibrated to produce.
        */}
       <div className="border-t border-border-subtle bg-inset px-3 py-2">
-        <h3 className="mb-1 text-label uppercase text-fg-muted">Counted, not traversable</h3>
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <h3 className="text-label uppercase text-fg-muted">Measured dimensions</h3>
+          <span className="flex items-center gap-1.5 text-caption text-fg-muted">
+            assessed
+            <MonoValue muted>{radius.completeness.ratio}</MonoValue>
+            flights
+          </span>
+        </div>
         <ul className="flex flex-col gap-1.5">
-          {radius.terminals.map((terminal) => (
-            <li key={terminal.label} className="flex items-start gap-2">
-              <CircleSlash
-                size={12}
-                strokeWidth={1.5}
-                className="mt-0.5 shrink-0 text-fg-muted"
-                aria-hidden
-              />
+          {radius.dimensions.map((dimension) => (
+            <li key={dimension.key} className="flex items-start gap-2">
               <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="text-caption uppercase text-fg-secondary">{terminal.label}</span>
+                <span className="flex items-baseline gap-1.5">
+                  <span className="text-caption uppercase text-fg-secondary">
+                    {dimension.label}
+                  </span>
                   <Metric
-                    value={terminal.count}
-                    derivation={terminalDerivation(
-                      terminal.label,
-                      terminal.count,
-                      terminal.countSource,
-                      terminal.reason,
-                    )}
+                    value={dimension.value}
+                    derivation={arrayLengthDerivation(dimension.label, dimension.value, {
+                      endpoint: 'GET /incident-groups/{id}',
+                      field: `blast_radius.dimensions[${dimension.key}].value`,
+                      provenance: group.provenance,
+                    })}
                   />
+                  <span className="text-caption text-fg-muted">{dimension.unit}</span>
+                  {!dimension.is_complete && (
+                    /* Not decoration: this value is a lower bound and must never read as a total. */
+                    <span className="rounded-sm border border-state-warn/40 px-1 text-caption uppercase text-state-warn">
+                      at least
+                    </span>
+                  )}
                 </span>
-                <span className="block text-caption text-fg-muted">{terminal.reason}</span>
+                <span className="block text-caption text-fg-muted">
+                  measured by <MonoValue muted>{dimension.measured_by}</MonoValue>
+                  {dimension.note ? ` · ${dimension.note}` : ''}
+                </span>
               </span>
             </li>
           ))}
         </ul>
       </div>
 
+      {radius.gaps.length > 0 && (
+        /* Named, countable gaps. A partial cascade must say what is missing, not just that
+         * something is. */
+        <div className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={12} strokeWidth={1.5} className="text-state-warn" aria-hidden />
+            <span className="text-label uppercase text-state-warn">Not yet known</span>
+          </div>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {radius.gaps.map((gap) => (
+              <li key={gap} className="text-caption text-state-warn">
+                {gap}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {radius.unmatched.length > 0 && (
         <div className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-2">
           <div className="flex items-center gap-2">
             <StateBadge status="degraded" label="unmatched" />
             <span className="text-caption text-state-warn">
-              {radius.unmatched.length} pairing
-              {radius.unmatched.length === 1 ? '' : 's'} name a source flight that is not in this
-              group, so no edge could be drawn for them
+              {radius.unmatched.length} rotation
+              {radius.unmatched.length === 1 ? '' : 's'} appear in the crew table with no graph edge
+              reaching them, so the picture understates the cascade by that much
             </span>
           </div>
           <ul className="mt-1 flex flex-col gap-0.5">

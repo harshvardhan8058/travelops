@@ -1,133 +1,130 @@
 /**
  * Blast radius: how far the disruption reaches, and by what mechanism at each hop.
  *
- * Pure and unit-testable. Every figure is either a count the API returned or the length of an
- * array it returned — see §0.4 of the Phase 2 plan for the exhaustive whitelist.
+ * Pure and unit-testable. **Every figure here is repeated from the server payload; none is
+ * computed.** The dimensions come from `blast_radius.dimensions`, each carrying the service that
+ * measured it, and the hops are a partition of `graph.edges` by `edge_kind` — which is a grouping
+ * of records the API returned, not a derivation of new ones.
  *
- * The important design decision is what is NOT a hop. Connections (22) and candidate hotels (11)
- * arrive as counts inside `rollups` with no arrays behind them, so they cannot be traversed and
- * are returned as terminals carrying the reason. Drawing them as nodes would be inventing 33
- * relationships that no endpoint asserts.
+ * The earlier version had to describe connections and hotels as untraversable "terminals", because
+ * they arrived as bare counts with no records behind them. They are now real nodes with real edges,
+ * each naming the action it was read from, so they are ordinary hops. The distinction that remains
+ * is completeness: a dimension whose `is_complete` is false is a floor, not a total, and it says so.
+ *
+ * There is deliberately no confidence figure. Completeness is countable; a confidence percentage
+ * would be a probability nothing in this system is calibrated to produce.
  *
  * Owner: Stream D.
  */
 
-import type { CrewPairingImpact, IncidentGroupDetail, PairingMechanism } from '@/api/types';
+import type {
+  BlastRadiusDimension,
+  CascadeEdgeKind,
+  CascadeGraphPayload,
+  CrewPairingImpact,
+  IncidentGroupDetail,
+} from '@/api/types';
 
 export interface RadiusHop {
+  kind: CascadeEdgeKind;
   index: number;
   from: string;
   to: string;
-  /** Always an array length or an API-returned count. Never computed any other way. */
+  /** Number of edges of this kind. A count of returned records, never anything else. */
   count: number;
   countSource: string;
-  /** Partition over a returned enum field. Empty for hop 1, which has no mechanism. */
-  mechanismCounts: { mechanism: PairingMechanism; count: number }[];
-  records: { id: string; label: string; detail?: string }[];
+  /** Partition over the returned `mechanism` field. Empty when the kind carries none. */
+  mechanismCounts: { mechanism: string; count: number }[];
+  records: { id: string; label: string; detail?: string; derivedFrom: string }[];
 }
 
-export interface RadiusTerminal {
-  label: string;
-  count: number;
-  countSource: string;
-  /** Why this cannot be traversed. Rendered on screen, not hidden. */
-  reason: string;
-}
-
-export interface BlastRadius {
+export interface Radius {
   trigger: { cause: string; airport: string };
+  headline: string;
   hops: RadiusHop[];
-  terminals: RadiusTerminal[];
+  dimensions: BlastRadiusDimension[];
+  completeness: IncidentGroupDetail['blast_radius']['completeness'];
+  gaps: string[];
+  /** Pairings the crew table lists that no graph edge reaches. Surfaced, never dropped. */
   unmatched: CrewPairingImpact[];
   /** The backend's own explanation, rendered verbatim. */
   summary?: string;
+  snapshotHash: string;
 }
 
+const HOP_LABELS: Record<CascadeEdgeKind, { from: string; to: string }> = {
+  root_cause: { from: 'trigger', to: 'flights' },
+  crew: { from: 'flights', to: 'crew rotations' },
+  connection: { from: 'flights', to: 'connections' },
+  accommodation: { from: 'flights', to: 'rooms held' },
+};
+
+const HOP_ORDER: CascadeEdgeKind[] = ['root_cause', 'crew', 'connection', 'accommodation'];
+
 function partitionMechanisms(
-  pairings: CrewPairingImpact[],
-): { mechanism: PairingMechanism; count: number }[] {
-  const counts = new Map<PairingMechanism, number>();
-  for (const pairing of pairings) {
-    counts.set(pairing.mechanism, (counts.get(pairing.mechanism) ?? 0) + 1);
+  edges: CascadeGraphPayload['edges'],
+): { mechanism: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const edge of edges) {
+    if (!edge.mechanism) continue;
+    counts.set(edge.mechanism, (counts.get(edge.mechanism) ?? 0) + 1);
   }
   return [...counts.entries()]
     .map(([mechanism, count]) => ({ mechanism, count }))
     .sort((a, b) => b.count - a.count || a.mechanism.localeCompare(b.mechanism));
 }
 
-export function buildRadius(group: IncidentGroupDetail): BlastRadius {
-  const flights = group.flights as { id?: number; flight_number?: string; route?: string }[];
-  const pairings = group.crew_pairings;
-  const flightNumbers = new Set(
-    flights.map((flight) => flight.flight_number).filter((n): n is string => Boolean(n)),
+export function buildRadius(group: IncidentGroupDetail): Radius {
+  const graph = group.graph;
+  const labelByRef = new Map(graph.nodes.map((node) => [node.ref, node]));
+
+  const hops: RadiusHop[] = HOP_ORDER.filter((kind) =>
+    graph.edges.some((edge) => edge.edge_kind === kind),
+  ).map((kind, index) => {
+    const edges = graph.edges.filter((edge) => edge.edge_kind === kind);
+    return {
+      kind,
+      index: index + 1,
+      from:
+        kind === 'root_cause'
+          ? `${group.root_cause} at ${group.airport_icao}`
+          : HOP_LABELS[kind].from,
+      to: HOP_LABELS[kind].to,
+      count: edges.length,
+      countSource: `graph.edges where edge_kind = ${kind}`,
+      mechanismCounts: partitionMechanisms(edges),
+      records: edges.map((edge) => ({
+        id: `${edge.source_ref}->${edge.target_ref}`,
+        label: `${labelByRef.get(edge.source_ref)?.label ?? edge.source_ref} -> ${
+          labelByRef.get(edge.target_ref)?.label ?? edge.target_ref
+        }`,
+        detail: edge.detail ?? undefined,
+        derivedFrom: edge.derived_from,
+      })),
+    };
+  });
+
+  // A rotation the crew table lists that the graph does not reach. Should be empty; shown when not,
+  // because a silently missing edge understates the cascade.
+  const reached = new Set(
+    graph.edges
+      .filter((edge) => edge.edge_kind === 'crew')
+      .map((edge) => labelByRef.get(edge.target_ref)?.label)
+      .filter((label): label is string => Boolean(label)),
   );
-
-  const unmatched = pairings.filter((pairing) => !flightNumbers.has(pairing.source_flight));
-
-  const hops: RadiusHop[] = [
-    {
-      index: 1,
-      from: `${group.root_cause} at ${group.airport_icao}`,
-      to: 'flights',
-      count: flights.length,
-      countSource: 'length of flights[]',
-      mechanismCounts: [],
-      records: flights.map((flight) => ({
-        id: String(flight.id ?? flight.flight_number ?? ''),
-        label: flight.flight_number ?? 'unknown flight',
-        detail: flight.route,
-      })),
-    },
-    {
-      index: 2,
-      from: 'flights',
-      to: 'crew pairings',
-      count: pairings.length,
-      countSource: 'length of crew_pairings[]',
-      mechanismCounts: partitionMechanisms(pairings),
-      records: pairings.map((pairing) => ({
-        id: pairing.pairing_reference,
-        label: `${pairing.pairing_reference} · ${pairing.mechanism}`,
-        detail: pairing.detail,
-      })),
-    },
-  ];
-
-  const rollups = group.rollups ?? {};
-  const terminals: RadiusTerminal[] = [];
-  const asCount = (value: unknown): number | null => (typeof value === 'number' ? value : null);
-
-  const connections = asCount(rollups['connections_at_risk']);
-  if (connections !== null) {
-    terminals.push({
-      label: 'connections at risk',
-      count: connections,
-      countSource: 'rollups.connections_at_risk',
-      reason:
-        'A count only. No per-connection records are returned, so this cannot be traversed or listed.',
-    });
-  }
-  const hotels = asCount(rollups['candidate_hotels']);
-  if (hotels !== null) {
-    terminals.push({
-      label: 'candidate hotels',
-      count: hotels,
-      countSource: 'rollups.candidate_hotels',
-      reason:
-        'A count only. No per-hotel records are returned, so this cannot be traversed or listed.',
-    });
-  }
+  const unmatched = group.crew_pairings.filter(
+    (pairing) => !reached.has(pairing.pairing_reference),
+  );
 
   return {
     trigger: { cause: group.root_cause, airport: group.airport_icao },
+    headline: group.blast_radius.headline,
     hops,
-    terminals,
+    dimensions: group.blast_radius.dimensions,
+    completeness: group.blast_radius.completeness,
+    gaps: group.blast_radius.gaps,
     unmatched,
     summary: group.why_nine_not_eight,
+    snapshotHash: graph.snapshot_hash,
   };
-}
-
-/** Matched pairing count, used by the graph and the radius so they cannot disagree. */
-export function matchedPairingCount(group: IncidentGroupDetail): number {
-  return buildRadius(group).hops[1]?.count ?? 0;
 }

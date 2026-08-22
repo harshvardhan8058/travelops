@@ -50,25 +50,16 @@ async def list_sources() -> Any:
     return _load("sources")
 
 
-# ---------------------------------------------------------------- Stream A
-@router.get("/incident-groups", summary="Cascade summaries [fixture]")
-async def list_incident_groups() -> Any:
-    return _load("incident_groups")
-
-
-@router.get("/incident-groups/{group_id}", summary="Cascade detail [fixture]")
-async def get_incident_group(group_id: str) -> Any:
-    payload = _load("incident_group_detail")
-    if payload.get("reference") != group_id and group_id not in {"current", payload.get("id")}:
-        # Wave 0 serves a single canonical fixture; accept the alias so the UI can link.
-        payload = {**payload, "requested_id": group_id}
-    return payload
-
-
 # /incidents/{id}, /incidents/{id}/timeline and /incidents/{id}/assurance were served from
 # here in Wave 0. They are now real, in app/api/incidents.py and app/api/assurance_router.py,
 # and their fixture routes were deleted in the same commit so there is never a period where
 # two implementations of one path exist.
+#
+# /incident-groups and /incident-groups/{id} followed in Phase 2 and are now real, in
+# app/api/groups.py, together with the group run, plan-assurance, plan-approval, what-if and
+# replay routes. Their fixture routes were deleted in the same commit for the same reason. The
+# committed fixture JSON stays on disk: the frontend uses it for its offline mode and the
+# contract tests assert the real payload keeps the same shape.
 
 
 # ---------------------------------------------------------------- Stream B

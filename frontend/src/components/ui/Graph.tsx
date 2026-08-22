@@ -17,6 +17,8 @@ const KIND_CLASS: Record<CascadeNode['kind'], string> = {
   event: 'fill-inset stroke-accent',
   flight: 'fill-surface stroke-border-strong',
   pairing: 'fill-surface stroke-border',
+  booking: 'fill-inset stroke-border',
+  hotel: 'fill-surface stroke-border',
 };
 
 const STATE_STROKE: Record<string, string> = {
@@ -57,17 +59,18 @@ export function GraphEdge({
           emphasis === 'on' ? 'stroke-2' : 'stroke-1',
         )}
       />
-      <text
-        x={(edge.fromX + edge.toX) / 2}
-        y={(edge.fromY + edge.toY) / 2 - 4}
-        textAnchor="middle"
-        className={clsx(
-          'font-mono text-[9px] uppercase',
-          emphasis === 'on' ? 'fill-accent' : 'fill-fg-muted',
-        )}
-      >
-        {edge.mechanism.replace(/_/g, ' ')}
-      </text>
+      {/* Only labelled when the edge carries a mechanism and is being looked at. A root-cause edge
+       * has no mechanism, and 45 permanent labels is noise rather than information. */}
+      {edge.mechanism && emphasis === 'on' && (
+        <text
+          x={(edge.fromX + edge.toX) / 2}
+          y={(edge.fromY + edge.toY) / 2 - 4}
+          textAnchor="middle"
+          className="fill-accent font-mono text-[9px] uppercase"
+        >
+          {edge.mechanism.replace(/_/g, ' ')}
+        </text>
+      )}
     </g>
   );
 }
@@ -78,6 +81,7 @@ export function GraphNode({
   dimmed,
   onSelect,
   itemProps,
+  showLabel,
 }: {
   node: CascadeNode;
   selected: boolean;
@@ -89,8 +93,19 @@ export function GraphNode({
    * navigation while leaving the tab stops looking correct.
    */
   itemProps?: { tabIndex: number; 'data-active'?: true };
+  /**
+   * Whether to draw the text label.
+   *
+   * Off for the dense consequence clusters. With 22 bookings and 9 rotations on one row the labels
+   * overlapped into an unreadable smear, which is worse than no label: it looks like data and reads
+   * as noise, and at projector distance it made the whole layer look broken. The name is still on
+   * the node's `aria-label`, appears on selection, and every record is in the table below — so
+   * nothing is lost except the illegible part.
+   */
+  showLabel?: boolean;
 }) {
   const label = node.sublabel ? `${node.label}, ${node.sublabel}` : node.label;
+  const labelled = showLabel ?? true;
   return (
     <g
       {...itemProps}
@@ -121,15 +136,17 @@ export function GraphNode({
           selected ? 'stroke-2' : 'stroke-1',
         )}
       />
-      <text
-        x={node.x}
-        y={node.y + node.radius + 12}
-        textAnchor="middle"
-        className={clsx('font-mono text-[10px]', selected ? 'fill-accent' : 'fill-fg')}
-      >
-        {node.label}
-      </text>
-      {node.sublabel && (
+      {(labelled || selected) && (
+        <text
+          x={node.x}
+          y={node.y + node.radius + 12}
+          textAnchor="middle"
+          className={clsx('font-mono text-[10px]', selected ? 'fill-accent' : 'fill-fg')}
+        >
+          {node.label}
+        </text>
+      )}
+      {node.sublabel && (labelled || selected) && (
         <text
           x={node.x}
           y={node.y + node.radius + 23}

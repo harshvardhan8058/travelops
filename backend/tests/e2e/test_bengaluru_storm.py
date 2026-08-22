@@ -188,28 +188,53 @@ class TestInjection:
 
 
 class TestRecoveryRun:
-    def test_the_run_reaches_a_terminal_state_after_one_approval(
+    def test_the_run_reaches_a_terminal_state_through_the_approvals_it_asks_for(
         self, storm_client, sessionmaker_for, injected
     ):
-        """open → assess → plan → assure → execute → approve → execute → resolved."""
+        """open → assess → plan → assure → execute → approve → execute → resolved.
+
+        Driven as a loop rather than a single approval, because the gate does not reveal what it
+        will hold until the earlier tasks have been assured. On this scenario it holds exactly
+        one action, and the loop proves that rather than assuming it.
+
+        The hotel allocation is not held here and does not fail: it runs, secures 71 of the 87
+        rooms it needs, and records the 16-room shortfall as an outstanding item. The incident
+        still reaches `resolved`, and the resolve summary names the outstanding work — an
+        allocation that cannot be completed is not a reason to abandon the connection, crew and
+        notification work for 604 passengers.
+        """
         first = storm_client.post(f"{PREFIX}/incidents/{injected}/run").json()
         assert first["state"] == "awaiting_approval"
         assert first["is_terminal"] is False
 
-        assurance = storm_client.get(f"{PREFIX}/incidents/{injected}/assurance").json()
-        pending = [e for e in assurance["evaluations"] if e["decision"] == "needs_human"]
-        assert len(pending) == 1
-        assert pending[0]["action_type"] == "notify_passengers"
+        held: list[str] = []
+        state = first
+        for _ in range(6):
+            assurance = storm_client.get(f"{PREFIX}/incidents/{injected}/assurance").json()
+            undecided = [
+                e
+                for e in assurance["evaluations"]
+                if e["decision"] == "needs_human" and not e.get("human_decision")
+            ]
+            if not undecided:
+                break
+            for evaluation in undecided:
+                held.append(evaluation["action_type"])
+                approved = storm_client.post(
+                    f"{PREFIX}/assurance/{evaluation['id']}/decision",
+                    json={"decision": "approved", "reason": "confirmed against the ops board"},
+                )
+                assert approved.status_code == 200
+            state = storm_client.post(f"{PREFIX}/incidents/{injected}/run").json()
+            if state["is_terminal"]:
+                break
 
-        approved = storm_client.post(
-            f"{PREFIX}/assurance/{pending[0]['id']}/decision",
-            json={"decision": "approved", "reason": "confirmed against the ops board"},
-        )
-        assert approved.status_code == 200
-
-        second = storm_client.post(f"{PREFIX}/incidents/{injected}/run").json()
-        assert second["state"] == "resolved"
-        assert second["is_terminal"] is True
+        assert state["state"] == "resolved"
+        assert state["is_terminal"] is True
+        # Exactly one action was held, and it was the bulk external effect. Asserted as the whole
+        # list rather than as membership: an extra hold would mean the gate started asking for
+        # permission it does not need, which erodes the meaning of the ones it does ask for.
+        assert held == ["notify_passengers"]
 
     def test_no_model_was_involved(self, storm_client, injected):
         storm_client.post(f"{PREFIX}/incidents/{injected}/run")
@@ -286,26 +311,53 @@ class TestRecoveryRun:
 
 
 class TestRealServiceResults:
-    def _resolve(self, client, reference) -> dict:
-        client.post(f"{PREFIX}/incidents/{reference}/run")
-        assurance = client.get(f"{PREFIX}/incidents/{reference}/assurance").json()
-        for evaluation in assurance["evaluations"]:
-            if evaluation["decision"] == "needs_human":
+    def _resolve(self, client, reference, *, rounds: int = 6) -> dict:
+        """Run, approve everything the gate held, run again — until nothing is held.
+
+        A loop rather than a single round, because the gate legitimately holds more than one
+        action and does not reveal the later ones until the earlier tasks have been assured.
+        Committing hotel rooms and notifying 174 passengers are two separate external effects and
+        each gets its own decision; a fixed single round would have hidden the second.
+        """
+        state = client.post(f"{PREFIX}/incidents/{reference}/run").json()
+        for _ in range(rounds):
+            assurance = client.get(f"{PREFIX}/incidents/{reference}/assurance").json()
+            pending = [e for e in assurance["evaluations"] if e["decision"] == "needs_human"]
+            undecided = [e for e in pending if not e.get("human_decision")]
+            if not undecided:
+                break
+            for evaluation in undecided:
                 client.post(
                     f"{PREFIX}/assurance/{evaluation['id']}/decision",
                     json={"decision": "approved", "reason": "confirmed"},
                 )
-        client.post(f"{PREFIX}/incidents/{reference}/run")
+            state = client.post(f"{PREFIX}/incidents/{reference}/run").json()
+            if state["is_terminal"]:
+                break
         return client.get(f"{PREFIX}/incidents/{reference}").json()
 
     def test_every_task_executed_through_a_real_service(self, storm_client, injected):
         body = self._resolve(storm_client, injected)
         actions = {a["action_type"]: a for a in body["actions"]}
 
-        assert set(actions) == {"check_connections", "assess_crew_impact", "notify_passengers"}
+        assert set(actions) == {
+            "check_connections",
+            "find_hotel_options",
+            "reserve_hotel_block",
+            "assess_crew_impact",
+            "notify_passengers",
+        }
         for action in actions.values():
-            assert action["status"] == "success"
             assert "SERVICE_NOT_IMPLEMENTED" not in action["reason"]
+            # `reserve_hotel_block` may legitimately land on `needs_human`: capacity inside the
+            # rate cap is deliberately short, and a partial allocation with a named shortfall is
+            # the honest outcome rather than a failure. Everything else must succeed.
+            expected = (
+                {"success", "needs_human"}
+                if action["action_type"] == "reserve_hotel_block"
+                else {"success"}
+            )
+            assert action["status"] in expected, action
 
     def test_connection_results_are_computed_from_itineraries(self, storm_client, injected):
         body = self._resolve(storm_client, injected)
@@ -329,7 +381,7 @@ class TestRealServiceResults:
         reason = next(
             a["reason"] for a in body["actions"] if a["action_type"] == "notify_passengers"
         )
-        assert "0 real and 174 simulated" in reason
+        assert "0 real and 174 simulated" in reason, reason
 
     def test_the_approved_action_references_its_human_decision(self, storm_client, injected):
         body = self._resolve(storm_client, injected)

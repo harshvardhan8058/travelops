@@ -1,15 +1,23 @@
 /**
  * Cascade Explorer — `/cascade/:groupId`. docs/27 screen 3.
  *
- * The screen that makes "eight flights, nine rotations" countable instead of asserted. Three
- * layers, because the data supports exactly three: the trigger, the flights, and the crew
- * pairings those flights touch. Connections and hotels arrive as counts with no arrays behind
- * them, so they are terminal tiles in the blast radius rather than nodes here.
+ * The screen that makes "eight flights, nine rotations" countable instead of asserted.
+ *
+ * The topology is the server's. `GET /incident-groups/{id}` returns `graph.nodes` and `graph.edges`
+ * projected from recorded actions and predictions, every edge naming the row it came from, and this
+ * screen positions and filters them. It used to assemble the graph itself from the flight and
+ * pairing arrays, which put a second, untested implementation of "which rows are related" in the
+ * browser. Connections and rooms are now real nodes with real edges rather than untraversable
+ * counts, because the projection can point at the action that found each one.
+ *
+ * The graph is an enhancement throughout: the blast-radius list and the crew table carry the same
+ * records and read completely with the SVG switched off.
  *
  * Owner: Stream D.
  */
 
 import { useMemo, useState } from 'react';
+import { clsx } from 'clsx';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
@@ -27,8 +35,19 @@ import { Metric, MetricTile } from '@/components/ui/Metric';
 import { countDerivation } from '@/components/ui/derivation';
 import { GraphEdge, GraphLegend, GraphNode, GraphSurface } from '@/components/ui/Graph';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
-import { buildCascadeLayout, type LayoutFlight } from './layout';
+import { layoutFromGraph, type PassengerWeights } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
+import { WhatIfPanel } from './WhatIf';
+import { GroupRunBar } from './GroupRunBar';
+import { GroupPlanAssurance } from './GroupPlanAssurance';
+
+/** Edge kinds an operator can isolate. Filtering hides records; it never invents any. */
+const EDGE_FILTERS = [
+  { kind: 'root_cause' as const, label: 'Root cause' },
+  { kind: 'crew' as const, label: 'Crew' },
+  { kind: 'connection' as const, label: 'Connections' },
+  { kind: 'accommodation' as const, label: 'Rooms' },
+];
 
 const ROLLUP_TILES = [
   { field: 'flights_affected', label: 'Flights' },
@@ -60,6 +79,7 @@ export function CascadeExplorer() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedHop, setSelectedHop] = useState<number | null>(null);
   const [selectedMechanism, setSelectedMechanism] = useState<PairingMechanism | null>(null);
+  const [hiddenKinds, setHiddenKinds] = useState<Set<string>>(new Set());
 
   const groupQuery = useQuery({
     queryKey: ['incident-group', groupId],
@@ -71,20 +91,30 @@ export function CascadeExplorer() {
   const group = groupQuery.data;
 
   const layout = useMemo(() => {
-    if (!group) return null;
-    const flights = (group.flights as unknown as LayoutFlight[]) ?? [];
-    return buildCascadeLayout(
-      {
-        rootCause: group.root_cause,
-        airportIcao: group.airport_icao,
-        flights,
-        pairings: group.crew_pairings,
-      },
-      920,
-    );
+    if (!group?.graph) return null;
+    // Passenger counts come from the declared member flights, so node size is a recorded figure.
+    const weights: PassengerWeights = {};
+    for (const flight of group.flights ?? []) {
+      weights[`flight:${flight.flight_id}`] = flight.passengers;
+    }
+    return layoutFromGraph(group.graph, { width: 1180, weights });
   }, [group]);
 
-  const nodes = layout?.nodes ?? [];
+  const visibleEdges = (layout?.edges ?? []).filter((edge) => !hiddenKinds.has(edge.kind));
+  const visibleRefs = new Set<string>();
+  for (const edge of visibleEdges) {
+    visibleRefs.add(edge.from);
+    visibleRefs.add(edge.to);
+  }
+  // A flight with no evidence has no edges, and must stay visible: it is a declared member of the
+  // cascade that nothing has assessed, which is a gap the operator needs to see.
+  const nodes = (layout?.nodes ?? []).filter(
+    (node) =>
+      hiddenKinds.size === 0 ||
+      visibleRefs.has(node.id) ||
+      node.kind === 'event' ||
+      (node.kind === 'flight' && !node.hasEvidence),
+  );
   const keyboard = useKeyboardList({
     count: nodes.length,
     onOpen: (index) => setSelectedNode(nodes[index]?.id ?? null),
@@ -110,20 +140,31 @@ export function CascadeExplorer() {
   const selected = nodes.find((node) => node.id === selectedNode) ?? null;
   const selectedFlightNumber = selected?.kind === 'flight' ? selected.label : null;
 
-  // Edges belonging to the selected hop or node, for emphasis. Opacity and stroke only.
-  const emphasisFor = (edgeId: string, mechanism: PairingMechanism): 'on' | 'off' | 'neutral' => {
-    const hopMatch =
-      selectedHop === 1
-        ? edgeId.startsWith('event:')
-        : selectedHop === 2
-          ? !edgeId.startsWith('event:')
-          : null;
-    const mechanismMatch = selectedMechanism ? mechanism === selectedMechanism : null;
-    const nodeMatch = selectedNode ? edgeId.includes(selectedNode.split(':')[1] ?? '') : null;
+  // Emphasis only: opacity and stroke. Nothing is added or removed by selection, so the count on
+  // screen never depends on what happens to be highlighted.
+  const emphasisFor = (edge: {
+    from: string;
+    to: string;
+    kind: string;
+    mechanism: string | null;
+  }): 'on' | 'off' | 'neutral' => {
+    const hopKind = selectedHop ? EDGE_FILTERS[selectedHop - 1]?.kind : null;
+    const hopMatch = hopKind ? edge.kind === hopKind : null;
+    const mechanismMatch = selectedMechanism ? edge.mechanism === selectedMechanism : null;
+    const nodeMatch = selectedNode ? edge.from === selectedNode || edge.to === selectedNode : null;
 
     const signals = [hopMatch, mechanismMatch, nodeMatch].filter((s) => s !== null);
     if (signals.length === 0) return 'neutral';
     return signals.every(Boolean) ? 'on' : 'off';
+  };
+
+  const toggleKind = (kind: string) => {
+    setHiddenKinds((current) => {
+      const next = new Set(current);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
   };
 
   const incidentByFlightId = new Map(
@@ -132,6 +173,7 @@ export function CascadeExplorer() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
+      <GroupRunBar groupId={groupId} rollupStatus={group.rollup_status} />
       <Panel>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
           <div className="flex items-baseline gap-2">
@@ -176,9 +218,37 @@ export function CascadeExplorer() {
           <Panel
             title="Cascade"
             actions={
-              <span className="text-caption text-fg-muted">
-                {layout.nodes.length} nodes · {layout.edges.length} edges
-              </span>
+              <div className="flex items-center gap-2">
+                {/* Filters hide records. They never create one, and the totals beside them are of
+                 * the whole projection rather than of what is currently shown. */}
+                <div className="flex items-center gap-1" role="group" aria-label="Edge kinds">
+                  {EDGE_FILTERS.filter((filter) =>
+                    Boolean(group.graph.edge_counts_by_kind[filter.kind]),
+                  ).map((filter) => {
+                    const hidden = hiddenKinds.has(filter.kind);
+                    return (
+                      <button
+                        key={filter.kind}
+                        type="button"
+                        onClick={() => toggleKind(filter.kind)}
+                        aria-pressed={!hidden}
+                        className={clsx(
+                          'rounded-sm border px-1.5 py-0.5 text-caption uppercase',
+                          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                          hidden
+                            ? 'border-border-subtle text-fg-muted line-through'
+                            : 'border-accent-border bg-accent-subtle text-accent',
+                        )}
+                      >
+                        {filter.label} {group.graph.edge_counts_by_kind[filter.kind]}
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="text-caption text-fg-muted">
+                  {layout.nodes.length} nodes · {layout.edges.length} edges
+                </span>
+              </div>
             }
           >
             {/* The graph is an enhancement; the tables below carry the same records. */}
@@ -192,17 +262,17 @@ export function CascadeExplorer() {
                 height={layout.height}
                 ariaLabel={`Cascade for ${group.reference}: ${layout.nodes.length} nodes across trigger, flights and crew pairings`}
               >
-                {layout.edges.map((edge) => (
-                  <GraphEdge
-                    key={edge.id}
-                    edge={edge}
-                    emphasis={emphasisFor(edge.id, edge.mechanism)}
-                  />
+                {visibleEdges.map((edge) => (
+                  <GraphEdge key={edge.id} edge={edge} emphasis={emphasisFor(edge)} />
                 ))}
-                {layout.nodes.map((node, index) => (
+                {nodes.map((node, index) => (
                   <GraphNode
                     key={node.id}
                     node={node}
+                    /* Labels for the trigger and the flights, which are the spine an operator
+                     * reads. The consequence clusters are labelled on selection only: 37 overlapping
+                     * captions is noise that looks like data. */
+                    showLabel={node.kind === 'event' || node.kind === 'flight'}
                     selected={node.id === selectedNode}
                     dimmed={Boolean(selectedNode) && node.id !== selectedNode}
                     onSelect={() => {
@@ -222,6 +292,19 @@ export function CascadeExplorer() {
                 }))}
               />
             </div>
+            {!group.graph.completeness.is_complete && (
+              /* An incomplete projection says so on the picture itself, not only in a panel
+               * somewhere else. A cascade that hides its unassessed flights looks finished. */
+              <div className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
+                {group.graph.completeness.note}
+              </div>
+            )}
+            {layout.danglingEdges.length > 0 && (
+              <div className="border-t border-state-crit/30 bg-state-crit-bg px-3 py-1.5 text-caption text-state-crit">
+                {layout.danglingEdges.length} edge(s) reference a node the projection did not
+                return, so the picture is incomplete in a way the payload should not allow.
+              </div>
+            )}
           </Panel>
 
           {selected && (
@@ -311,6 +394,8 @@ export function CascadeExplorer() {
             selectedMechanism={selectedMechanism}
             onSelectMechanism={setSelectedMechanism}
           />
+          <GroupPlanAssurance groupId={groupId} />
+          <WhatIfPanel groupId={groupId} />
         </div>
       </div>
     </div>

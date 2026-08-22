@@ -268,8 +268,8 @@ export interface PlanTaskRow {
  * because the UI must render whatever the endpoint actually returns and name what it does
  * not, rather than assuming a field exists.
  *
- * `route` arrives as ICAO codes from the real API (`VOBL → VIDP`) and as IATA in the
- * committed fixture (`BLR → DEL`). It is rendered as returned; the UI never translates one
+ * `route` arrives as ICAO codes from the real API (`VOBL -> VIDP`) and as IATA in the
+ * committed fixture (`BLR -> DEL`). It is rendered as returned; the UI never translates one
  * into the other, because it has no airport table to do that correctly.
  */
 export interface IncidentFlightSummary {
@@ -451,6 +451,25 @@ export interface CrewPairingImpact {
   at_risk: boolean;
 }
 
+/**
+ * Whether a rollup is a complete answer, and what is missing when it is not.
+ *
+ * A sibling of `rollups` rather than a member of it, because completeness is a property of the
+ * computation and `rollups` is typed as numbers. Rendering a partial rollup as a final one is the
+ * single most misleading thing this console could do, so the flag is never optional.
+ */
+export interface RollupStatus {
+  is_complete: boolean;
+  computed_at: string;
+  incidents_in_group: number;
+  incidents_assessed_connections: number;
+  incidents_assessed_crew: number;
+  member_flight_ids: number[];
+  flights_without_incident: number[];
+  membership_is_declared: boolean;
+  note: string;
+}
+
 /** One row of `GET /incident-groups`. Rollups are counts computed server-side. */
 export interface IncidentGroupSummary {
   id: number;
@@ -461,8 +480,109 @@ export interface IncidentGroupSummary {
   state: IncidentState;
   opened_at: string;
   rollups: Record<string, number>;
+  rollup_status: RollupStatus;
   awaiting_approval_count: number;
   provenance: Provenance;
+}
+
+/** A declared member flight of a disruption group. Role comes from `incident_group_flight`. */
+export interface GroupFlightRow {
+  flight_id: number;
+  flight_number: string;
+  route: string;
+  origin_icao: string;
+  destination_icao: string;
+  /** `primary` | `affected_departure` | `affected_arrival`. Declared, never inferred. */
+  role: string;
+  delay_minutes: number;
+  scheduled_departure_local: string;
+  incident_id: number | null;
+  incident_reference: string | null;
+  incident_state: string | null;
+  passengers: number;
+}
+
+export type CascadeNodeKindWire = 'event' | 'flight' | 'pairing' | 'booking' | 'hotel';
+export type CascadeEdgeKind = 'root_cause' | 'crew' | 'connection' | 'accommodation';
+
+/** A node is a reference to a row that already exists — `kind:id`. There is no node table. */
+export interface GraphNodeWire {
+  ref: string;
+  kind: CascadeNodeKindWire;
+  label: string;
+  sublabel: string | null;
+  depth: number;
+  at_risk: boolean;
+  /** False when the flight is declared but no service has assessed it. Rendered as a gap. */
+  has_evidence: boolean;
+  role: string | null;
+}
+
+/** An edge, with the recorded row it was read from. `action:57` or `prediction:12`, never empty. */
+export interface GraphEdgeWire {
+  source_ref: string;
+  target_ref: string;
+  edge_kind: CascadeEdgeKind;
+  mechanism: string | null;
+  detail: string | null;
+  depth: number;
+  derived_from: string;
+}
+
+export interface GraphCompleteness {
+  member_flight_count: number;
+  flights_with_evidence: number;
+  is_complete: boolean;
+  note: string;
+}
+
+/**
+ * The cascade as the server projected it.
+ *
+ * Topology arrives from the API rather than being assembled here. Which rows are related is a
+ * statement about the data, and deriving it in the browser would be a second implementation that
+ * nothing tests against the database.
+ */
+export interface CascadeGraphPayload {
+  group_reference: string;
+  rule_version: string;
+  nodes: GraphNodeWire[];
+  edges: GraphEdgeWire[];
+  edge_counts_by_kind: Partial<Record<CascadeEdgeKind, number>>;
+  completeness: GraphCompleteness;
+  source_action_ids: number[];
+  source_prediction_ids: number[];
+  snapshot_hash: string;
+}
+
+/** One measured dimension of the blast radius, with the service that measured it named. */
+export interface BlastRadiusDimension {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  measured_by: string;
+  /** False makes the value a floor rather than a total. */
+  is_complete: boolean;
+  note: string;
+}
+
+/**
+ * Composition only. There is deliberately no confidence field: completeness is countable, and a
+ * confidence percentage would be a probability nothing in this system is calibrated to produce.
+ */
+export interface BlastRadiusPayload {
+  group_reference: string;
+  headline: string;
+  basis: 'composed_from_recorded_findings';
+  dimensions: BlastRadiusDimension[];
+  completeness: {
+    flights_declared: number;
+    flights_assessed: number;
+    ratio: string;
+    is_complete: boolean;
+  };
+  gaps: string[];
 }
 
 export interface IncidentGroupsResponse {
@@ -501,13 +621,167 @@ export interface IncidentGroupDetail {
   airport_icao: string;
   severity: string;
   state: IncidentState;
+  opened_at: string;
   /** Derived server-side from the arrays. The UI never hardcodes a total. */
   rollups: Record<string, number | string>;
-  flights: Record<string, unknown>[];
+  rollup_status: RollupStatus;
+  flights: GroupFlightRow[];
   crew_pairings: CrewPairingImpact[];
   mechanism_legend: Record<PairingMechanism, string>;
   why_nine_not_eight: string;
+  graph: CascadeGraphPayload;
+  blast_radius: BlastRadiusPayload;
   provenance: Provenance;
+}
+
+// ------------------------------------------------------------------ group run + plan level
+
+export interface IncidentProgress {
+  flight_id: number;
+  flight_number: string;
+  role: string;
+  incident_id: number;
+  incident_reference: string;
+  state: string;
+  steps_taken: number;
+  is_terminal: boolean;
+  note: string | null;
+  plan_id: number | null;
+  plan_hash: string | null;
+  awaiting_evaluation_ids: number[];
+}
+
+export interface GroupRunResponse {
+  group_reference: string;
+  is_terminal: boolean;
+  states: Record<string, number>;
+  note: string;
+  incidents: IncidentProgress[];
+  rollups: Record<string, number>;
+  rollup_status: RollupStatus;
+  snapshot_hash: string | null;
+  edges_recorded: number;
+  replayed: boolean;
+  idempotency_key: string | null;
+}
+
+export interface PlanCheckRow {
+  name: string;
+  state: 'PASS' | 'WARN' | 'FAIL';
+  reason_code: string;
+  reason: string | null;
+  tier: RiskTier | null;
+  offending_refs: string[];
+  is_blocking: boolean;
+}
+
+export interface PlanApprovalRow {
+  id: number;
+  plan_id: number;
+  plan_hash: string;
+  covered_task_ids: string[];
+  covers_tiers: string[];
+  actor_id: string;
+  reason: string;
+  decided_at: string;
+  gate_config_version: string;
+  gate_config_hash: string;
+  tasks_needing_own_decision: string[];
+  note: string;
+}
+
+/**
+ * A plan-level evaluation.
+ *
+ * `authorises_no_action` is `true` in the type, not just in the data: a plan result never
+ * authorises an action. Every task still passes the action gate, and a high-risk task always needs
+ * its own decision.
+ */
+export interface PlanAssuranceRow {
+  decision: AssuranceDecision;
+  plan_risk_tier: RiskTier;
+  plan_id: number | null;
+  plan_hash: string;
+  group_reference: string;
+  task_count: number;
+  admissible: boolean;
+  requires_human: boolean;
+  authorises_no_action: true;
+  checks: PlanCheckRow[];
+  blocking: string[];
+  exposure: Record<string, unknown>;
+  config_version: string;
+  config_hash: string;
+  evaluated_at: string | null;
+  tasks_needing_own_decision: string[];
+  note: string;
+  incident_reference: string | null;
+  incident_id: number | null;
+  approval: PlanApprovalRow | null;
+}
+
+export interface PlanAssuranceResponse {
+  group_reference: string;
+  plans: PlanAssuranceRow[];
+  config_version: string;
+  config_hash: string;
+  note: string;
+}
+
+// ------------------------------------------------------------------------------- what-if
+
+export interface ScenarioDelta {
+  key: string;
+  label: string;
+  baseline: number;
+  scenario: number;
+  delta: number;
+  summary: string;
+}
+
+/**
+ * A bounded, zero-write, deterministic re-evaluation. Not a simulation and not a forecast.
+ *
+ * `wrote_rows` is `false` in the type as well as the data, so a future change that started writing
+ * would not typecheck without someone editing this line.
+ */
+export interface WhatIfResponse {
+  group_reference: string;
+  rule_version: string;
+  basis: 'recorded_evidence';
+  wrote_rows: false;
+  boundary_note: string;
+  headline: string;
+  levers_applied: Record<string, unknown>;
+  levers_available: Record<string, string>;
+  levers_rejected: { lever: string; reason: string }[];
+  recorded_baseline: Record<string, number>;
+  deltas: ScenarioDelta[];
+  guard: Record<string, unknown>;
+}
+
+// -------------------------------------------------------------------------------- replay
+
+export interface ReplayFrame {
+  index: number;
+  id: number;
+  incident_id: number | null;
+  incident_reference: string | null;
+  occurred_at: string;
+  stage: string;
+  actor: string;
+  actor_kind: 'human' | 'gate' | 'system';
+  event_type: string;
+  summary: string;
+  detail: Record<string, unknown>;
+  correlation_id: string | null;
+}
+
+export interface GroupReplayResponse {
+  group_reference: string;
+  frame_count: number;
+  frames: ReplayFrame[];
+  note: string;
 }
 
 // ---------------------------------------------------------------- policy

@@ -66,12 +66,13 @@ from app.models.workflow import (
     DecisionLog,
     HumanDecision,
     Incident,
+    IncidentGroup,
     Plan,
     Prediction,
 )
 from app.models.workflow import PlanTask as PlanTaskRow
 from app.observability.logging import correlation_id_var, get_logger
-from app.orchestrator import assurance_adapter, dispatch
+from app.orchestrator import assurance_adapter, dispatch, plan_lifecycle
 from app.orchestrator.limits import Limits, check_step_budget
 from app.orchestrator.playbook import (
     FALLBACK_GENERATOR,
@@ -278,7 +279,7 @@ class Orchestrator:
                 event_type="INCIDENT_OPENED",
                 summary=(
                     f"Opened {incident.reference} for "
-                    f"{flight.flight_number} ({flight.origin_icao}→{flight.destination_icao})"
+                    f"{flight.flight_number} ({flight.origin_icao}->{flight.destination_icao})"
                 ),
                 detail={
                     "trigger_type": trigger.value,
@@ -467,6 +468,11 @@ class Orchestrator:
             rows[task.action.value] = row
         await self._session.flush()
 
+        # Stamp the plan's identity now that its tasks exist. A hash over an empty task list
+        # would be a signature on nothing that later appeared to cover whatever got added.
+        # `PlanUnderReview.hash()` is the one implementation — the same value the approval gate
+        # compares — so `plan.plan_hash` and `plan_approval.plan_hash` cannot disagree.
+        #
         # Resolve action-name dependencies to persisted task IDs, so the stored plan holds
         # no dangling references. Matches the fixture, which stores task-id strings.
         for task in tasks:
@@ -476,6 +482,12 @@ class Orchestrator:
 
         ctx.plan_id = plan.id
         task_ids = [rows[task.action.value].id for task in tasks]
+
+        # The plan's identity, and the fact that it is the one being worked. `selection_state`
+        # goes straight to `selected` because the playbook produces a single plan; when candidate
+        # generation arrives, that is the only line that changes.
+        plan_hash = await self._stamp_plan_identity(ctx, plan)
+
         await self._journal(
             ctx,
             stage=STAGE_PLAN,
@@ -484,6 +496,8 @@ class Orchestrator:
             summary=f"{len(tasks)} tasks proposed by the deterministic playbook",
             detail={
                 "plan_id": plan.id,
+                "plan_hash": plan_hash,
+                "selection_state": plan_lifecycle.SELECTION_SELECTED,
                 "generator": FALLBACK_GENERATOR,
                 "prompt_version": None,
                 "model_self_report": None,
@@ -810,9 +824,9 @@ class Orchestrator:
         self._session.add(evaluation)
         await self._session.flush()
 
-        summary = f"{task_row.action_type} → {result.decision.value}"
+        summary = f"{task_row.action_type} -> {result.decision.value}"
         if not outcome.gate_available:
-            summary = f"{task_row.action_type} → refused: {outcome.unavailable_reason}"
+            summary = f"{task_row.action_type} -> refused: {outcome.unavailable_reason}"
         await self._journal(
             ctx,
             stage=STAGE_ASSURE,
@@ -864,9 +878,17 @@ class Orchestrator:
         """Dispatch to the owning deterministic service, under two hard preconditions.
 
         1. `assurance.executable` is False -> refuse. No side effect without authorisation.
-        2. The gate said `needs_human` -> an `approved` human decision for **that same
-           evaluation** is required. A rejected decision cannot be reused, and an approval
-           for a different evaluation does not transfer.
+        2. The gate said `needs_human` -> authorisation is required, and it may come from
+           exactly one of two places:
+           * an `approved` human decision for **that same evaluation**; or
+           * a **plan approval** whose scope covers this task (Phase 2, P2-D3).
+
+        A rejected decision cannot be reused, and an approval for a different evaluation does
+        not transfer. The plan-approval route is deliberately narrow: Stream B's
+        `plan_approval_covers` re-checks the plan hash, the task's membership in the approved
+        set, the tier, and whether the task is blocked on evidence rather than risk. A high-risk
+        task is refused there whatever the plan approval says, so no code path in this engine can
+        widen it.
 
         A replay of an already-recorded idempotency key returns the original result rather
         than acting a second time.
@@ -875,20 +897,28 @@ class Orchestrator:
         evaluation = await self._resolve_evaluation(task_row.id, evaluation_id)
 
         human_decision_id: int | None = None
+        plan_approval_id: int | None = None
         if assurance.requires_human:
             decision = await self._human_decision(evaluation.id)
             if decision is None:
-                raise AssuranceBlocked(
-                    "action requires operator approval",
-                    details={
-                        "assurance_id": evaluation.id,
-                        "action_type": task.action.value,
-                        "blocking_checks": [name.value for name in assurance.blocking],
-                    },
-                )
-            if decision.decision is not HumanDecisionType.approved and (
+                # No decision on this evaluation. Before refusing, check whether a plan
+                # approval covers the task — that is the only other authorisation this engine
+                # recognises, and it recognises it through Stream B's rules, not its own.
+                plan_approval_id = await self._plan_approval_authorising(ctx, task_row)
+                if plan_approval_id is None:
+                    raise AssuranceBlocked(
+                        "action requires operator approval",
+                        details={
+                            "assurance_id": evaluation.id,
+                            "action_type": task.action.value,
+                            "blocking_checks": [name.value for name in assurance.blocking],
+                        },
+                    )
+            elif decision.decision is not HumanDecisionType.approved and (
                 str(decision.decision) != HumanDecisionType.approved.value
             ):
+                # An explicit rejection is final and a plan approval does not override it. The
+                # operator said no to this specific action; a broader signature cannot undo that.
                 raise AssuranceBlocked(
                     "operator rejected this action; a rejected decision cannot be reused",
                     details={
@@ -897,7 +927,8 @@ class Orchestrator:
                         "human_decision": str(decision.decision),
                     },
                 )
-            human_decision_id = decision.id
+            else:
+                human_decision_id = decision.id
         elif not assurance.executable:
             raise AssuranceBlocked(
                 f"assurance decision '{assurance.decision.value}' does not authorise execution",
@@ -950,6 +981,9 @@ class Orchestrator:
             plan_task_id=task_row.id,
             assurance_id=evaluation.id,
             human_decision_id=human_decision_id,
+            # Exactly one of these is set when the gate held the task, so the record always
+            # names which authorisation released it.
+            plan_approval_id=plan_approval_id,
             actor=ACTOR_ORCHESTRATOR,
             idempotency_key=key,
             status=result.status,
@@ -970,12 +1004,13 @@ class Orchestrator:
             stage=STAGE_EXECUTE,
             actor=ACTOR_ORCHESTRATOR,
             event_type="ACTION_COMPLETED",
-            summary=f"{task_row.action_type} → {result.status.value}: {result.reason}",
+            summary=f"{task_row.action_type} -> {result.status.value}: {result.reason}",
             detail={
                 "action_id": action.id,
                 "plan_task_id": task_row.id,
                 "assurance_id": evaluation.id,
                 "human_decision_id": human_decision_id,
+                "plan_approval_id": plan_approval_id,
                 "idempotency_key": key,
                 "provenance_kind": result.provenance_kind,
                 **result.payload,
@@ -1002,6 +1037,116 @@ class Orchestrator:
             human_decision_id=human_decision_id,
             idempotency_key=key,
         )
+
+    async def _stamp_plan_identity(self, ctx: WorkflowContext, plan: Plan) -> str | None:
+        """Set `plan.plan_hash` and mark the plan selected. Returns the hash.
+
+        Returns None for an incident with no group: a plan hash is scoped to a disruption, and
+        inventing a group reference so the hash could be computed would produce an identity that
+        looked meaningful and was not.
+        """
+        from app.orchestrator import plan_lifecycle
+
+        group_reference = await self._group_reference(ctx)
+        if group_reference is None:
+            plan.selection_state = plan_lifecycle.SELECTION_SELECTED
+            plan.selected_at = self._now()
+            plan.selected_by = ACTOR_ORCHESTRATOR
+            await self._session.flush()
+            return None
+
+        plan_hash = await plan_lifecycle.stamp_plan_hash(
+            self._session, plan_id=int(plan.id), group_reference=group_reference
+        )
+        await plan_lifecycle.mark_selected(
+            self._session,
+            plan_id=int(plan.id),
+            actor_id=ACTOR_ORCHESTRATOR,
+            selected_at=self._now(),
+        )
+        return plan_hash
+
+    async def _plan_approval_authorising(
+        self, ctx: WorkflowContext, task_row: PlanTaskRow
+    ) -> int | None:
+        """The plan approval id that covers this task, or None.
+
+        The decision itself is Stream B's: `plan_approval_covers` re-checks the plan hash, task
+        membership, the tier and the blocking kind. This method only supplies the persisted
+        values and records the outcome, so there is one implementation of P2-D3 rather than a
+        second one living in the orchestrator.
+
+        A refusal is journalled rather than swallowed. "The plan was approved but this action
+        still waited" is the single most confusing thing this feature can do to an operator, so
+        the reason is on the timeline before they have to ask.
+        """
+        from app.orchestrator import plan_lifecycle
+
+        group_reference = await self._group_reference(ctx)
+        if group_reference is None or task_row.plan_id is None:
+            return None
+
+        approval, check = await plan_lifecycle.plan_approval_for_task(
+            self._session,
+            plan_id=int(task_row.plan_id),
+            plan_task_id=int(task_row.id),
+            group_reference=group_reference,
+        )
+        if approval is None or check is None:
+            return None
+        if check.permitted:
+            await self._journal(
+                ctx,
+                stage=STAGE_EXECUTE,
+                actor=ACTOR_GATE,
+                event_type="PLAN_APPROVAL_APPLIED",
+                summary=(
+                    f"{task_row.action_type} authorised by the plan approval for "
+                    f"{approval.plan_hash}"
+                ),
+                detail={
+                    "plan_approval_id": approval.id,
+                    "plan_task_id": task_row.id,
+                    "plan_hash": approval.plan_hash,
+                    "approved_by": approval.actor_id,
+                },
+            )
+            return int(approval.id)
+
+        await self._journal(
+            ctx,
+            stage=STAGE_EXECUTE,
+            actor=ACTOR_GATE,
+            event_type="PLAN_APPROVAL_NOT_APPLICABLE",
+            summary=(f"{task_row.action_type} still needs its own decision: {check.reason}"),
+            detail={
+                "plan_approval_id": approval.id,
+                "plan_task_id": task_row.id,
+                "refusal": check.refusal.value if check.refusal else None,
+                "reason": check.reason,
+                "unresolved": list(check.unresolved),
+            },
+        )
+        return None
+
+    async def _group_reference(self, ctx: WorkflowContext) -> str | None:
+        """The incident's group reference, cached on the context.
+
+        Needed because a plan hash is computed over `(group_reference, tasks)` — an approval is
+        scoped to a disruption, not to a bare task list.
+        """
+        cached = ctx.metadata.get("group_reference")
+        if cached is not None:
+            return str(cached)
+
+        incident = await self._session.get(Incident, ctx.incident_id)
+        if incident is None or incident.group_id is None:
+            return None
+        group = await self._session.get(IncidentGroup, int(incident.group_id))
+        if group is None:
+            return None
+        ctx.metadata["group_reference"] = group.reference
+        return str(group.reference)
 
     def _idempotency_key(self, ctx: WorkflowContext, task: PlanTask, plan_task_id: int) -> str:
         """Scope: action type + target entities + incident + intended version.
@@ -1160,6 +1305,24 @@ class Orchestrator:
             detail={"llm_mode": self.modes.llm.value, **(assessment or {})},
         )
 
+    async def _risk_airport(self, incident: Incident | None, flight: Flight) -> str:
+        """Which airport's weather explains this flight's disruption.
+
+        The group's airport when the incident belongs to one, because the group declares where the
+        disruption is. Otherwise the flight's origin.
+
+        This matters for arrivals. UK 705 is VAAH to VOBL: the storm is at VOBL, its destination.
+        Reading the origin's weather asked "what is the weather in Ahmedabad", found no observation
+        for it, and left the one inbound flight in the cascade with no risk assessment — so the
+        cascade graph drew seven root-cause edges for eight declared flights and the flight
+        appeared in the picture with nothing explaining why it was there.
+        """
+        if incident is not None and incident.group_id is not None:
+            group = await self._session.get(IncidentGroup, int(incident.group_id))
+            if group is not None and group.airport_icao:
+                return str(group.airport_icao)
+        return str(flight.origin_icao)
+
     async def _assess_delay_risk(self, ctx: WorkflowContext) -> dict[str, Any] | None:
         """Score disruption risk from the recorded observation, and persist a Prediction.
 
@@ -1181,10 +1344,11 @@ class Orchestrator:
 
         incident = await self._session.get(Incident, ctx.incident_id)
         as_of = await self._incident_clock(ctx)
+        airport_icao = await self._risk_airport(incident, flight)
 
         try:
             weather, runways, ruleset = await load_delay_risk_inputs(
-                self._session, flight.origin_icao, as_of=as_of
+                self._session, airport_icao, as_of=as_of
             )
         except LookupError as exc:
             # No observation to reason from. Recorded, and the risk stays absent rather than
@@ -1194,8 +1358,8 @@ class Orchestrator:
                 stage=STAGE_ASSESS,
                 actor="delay_risk_service",
                 event_type="DELAY_RISK_UNAVAILABLE",
-                summary=f"No weather observation available for {flight.origin_icao}",
-                detail={"airport_icao": flight.origin_icao, "detail": str(exc)},
+                summary=f"No weather observation available for {airport_icao}",
+                detail={"airport_icao": airport_icao, "detail": str(exc)},
             )
             return None
 
@@ -1209,7 +1373,7 @@ class Orchestrator:
 
         prediction = Prediction(
             flight_id=flight.id,
-            airport_icao=flight.origin_icao,
+            airport_icao=airport_icao,
             predicted_at=as_of or self._now(),
             risk_index=int(payload["risk_index"]),
             risk_level=payload["risk_level"],
@@ -1358,10 +1522,33 @@ class Orchestrator:
         if evaluation_id is None or plan_task_id is None:
             resolved = await self._pending_approval(ctx)
             if resolved is None:
+                # Nothing the gate held is outstanding. If work remains, go and do it rather than
+                # blocking: an incident whose only `needs_human` task is a service's surfaced
+                # decision can never be cleared by an approval, so waiting would never end.
+                if await self._next_actionable_task(ctx) is not None:
+                    await self._transition(
+                        ctx,
+                        IncidentState.assuring,
+                        stage=STAGE_ASSURE,
+                        summary="No decision outstanding; submitting the next task to the gate",
+                        detail={"plan_id": ctx.plan_id},
+                    )
+                    return
+                # Genuinely nothing left and nothing pending. `awaiting_approval -> resolved` is
+                # not a legal transition and must not become one, so this blocks — and names the
+                # outstanding items so the reason is actionable rather than mysterious.
+                outstanding = [
+                    str(row.action_type)
+                    for row in await self._plan_tasks(ctx)
+                    if TaskState(row.state) is TaskState.needs_human
+                ]
                 await self._block(
                     ctx,
-                    reason="awaiting approval but no evaluation is pending a decision",
-                    detail={"plan_id": ctx.plan_id},
+                    reason=(
+                        "no operator decision is outstanding and no task can proceed; "
+                        f"outstanding items: {', '.join(sorted(outstanding)) or 'none'}"
+                    ),
+                    detail={"plan_id": ctx.plan_id, "outstanding_actions": sorted(outstanding)},
                 )
                 return
             plan_task_id, evaluation_id = resolved
@@ -1370,6 +1557,31 @@ class Orchestrator:
 
         decision = await self._human_decision(int(evaluation_id))
         if decision is None:
+            # No decision on this evaluation. A plan approval may already cover the task, in
+            # which case waiting would be asking twice for the same authorisation.
+            task_row = await self._session.get(PlanTaskRow, int(plan_task_id))
+            covered = (
+                await self._plan_approval_authorising(ctx, task_row)
+                if task_row is not None
+                else None
+            )
+            if covered is not None:
+                task_row.state = TaskState.assured
+                await self._session.flush()
+                await self._transition(
+                    ctx,
+                    IncidentState.executing,
+                    stage=STAGE_EXECUTE,
+                    summary=(
+                        f"Proceeding under the plan approval covering evaluation {evaluation_id}"
+                    ),
+                    detail={
+                        "assurance_id": evaluation_id,
+                        "plan_task_id": plan_task_id,
+                        "plan_approval_id": covered,
+                    },
+                )
+                return
             # Not an error. Waiting for a person is a legitimate resting state.
             ctx.steps_taken -= 1
             ctx.last_note = f"waiting for an operator decision on evaluation {evaluation_id}"
@@ -1450,9 +1662,53 @@ class Orchestrator:
         ctx.metadata.pop("current_plan_task_id", None)
         ctx.metadata.pop("current_assurance_id", None)
 
+        if outcome.result.status is ActionStatus.needs_human and _carries_evidence(outcome.result):
+            # The service did its work and surfaced a decision. That is not a failure, and it
+            # must not stop the rest of the plan.
+            #
+            # The case that forced this distinction is the hotel allocation: 71 of 87 rooms are
+            # secured and 16 remain, which is a real decision for a person — raise the cap, go
+            # further out, or accept that some passengers wait. Treating it as a failure would
+            # abandon the 71 rooms that were secured *and* stop the connection, crew and
+            # notification work for 604 passengers because 32 of them lack a bed. The refusal is
+            # recorded on the action, named on the timeline, and carried into the blast radius as
+            # `rooms_short`; nothing about it is hidden by continuing.
+            #
+            # A `failure`, a `skipped`, or a `needs_human` with no provenance still blocks, below.
+            # The difference is whether the service actually worked: `_carries_evidence` is the
+            # test, and it is why an unimplemented service still stops the plan instead of being
+            # quietly filed as an outstanding item.
+            await self._journal(
+                ctx,
+                stage=STAGE_EXECUTE,
+                actor=ACTOR_ORCHESTRATOR,
+                event_type="TASK_NEEDS_HUMAN",
+                summary=(
+                    f"{task_row.action_type} needs a person: {outcome.result.reason} "
+                    "Continuing with the rest of the plan."
+                ),
+                detail={
+                    "action_id": outcome.action_id,
+                    "plan_task_id": task_row.id,
+                    "status": outcome.result.status.value,
+                    **outcome.result.payload,
+                },
+            )
+            if await self._next_actionable_task(ctx) is not None:
+                await self._transition(
+                    ctx,
+                    IncidentState.assuring,
+                    stage=STAGE_ASSURE,
+                    summary="Outstanding item recorded; submitting the next task to the gate",
+                    detail={"plan_id": ctx.plan_id, "plan_task_id": task_row.id},
+                )
+                return
+            await self._resolve(ctx)
+            return
+
         if outcome.result.status is not ActionStatus.success:
-            # An explicit refusal or failure stops the plan. Nothing is invented to keep
-            # the run looking healthy.
+            # A failure, a skip, or a refusal with no provenance stops the plan. Nothing is
+            # invented to keep the run looking healthy.
             await self._block(
                 ctx,
                 reason=outcome.result.reason,
@@ -1517,12 +1773,30 @@ class Orchestrator:
         return None
 
     async def _pending_approval(self, ctx: WorkflowContext) -> tuple[int, int] | None:
+        """The first task genuinely waiting on a person, as `(plan_task_id, evaluation_id)`.
+
+        "Pending approval" is defined by the **evaluation's decision**, not by the task state.
+        Task state `needs_human` is overloaded: the gate holding a task and a service surfacing a
+        decision both land there, and they need opposite handling.
+
+        Keying off the task state alone deadlocked the run. After the hotel allocation reported a
+        16-room shortfall its task became `needs_human`, and the engine then waited forever for an
+        operator decision on an evaluation that had already said `execute` and whose action had
+        already run. Filtering on `decision == needs_human` excludes it, because the gate never
+        held it.
+
+        Note what is deliberately *not* filtered: whether a decision already exists. An approved
+        evaluation still needs its task executed, so it is still the pending item until it runs.
+        """
         for row in await self._plan_tasks(ctx):
             if TaskState(row.state) is not TaskState.needs_human:
                 continue
             stmt = (
                 select(AssuranceEvaluation)
-                .where(AssuranceEvaluation.plan_task_id == row.id)
+                .where(
+                    AssuranceEvaluation.plan_task_id == row.id,
+                    AssuranceEvaluation.decision == AssuranceDecision.needs_human,
+                )
                 .order_by(AssuranceEvaluation.id.desc())
                 .limit(1)
             )
@@ -1592,17 +1866,32 @@ class Orchestrator:
 
     async def _resolve(self, ctx: WorkflowContext) -> None:
         rows = await self._plan_tasks(ctx)
+        outstanding = [r for r in rows if TaskState(r.state) is TaskState.needs_human]
         metrics = {
             "tasks_total": len(rows),
             "tasks_succeeded": sum(1 for r in rows if TaskState(r.state) is TaskState.succeeded),
             "tasks_skipped": sum(1 for r in rows if TaskState(r.state) is TaskState.skipped),
+            # Tasks whose service surfaced a decision rather than completing. Counted separately
+            # and named, so "resolved" can never be read as "nothing left to do".
+            "tasks_needing_human": len(outstanding),
+            "outstanding_actions": [str(r.action_type) for r in outstanding],
             "steps_taken": ctx.steps_taken,
         }
+        # The summary is the line an operator reads on the timeline, so it states the outstanding
+        # work rather than leaving it to be inferred from a metric.
+        summary = (
+            "Every task in the plan completed"
+            if not outstanding
+            else (
+                f"Plan worked to completion with {len(outstanding)} item(s) still needing a "
+                f"person: {', '.join(sorted(str(r.action_type) for r in outstanding))}"
+            )
+        )
         await self._transition(
             ctx,
             IncidentState.resolved,
             stage=STAGE_RESOLVE,
-            summary="Every task in the plan completed",
+            summary=summary,
             detail=metrics,
         )
         await self._publish(
@@ -1770,6 +2059,34 @@ def _contract_task(row: PlanTaskRow) -> PlanTask:
         inputs=dict(row.inputs or {}),
         depends_on=[str(dep) for dep in (row.depends_on or [])],
     )
+
+
+#: `provenance_kind` on a result that did not come from doing anything. `dispatch.refusal` and
+#: the service adapters' `_unavailable` both use it.
+PROVENANCE_UNAVAILABLE = "unavailable"
+
+
+def _carries_evidence(result: ServiceResult) -> bool:
+    """Whether a `needs_human` result came from a service that actually ran.
+
+    This is the line between two outcomes that share a status and mean opposite things:
+
+    * The hotel allocation secured 71 of 87 rooms and needs a person to decide about the other
+      16. It ran, it produced evidence, and the plan should continue around it.
+    * `evaluate_entitlements` has no implementation, so nothing happened at all. Continuing would
+      let an incident resolve with a task nobody performed and nobody was told about.
+
+    `provenance_kind == "unavailable"` is the discriminator because a result with no provenance is
+    not a finding. Checked alongside the refusal reason codes so a future adapter that forgets the
+    provenance still fails closed.
+    """
+    if result.provenance_kind == PROVENANCE_UNAVAILABLE:
+        return False
+    reason_code = (result.payload or {}).get("reason_code")
+    return reason_code not in {
+        dispatch.SERVICE_NOT_IMPLEMENTED,
+        "SERVICE_INPUTS_UNAVAILABLE",
+    }
 
 
 def _task_state_for(status: ActionStatus) -> TaskState:

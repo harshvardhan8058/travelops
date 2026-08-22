@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api import assurance_router, fixtures_router, health, incidents
+from app.api import assurance_router, fixtures_router, groups, health, incidents
 
 router = APIRouter()
 router.include_router(health.router)
@@ -35,6 +35,7 @@ router.include_router(health.router)
 # Real endpoints.
 router.include_router(incidents.router)
 router.include_router(assurance_router.router)
+router.include_router(groups.router)
 
 # Fixture-backed remainder. Each owning stream replaces its section in place, keeping the
 # response shape identical so the frontend never has to change.

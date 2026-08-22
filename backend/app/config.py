@@ -99,7 +99,10 @@ class Settings(BaseSettings):
     policy_pack_id: str = "in-moca-charter-2019"
     policy_pack_version: str = "2019.02"
 
-    assurance_config_path: Path = Path("./config/assurance.v1.yaml")
+    #: v2 carries every v1 action-level section forward unchanged and adds the `plan` and
+    #: `what_if` sections the Phase 2 gate requires. v1 stays on disk permanently so Phase 1
+    #: evaluations remain interpretable against the config that produced them.
+    assurance_config_path: Path = Path("./config/assurance.v2.yaml")
 
     max_workflow_steps: int = Field(default=20, ge=1, le=1000)
     action_timeout_seconds: int = Field(default=30, ge=1, le=600)

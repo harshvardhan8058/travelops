@@ -163,7 +163,7 @@ async def get_incident(
         flight=FlightSummary(
             id=flight.id,
             flight_number=flight.flight_number,
-            route=f"{flight.origin_icao} → {flight.destination_icao}",
+            route=f"{flight.origin_icao} -> {flight.destination_icao}",
             scheduled_departure=scheduled,
             estimated_departure=estimated,
             delay_minutes=delay_minutes,

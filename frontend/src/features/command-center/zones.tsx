@@ -144,7 +144,7 @@ export function FlightBoard({
               </td>
               <td className="px-3">
                 <MonoValue muted>
-                  {flight.origin_icao} → {flight.destination_icao}
+                  {flight.origin_icao} {'->'} {flight.destination_icao}
                 </MonoValue>
               </td>
               <td className="px-3 text-right">

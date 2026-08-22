@@ -16,11 +16,31 @@
     "crew_pairings_affected": 9,
     "note": "Each value is the length of the corresponding array, computed server-side."
   },
+  "rollup_status": {
+    "is_complete": true,
+    "computed_at": "2026-08-20T15:36:00Z",
+    "incidents_in_group": 8,
+    "incidents_assessed_connections": 8,
+    "incidents_assessed_crew": 8,
+    "member_flight_ids": [
+      1,
+      2,
+      3,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "flights_without_incident": [],
+    "membership_is_declared": true,
+    "note": "All 8 incidents across 8 declared flights have been assessed for both connections and crew."
+  },
   "flights": [
     {
       "id": 1,
       "flight_number": "6E 2134",
-      "route": "BLR → DEL",
+      "route": "BLR -> DEL",
       "delay_minutes": 420,
       "passengers": 174,
       "state": "executing"
@@ -28,7 +48,7 @@
     {
       "id": 2,
       "flight_number": "6E 811",
-      "route": "BLR → BOM",
+      "route": "BLR -> BOM",
       "delay_minutes": 110,
       "passengers": 158,
       "state": "assuring"
@@ -36,7 +56,7 @@
     {
       "id": 3,
       "flight_number": "AI 503",
-      "route": "BLR → HYD",
+      "route": "BLR -> HYD",
       "delay_minutes": 65,
       "passengers": 96,
       "state": "planning"
@@ -44,7 +64,7 @@
     {
       "id": 5,
       "flight_number": "6E 455",
-      "route": "BLR → MAA",
+      "route": "BLR -> MAA",
       "delay_minutes": 95,
       "passengers": 72,
       "state": "planning"
@@ -52,7 +72,7 @@
     {
       "id": 6,
       "flight_number": "UK 812",
-      "route": "BLR → CCU",
+      "route": "BLR -> CCU",
       "delay_minutes": 140,
       "passengers": 41,
       "state": "detected"
@@ -60,7 +80,7 @@
     {
       "id": 7,
       "flight_number": "AI 611",
-      "route": "BLR → COK",
+      "route": "BLR -> COK",
       "delay_minutes": 55,
       "passengers": 33,
       "state": "detected"
@@ -68,7 +88,7 @@
     {
       "id": 8,
       "flight_number": "6E 297",
-      "route": "BLR → GOI",
+      "route": "BLR -> GOI",
       "delay_minutes": 80,
       "passengers": 18,
       "state": "detected"
@@ -76,7 +96,7 @@
     {
       "id": 9,
       "flight_number": "UK 705",
-      "route": "AMD → BLR",
+      "route": "AMD -> BLR",
       "delay_minutes": 70,
       "passengers": 12,
       "state": "detected"
@@ -166,6 +186,8 @@
     }
   ],
   "graph": {
+    "group_reference": "GRP-2026-0820-VOBL",
+    "rule_version": "cascade-graph-v1",
     "nodes": [
       {
         "ref": "event:GRP-2026-0820-VOBL",
@@ -181,7 +203,7 @@
         "ref": "flight:1",
         "kind": "flight",
         "label": "6E 2134",
-        "sublabel": "BLR → DEL, +420 min",
+        "sublabel": "BLR -> DEL, +420 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -191,7 +213,7 @@
         "ref": "flight:2",
         "kind": "flight",
         "label": "6E 811",
-        "sublabel": "BLR → BOM, +110 min",
+        "sublabel": "BLR -> BOM, +110 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -201,7 +223,7 @@
         "ref": "flight:3",
         "kind": "flight",
         "label": "AI 503",
-        "sublabel": "BLR → HYD, +65 min",
+        "sublabel": "BLR -> HYD, +65 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -211,7 +233,7 @@
         "ref": "flight:5",
         "kind": "flight",
         "label": "6E 455",
-        "sublabel": "BLR → MAA, +95 min",
+        "sublabel": "BLR -> MAA, +95 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -221,7 +243,7 @@
         "ref": "flight:6",
         "kind": "flight",
         "label": "UK 812",
-        "sublabel": "BLR → CCU, +140 min",
+        "sublabel": "BLR -> CCU, +140 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -231,7 +253,7 @@
         "ref": "flight:7",
         "kind": "flight",
         "label": "AI 611",
-        "sublabel": "BLR → COK, +55 min",
+        "sublabel": "BLR -> COK, +55 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -241,7 +263,7 @@
         "ref": "flight:8",
         "kind": "flight",
         "label": "6E 297",
-        "sublabel": "BLR → GOI, +80 min",
+        "sublabel": "BLR -> GOI, +80 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -251,7 +273,7 @@
         "ref": "flight:9",
         "kind": "flight",
         "label": "UK 705",
-        "sublabel": "AMD → BLR, +70 min",
+        "sublabel": "AMD -> BLR, +70 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -507,6 +529,9 @@
       "root_cause": 8,
       "crew": 9
     },
+    "source_action_ids": [],
+    "source_prediction_ids": [],
+    "snapshot_hash": "a27de552887f7ffc0fb14398f4af26fc",
     "completeness": {
       "member_flight_count": 8,
       "flights_with_evidence": 8,
@@ -516,6 +541,8 @@
     "note": "Nodes are references to rows that already exist; there is no node table. Edge provenance is a fixture marker, not a row id — the live projection carries a real action or prediction reference."
   },
   "blast_radius": {
+    "group_reference": "GRP-2026-0820-VOBL",
+    "headline": "8 flights, 604 passengers, 22 connections, 9 rotations, 11 hotels. All 8 declared flights assessed.",
     "basis": "composed_from_recorded_findings",
     "dimensions": [
       {

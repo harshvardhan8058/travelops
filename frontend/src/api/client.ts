@@ -12,9 +12,13 @@ import type {
   AssuranceResponse,
   DecisionResponse,
   FlightsResponse,
+  GroupReplayResponse,
+  GroupRunResponse,
   IncidentDetail,
   IncidentGroupDetail,
   IncidentGroupsResponse,
+  PlanApprovalRow,
+  PlanAssuranceResponse,
   ReportResponse,
   SourcesResponse,
   PolicyResponse,
@@ -22,6 +26,7 @@ import type {
   RunResponse,
   SystemMode,
   TimelineResponse,
+  WhatIfResponse,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000/api/v1';
@@ -123,6 +128,36 @@ export const api = {
   assurance: (id: string) => request<AssuranceResponse>(`/incidents/${id}/assurance`),
   policy: (id: string) => request<PolicyResponse>(`/incidents/${id}/policy`),
   incidentGroup: (id: string) => request<IncidentGroupDetail>(`/incident-groups/${id}`),
+
+  /**
+   * Advance every member incident of a disruption.
+   *
+   * Approves nothing: each member still passes its own per-flight gate. The group is a scope, not
+   * an authorisation.
+   */
+  runIncidentGroup: (id: string, idempotencyKey?: string) =>
+    request<GroupRunResponse>(`/incident-groups/${id}/run`, {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+    }),
+
+  planAssurance: (id: string) =>
+    request<PlanAssuranceResponse>(`/incident-groups/${id}/plan-assurance`),
+
+  approvePlan: (id: string, planId: number, body: { reason: string; actor_id?: string }) =>
+    request<PlanApprovalRow>(`/incident-groups/${id}/plans/${planId}/approval`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  /** Bounded zero-write re-evaluation. Undeclared levers come back refused by name. */
+  whatIf: (id: string, levers: Record<string, unknown>) =>
+    request<WhatIfResponse>(`/incident-groups/${id}/what-if`, {
+      method: 'POST',
+      body: JSON.stringify({ levers }),
+    }),
+
+  groupReplay: (id: string) => request<GroupReplayResponse>(`/incident-groups/${id}/replay`),
   report: (id: string) => request<ReportResponse>(`/reports/${id}`),
 
   /**

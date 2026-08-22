@@ -36,7 +36,7 @@ from app.models.workflow import PlanTask as PlanTaskRow
 from app.orchestrator import dispatch
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.limits import Limits
-from app.orchestrator.playbook import FALLBACK_GENERATOR
+from app.orchestrator.playbook import FALLBACK_GENERATOR, playbook_for
 from app.orchestrator.state import TRANSITIONS
 from app.services.base import ServiceResult
 
@@ -228,12 +228,20 @@ class TestAdvance:
         assert [r.action_type for r in rows] == [
             "check_connections",
             "find_hotel_options",
+            # Allocation is its own step, behind the search. Search commits nothing; this one
+            # takes rooms off the market, so it is a separate decision with its own evidence.
+            "reserve_hotel_block",
             "assess_crew_impact",
             "notify_passengers",
             "evaluate_entitlements",
         ]
         # notify_passengers depends on check_connections, stored as a resolved task ID.
-        assert rows[3].depends_on == [str(rows[0].id)]
+        notify = next(row for row in rows if row.action_type == "notify_passengers")
+        assert notify.depends_on == [str(rows[0].id)]
+        # And allocation depends on the search that found the options.
+        reserve = next(row for row in rows if row.action_type == "reserve_hotel_block")
+        search = next(row for row in rows if row.action_type == "find_hotel_options")
+        assert reserve.depends_on == [str(search.id)]
 
     async def test_the_plan_narrows_to_actions_with_a_registered_service(
         self, session, flight, settings
@@ -319,7 +327,7 @@ class TestAdvance:
             await engine.advance(ctx)
 
         rows = (await session.execute(select(PlanTaskRow))).scalars().all()
-        assert len(rows) == 5
+        assert len(rows) == len(playbook_for("weather"))
 
     async def test_a_plan_is_not_regenerated_on_re_entry(self, session, flight, settings):
         engine = build(session, settings=settings)
@@ -1221,7 +1229,9 @@ class TestExecutionBoundary:
             assert ctx.state is IncidentState.resolved
             rows = (await session.execute(select(PlanTaskRow))).scalars().all()
             assert all(TaskState(r.state) is TaskState.succeeded for r in rows)
-            assert await _count(session, Action) == 5
+            # One action per playbook step, read from the playbook rather than restated. A
+            # literal here made every playbook change look like an execution bug.
+            assert await _count(session, Action) == len(playbook_for("weather"))
         finally:
             dispatch.SERVICE_REGISTRY.clear()
 

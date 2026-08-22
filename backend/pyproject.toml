@@ -57,3 +57,9 @@ ignore = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+# The repo root, so `data.generators` — the committed dataset generators, which live one level above
+# `backend/` — is importable. This was previously working by accident: with no conftest in
+# `tests/contract/`, the first import of `app.db.seed` happened late enough that something else had
+# already extended `sys.path`. Adding a conftest there moved that import earlier and the accident
+# stopped holding. Declared explicitly so it does not depend on collection order.
+pythonpath = ["..", "."]
