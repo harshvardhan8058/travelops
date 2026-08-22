@@ -28,8 +28,8 @@ from itertools import pairwise
 import pytest
 from data.generators.cascade_spec import BENGALURU_STORM
 
-from app.models.enums import PairingLegRole, PairingMechanism
-from app.services.crew_impact import attribute_pairing_impacts
+from app.models.enums import DIRECT_PAIRING_MECHANISMS, PairingLegRole, PairingMechanism
+from app.services.crew_impact import attribute_pairing_impacts, expand_crew_cascade
 
 EXPECTED_PAIRING_COUNT = 9
 EXPECTED_AFFECTED_FLIGHTS = 8
@@ -73,10 +73,21 @@ def test_each_pairing_carries_exactly_one_mechanism(at_risk):
         assert isinstance(impact.mechanism, PairingMechanism)
 
 
-def test_all_four_mechanisms_appear(at_risk):
-    """Each mechanism is an edge label in the cascade graph. A missing one is a story
-    the reviewer cannot read off the screen."""
-    assert {impact.mechanism for impact in at_risk} == set(PairingMechanism)
+def test_all_four_direct_mechanisms_appear(at_risk):
+    """Each direct mechanism is an edge label in the cascade graph. A missing one is a story
+    the reviewer cannot read off the screen.
+
+    Compared against DIRECT_PAIRING_MECHANISMS rather than the whole enum: `downstream_flight`
+    is reachable only through bounded expansion at depth >= 2, and asserting it here would make
+    the default, unexpanded call look incomplete."""
+    assert {impact.mechanism for impact in at_risk} == set(DIRECT_PAIRING_MECHANISMS)
+
+
+def test_the_default_call_never_labels_a_pairing_downstream(at_risk):
+    """Guards the boundary from the other side. Without expansion explicitly requested, no
+    depth-2 label may appear, and every impact sits at depth 1."""
+    assert PairingMechanism.downstream_flight not in {i.mechanism for i in at_risk}
+    assert {i.depth for i in at_risk} == {1}
 
 
 def test_mechanism_distribution_is_the_documented_identity(at_risk):
@@ -297,3 +308,87 @@ def test_connection_breakdown_only_references_affected_flights():
 
 def test_passenger_counts_sum_to_the_fixture_target():
     assert sum(flight.passengers for flight in BENGALURU_STORM.affected_flights) == 604
+
+
+# ------------------------------------------------------- bounded expansion (Phase 2, C2-6)
+#
+# The expansion exists to answer "and then what?" without putting the nine at risk. These
+# tests are written so that any change making expansion move the headline count fails loudly.
+
+
+def _cascade(depth: int):
+    return expand_crew_cascade(
+        affected_flights=BENGALURU_STORM.affected_flights,
+        pairings=BENGALURU_STORM.pairings,
+        flights=BENGALURU_STORM.flights_by_id,
+        max_expansion_depth=depth,
+    )
+
+
+def test_depth_one_is_exactly_the_phase_one_answer(at_risk):
+    """The default is direct-only, byte for byte identical to `attribute_pairing_impacts`."""
+    cascade = _cascade(1)
+    assert cascade.downstream == []
+    assert cascade.max_depth_reached == 1
+    assert cascade.expansion_truncated is False
+    assert cascade.newly_at_risk_flight_ids == []
+    assert [i.model_dump() for i in cascade.direct_at_risk] == [i.model_dump() for i in at_risk]
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3, 5])
+def test_the_direct_count_is_nine_at_every_expansion_depth(depth):
+    """The load-bearing assertion of this whole feature.
+
+    Nine is the number a reviewer is invited to verify by hand. Expansion may add rows to
+    `downstream`; if it can also change `direct`, the figure on screen depends on a config
+    value nobody in the room can see, and the demo's most checkable claim becomes unfalsifiable.
+    """
+    cascade = _cascade(depth)
+    assert len(cascade.direct_at_risk) == EXPECTED_PAIRING_COUNT
+    assert {i.depth for i in cascade.direct} == {1}
+
+
+def test_expansion_never_relabels_a_direct_rotation():
+    """`downstream_flight` is reachable only at depth >= 2, and only for rotations that were
+    not already attributed. A pairing counted directly must never reappear downstream."""
+    cascade = _cascade(3)
+    direct_ids = {i.pairing_id for i in cascade.direct}
+    downstream_ids = {i.pairing_id for i in cascade.downstream}
+    assert direct_ids.isdisjoint(downstream_ids)
+    assert all(i.mechanism is PairingMechanism.downstream_flight for i in cascade.downstream)
+    assert all(i.depth >= 2 for i in cascade.downstream)
+    assert PairingMechanism.downstream_flight not in {i.mechanism for i in cascade.direct}
+
+
+def test_expansion_terminates_and_reports_truncation_rather_than_hiding_it():
+    """A bounded walk that quietly stops is an incomplete answer presented as a complete one.
+
+    Whatever the bound, the walk must terminate, and `expansion_truncated` must be the honest
+    statement of whether a frontier was still open when it did.
+    """
+    for depth in (2, 3, 4, 8):
+        cascade = _cascade(depth)
+        assert cascade.max_depth_reached <= depth
+        assert isinstance(cascade.expansion_truncated, bool)
+        # A cascade that exhausted its frontier before the bound cannot claim truncation.
+        if cascade.max_depth_reached < depth:
+            assert cascade.expansion_truncated is False
+
+
+def test_expansion_is_deterministic():
+    """Same roster, same answer — including ordering, since the payload is hashed downstream."""
+    first, second = _cascade(3), _cascade(3)
+    assert [i.model_dump() for i in first.downstream] == [i.model_dump() for i in second.downstream]
+
+
+def test_downstream_flights_were_not_themselves_disrupted():
+    """The point of the mechanism: these flights lost crew, they were never delayed.
+
+    If a newly-at-risk flight were already in the affected set, the row would be double
+    counting a direct impact under a second label.
+    """
+    cascade = _cascade(3)
+    affected = {f.flight_id for f in BENGALURU_STORM.affected_flights}
+    assert set(cascade.newly_at_risk_flight_ids).isdisjoint(affected)
+    for impact in cascade.downstream:
+        assert impact.source_flight_id not in affected

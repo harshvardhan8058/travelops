@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -403,6 +403,99 @@ async def affected_pairings_recursive(
 # contributes nothing, and `incidents_assessed` says so.
 
 
+class GroupFlight(BaseModel):
+    """A flight the disruption group declares as a member, with its role.
+
+    Read from `incident_group_flight`. Never from `flight.origin_icao == group.airport_icao`:
+    that query returns seven of the storm's eight flights because UK 705 arrives into VOBL,
+    and the seven still produce nine pairings — the headline survives while the `onward_duty`
+    mechanism silently disappears.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    flight_id: int
+    flight_number: str
+    origin_icao: str
+    destination_icao: str
+    role: str
+    delay_minutes_at_injection: int
+    scheduled_departure_local: str
+    #: The incident carrying this flight, when one has been opened. None means the group
+    #: declares the flight but no incident exists for it yet — a real gap, shown as one.
+    incident_id: int | None = None
+    incident_state: str | None = None
+
+    @property
+    def is_primary(self) -> bool:
+        return self.role == "primary"
+
+
+async def group_affected_flight_ids(session: AsyncSession, *, group_id: int) -> list[int]:
+    """Declared member flight ids, ascending.
+
+    The single source of truth for "which flights is this cascade about". Returns an empty
+    list for a group with no membership rows, and callers fall back to incident-derived
+    flights so Phase 1 datasets keep working.
+    """
+    from app.models.cascade import IncidentGroupFlight
+
+    rows = (
+        await session.execute(
+            select(IncidentGroupFlight.flight_id)
+            .where(IncidentGroupFlight.incident_group_id == group_id)
+            .order_by(IncidentGroupFlight.flight_id)
+        )
+    ).all()
+    return [int(row[0]) for row in rows]
+
+
+async def group_affected_flights(session: AsyncSession, *, group_id: int) -> list[GroupFlight]:
+    """Every declared member flight with its role and its incident, if one exists.
+
+    Ordered primary first, then by scheduled departure, which is how an operator reads a
+    cascade: the flight it is named for, then the rest in the order they were due out.
+    """
+    from app.models.cascade import IncidentGroupFlight
+    from app.models.workflow import Incident
+
+    rows = (
+        await session.execute(
+            select(
+                IncidentGroupFlight.flight_id,
+                IncidentGroupFlight.role,
+                IncidentGroupFlight.delay_minutes_at_injection,
+                Flight,
+                Incident.id,
+                Incident.state,
+            )
+            .join(Flight, Flight.id == IncidentGroupFlight.flight_id)
+            .outerjoin(
+                Incident,
+                (Incident.flight_id == IncidentGroupFlight.flight_id)
+                & (Incident.group_id == group_id),
+            )
+            .where(IncidentGroupFlight.incident_group_id == group_id)
+        )
+    ).all()
+
+    members = [
+        GroupFlight(
+            flight_id=int(flight_id),
+            flight_number=flight.flight_number,
+            origin_icao=flight.origin_icao,
+            destination_icao=flight.destination_icao,
+            role=str(role),
+            delay_minutes_at_injection=int(delay),
+            scheduled_departure_local=_local(flight.scheduled_departure),
+            incident_id=int(incident_id) if incident_id is not None else None,
+            incident_state=str(state) if state is not None else None,
+        )
+        for flight_id, role, delay, flight, incident_id, state in rows
+    ]
+    return sorted(members, key=lambda m: (not m.is_primary, m.scheduled_departure_local))
+
+
 class CascadePairing(BaseModel):
     """One affected rotation, as the cascade graph renders it."""
 
@@ -440,12 +533,27 @@ class CascadeRollup(BaseModel):
     incidents_assessed_connections: int
     incidents_assessed_crew: int
 
+    #: Declared member flights, from `incident_group_flight`. Empty for a Phase 1 group with
+    #: no membership rows, in which case `flights_affected` fell back to incident-derived.
+    member_flight_ids: list[int] = Field(default_factory=list)
+    #: Declared members with no incident open yet. A non-empty list means the cascade is
+    #: represented in data but not yet fully worked, which the operator should see rather
+    #: than have smoothed over.
+    flights_without_incident: list[int] = Field(default_factory=list)
+
+    @property
+    def membership_is_declared(self) -> bool:
+        return bool(self.member_flight_ids)
+
     @property
     def is_complete(self) -> bool:
         return (
             self.incidents_in_group > 0
             and self.incidents_assessed_connections == self.incidents_in_group
             and self.incidents_assessed_crew == self.incidents_in_group
+            # Every declared flight must carry an incident. Without this, eight declared
+            # flights with three incidents, all three assessed, would read as complete.
+            and not self.flights_without_incident
         )
 
 
@@ -461,6 +569,9 @@ _MECHANISM_PRECEDENCE: dict[str, int] = {
     "onward_duty": 1,
     "second_pairing": 2,
     "operating": 3,
+    # Last: a depth-2 label carries the least information about why the rotation broke, and
+    # must never outrank a direct attribution for the same pairing.
+    "downstream_flight": 4,
 }
 
 
@@ -476,13 +587,17 @@ async def _group_incident_flight_ids(session: AsyncSession, group_id: int) -> di
     return {int(incident_id): int(flight_id) for incident_id, flight_id in rows}
 
 
-async def _recorded_action_payloads(
+async def recorded_actions(
     session: AsyncSession, incident_ids: list[int], action_type: str
-) -> list[tuple[int, dict[str, Any]]]:
-    """(incident_id, payload) for every successful action of this type in the group.
+) -> list[tuple[int, int, dict[str, Any]]]:
+    """(incident_id, action_id, payload) for every successful action of this type in the group.
 
     Only `success` counts. A `needs_human` refusal carries no findings, and treating one as
     an empty finding would quietly shrink a total.
+
+    The action id is returned because `disruption_edge.derived_from_action_id` is NOT NULL:
+    every edge in the cascade graph names the recorded action it came from. An edge without
+    one would be an assertion rather than evidence.
     """
     from app.models.enums import ActionStatus
     from app.models.workflow import Action, Plan, PlanTask
@@ -492,7 +607,7 @@ async def _recorded_action_payloads(
 
     rows = (
         await session.execute(
-            select(Plan.incident_id, Action.payload)
+            select(Plan.incident_id, Action.id, Action.payload)
             .join(PlanTask, PlanTask.plan_id == Plan.id)
             .join(Action, Action.plan_task_id == PlanTask.id)
             .where(
@@ -503,7 +618,22 @@ async def _recorded_action_payloads(
             .order_by(Plan.incident_id, Action.id)
         )
     ).all()
-    return [(int(incident_id), payload or {}) for incident_id, payload in rows]
+    return [
+        (int(incident_id), int(action_id), payload or {})
+        for incident_id, action_id, payload in rows
+    ]
+
+
+async def _recorded_action_payloads(
+    session: AsyncSession, incident_ids: list[int], action_type: str
+) -> list[tuple[int, dict[str, Any]]]:
+    """(incident_id, payload), for callers that do not need the action id."""
+    return [
+        (incident_id, payload)
+        for incident_id, _action_id, payload in await recorded_actions(
+            session, incident_ids, action_type
+        )
+    ]
 
 
 async def cascade_rollup(session: AsyncSession, *, group_id: int) -> CascadeRollup:
@@ -524,7 +654,12 @@ async def cascade_rollup(session: AsyncSession, *, group_id: int) -> CascadeRoll
 
     incident_flights = await _group_incident_flight_ids(session, group_id)
     incident_ids = sorted(incident_flights)
-    flight_ids = set(incident_flights.values())
+
+    # Declared membership is authoritative for "how many flights". Falling back to the
+    # incident-derived set keeps groups seeded before 0004 working unchanged.
+    member_flight_ids = await group_affected_flight_ids(session, group_id=group_id)
+    flight_ids = set(member_flight_ids) or set(incident_flights.values())
+    flights_without_incident = sorted(set(member_flight_ids) - set(incident_flights.values()))
 
     # Passengers on the affected flights, counted from booking records rather than taken
     # from a target figure.
@@ -599,4 +734,6 @@ async def cascade_rollup(session: AsyncSession, *, group_id: int) -> CascadeRoll
         incidents_in_group=len(incident_ids),
         incidents_assessed_connections=len({i for i, _ in connection_payloads}),
         incidents_assessed_crew=len({i for i, _ in crew_payloads}),
+        member_flight_ids=member_flight_ids,
+        flights_without_incident=flights_without_incident,
     )

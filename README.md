@@ -65,7 +65,7 @@ make doctor          # check the toolchain and required files first
 make env             # create .env from .env.example
 make up              # build and start api + postgres + redis + web
 make migrate         # apply the schema
-make seed            # load the fixed-seed dataset: 2083 rows, digest 70fbdf8947c638e5
+make seed            # load the fixed-seed dataset: 2093 rows, digest fa9564fc4afefc5d
 make demo            # inject bengaluru_storm -> one incident, risk 80 (severe)
 ```
 
@@ -144,7 +144,7 @@ Being precise about this matters more than a green tick.
 | `alembic upgrade head`, `make seed`, `make demo` | Inside the built API image, against PostgreSQL 16 |
 | The recovery journey above, to `resolved` | The real Uvicorn process over HTTP, against PostgreSQL 16, with Redis deliberately unreachable |
 | Backend suite | 1068 passing; 1084 with `TRAVELOPS_TEST_DATABASE_URL` set, including 16/16 real-app PostgreSQL tests |
-| Determinism | Seed digest `70fbdf8947c638e5` reproduced across runs |
+| Determinism | Seed digest `fa9564fc4afefc5d` reproduced across runs |
 
 **Not yet confirmed by anyone:** `docker compose up` orchestrating all four services together on
 a real machine, and the console at `:5173`. That is team action 2 in

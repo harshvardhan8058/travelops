@@ -24,10 +24,18 @@ Two further boundaries, both deliberate:
    published", which is the fact a controller needs. Whether it could be flown against a
    revised departure depends on the crew's duty envelope, which this system does not
    adjudicate.
-2. **The forward walk does not expand to second-order flights.** It finds pairings holding
-   a leg on a storm-affected flight and then walks forward *within* each such pairing.
-   Letting a newly-at-risk flight pull in further pairings makes the cascade unbounded and
-   the count unverifiable.
+2. **Second-order expansion is opt-in, bounded, and reported separately.** The default walk
+   finds pairings holding a leg on a storm-affected flight and walks forward *within* each
+   such pairing — that is the direct set, and it is where the nine comes from. Phase 2 adds
+   `expand_crew_cascade`, which may follow a broken onward leg into the pairings on *that*
+   flight, labelled `downstream_flight`.
+
+   Two guards make the expansion safe to switch on. It is depth bounded, from
+   `business_constraint`, so the walk always terminates and truncation is reported rather
+   than hidden. And the direct set is returned as its own collection, so enabling expansion
+   can add rows but can never move the headline count of nine. An unbounded expansion that
+   silently changed the number would destroy the only figure in the demo a reviewer can
+   check by hand.
 """
 
 from __future__ import annotations
@@ -137,6 +145,10 @@ class PairingImpact(BaseModel):
     #: Every affected flight this pairing holds a leg on. One pairing spanning two affected
     #: flights is what makes eight flights resolve to seven carrying rotations.
     covered_flight_ids: list[int] = Field(default_factory=list)
+
+    #: Hops from the disruption. 1 = a leg on a storm-affected flight. 2+ = reached only
+    #: because an earlier rotation's onward leg broke. Persisted to `pairing_impact.depth`.
+    depth: int = 1
 
     @property
     def affected_leg_label(self) -> str:
@@ -358,6 +370,7 @@ def _build(
     detail: str,
     flights: dict[int, ScheduledFlight],
     is_at_risk: bool = True,
+    depth: int = 1,
 ) -> PairingImpact:
     return PairingImpact(
         pairing_id=pairing.pairing_id,
@@ -373,6 +386,163 @@ def _build(
         detail=detail,
         is_at_risk=is_at_risk,
         covered_flight_ids=covered,
+        depth=depth,
+    )
+
+
+# ----------------------------------------------------------------- bounded expansion
+
+
+class CrewCascade(BaseModel):
+    """The direct crew set and anything reached beyond it, kept apart on purpose.
+
+    `direct` is the Phase 1 answer, unchanged and independently countable. `downstream` is
+    additive. A single flat list would let a configuration change move the nine, which is the
+    one number a reviewer is invited to verify by hand.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    direct: list[PairingImpact] = Field(default_factory=list)
+    downstream: list[PairingImpact] = Field(default_factory=list)
+
+    #: Deepest hop actually attributed. 1 when expansion is off or found nothing.
+    max_depth_reached: int = 1
+    #: The configured bound.
+    max_expansion_depth: int = 1
+    #: True when the bound stopped a frontier that still had flights in it. Surfaced rather
+    #: than swallowed: a truncated cascade is an incomplete answer and must say so.
+    expansion_truncated: bool = False
+    #: Flights that became at risk only through a broken onward leg.
+    newly_at_risk_flight_ids: list[int] = Field(default_factory=list)
+
+    @property
+    def direct_at_risk(self) -> list[PairingImpact]:
+        return [impact for impact in self.direct if impact.is_at_risk]
+
+    @property
+    def downstream_at_risk(self) -> list[PairingImpact]:
+        return [impact for impact in self.downstream if impact.is_at_risk]
+
+
+def expand_crew_cascade(
+    *,
+    affected_flights: list[ScheduledFlight],
+    pairings: list[RosterPairing],
+    flights: dict[int, ScheduledFlight],
+    max_expansion_depth: int = 1,
+) -> CrewCascade:
+    """Attribute the direct set, then optionally follow broken onward legs one hop at a time.
+
+    `max_expansion_depth=1` means direct only and reproduces Phase 1 exactly, which is why
+    it is the default. The bound comes from `business_constraint`, so widening the cascade is
+    a data decision with an audit trail rather than a code change.
+    """
+    direct = attribute_pairing_impacts(
+        affected_flights=affected_flights, pairings=pairings, flights=flights
+    )
+    cascade = CrewCascade(direct=direct, max_expansion_depth=max(1, int(max_expansion_depth)))
+    if cascade.max_expansion_depth <= 1:
+        return cascade
+
+    attributed = {impact.pairing_id for impact in direct}
+    covered_flights = {flight.flight_id for flight in affected_flights}
+    frontier = _broken_downstream_flights(direct, flights=flights, seen=covered_flights)
+
+    depth = 1
+    downstream: list[PairingImpact] = []
+    while frontier and depth < cascade.max_expansion_depth:
+        depth += 1
+        covered_flights |= set(frontier)
+        wave = [
+            _downstream_impact(
+                pairing=pairing,
+                source=flights[flight_id],
+                flights=flights,
+                depth=depth,
+            )
+            for flight_id in frontier
+            for pairing in _pairings_on(flight_id, pairings=pairings, exclude=attributed)
+        ]
+        for impact in wave:
+            attributed.add(impact.pairing_id)
+        downstream.extend(wave)
+        frontier = _broken_downstream_flights(wave, flights=flights, seen=covered_flights)
+
+    cascade.downstream = downstream
+    cascade.max_depth_reached = depth if downstream else 1
+    cascade.expansion_truncated = bool(frontier)
+    cascade.newly_at_risk_flight_ids = sorted(
+        covered_flights - {flight.flight_id for flight in affected_flights}
+    )
+    return cascade
+
+
+def _pairings_on(
+    flight_id: int, *, pairings: list[RosterPairing], exclude: set[int]
+) -> list[RosterPairing]:
+    """Rotations holding a leg on a flight, in reference order so the walk is deterministic."""
+    return [
+        pairing
+        for pairing in sorted(pairings, key=lambda p: p.reference)
+        if pairing.pairing_id not in exclude
+        and any(leg.flight_id == flight_id for leg in pairing.legs)
+    ]
+
+
+def _broken_downstream_flights(
+    impacts: list[PairingImpact],
+    *,
+    flights: dict[int, ScheduledFlight],
+    seen: set[int],
+) -> list[int]:
+    """The next frontier: flights named by a broken onward leg and not already covered.
+
+    `operating` and `second_pairing` describe the delayed leg itself and so propagate
+    nothing new. Only a leg that breaks downstream puts a further flight at risk.
+    """
+    propagating = {
+        PairingMechanism.onward_duty,
+        PairingMechanism.positioning,
+        PairingMechanism.downstream_flight,
+    }
+    numbers = {
+        impact.affected_leg_flight_number
+        for impact in impacts
+        if impact.is_at_risk and impact.mechanism in propagating
+    }
+    return sorted(
+        flight.flight_id
+        for flight in flights.values()
+        if flight.flight_number in numbers and flight.flight_id not in seen
+    )
+
+
+def _downstream_impact(
+    *,
+    pairing: RosterPairing,
+    source: ScheduledFlight,
+    flights: dict[int, ScheduledFlight],
+    depth: int,
+) -> PairingImpact:
+    entry_leg = next(leg for leg in pairing.ordered_legs if leg.flight_id == source.flight_id)
+    broken = _first_infeasible_downstream_leg(pairing=pairing, entry_leg=entry_leg, flights=flights)
+    affected_leg = broken or entry_leg
+    detail = (
+        f"Reached at depth {depth}: {source.flight_number} was not itself delayed by the "
+        f"disruption but lost its crew to an earlier broken rotation, which puts this "
+        f"rotation at risk in turn."
+    )
+    return _build(
+        pairing=pairing,
+        source=source,
+        affected_leg=affected_leg,
+        leg_count=len(pairing.legs),
+        mechanism=PairingMechanism.downstream_flight,
+        covered=[source.flight_id],
+        detail=detail,
+        flights=flights,
+        depth=depth,
     )
 
 

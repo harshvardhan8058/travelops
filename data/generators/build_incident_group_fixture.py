@@ -28,6 +28,7 @@ from data.generators.cascade_spec import BENGALURU_STORM, IATA_BY_ICAO, CascadeS
 
 FIXTURE_PATH = REPO_ROOT / "fixtures" / "api" / "incident_group_detail.json"
 
+GROUP_REFERENCE = "GRP-2026-0820-VOBL"
 GENERATED_BY = "data/generators/build_incident_group_fixture.py"
 
 #: Values are the operator-facing wording of the four mechanisms. Keys are the enum, so a
@@ -65,6 +66,186 @@ def _why_nine_not_eight(impacts: list[PairingImpact]) -> str:
     )
 
 
+def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
+    """The cascade as nodes and edges, in the same shape `app.services.cascade_graph` returns.
+
+    Additive to the fixture: every key Stream D already reads is untouched, so the console keeps
+    working while the graph view is built. Node refs use `kind:id` — the same vocabulary as
+    `evidence_refs` — because there is no node table and a node *is* the row it names.
+
+    `derived_from` is a fixture marker here rather than a row id. The live projection carries a
+    real `action:` or `prediction:` reference, and the fixture says plainly that it does not, so
+    nobody mistakes a fixture edge for recorded evidence.
+    """
+    event_ref = f"event:{GROUP_REFERENCE}"
+    nodes = [
+        {
+            "ref": event_ref,
+            "kind": "event",
+            "label": GROUP_REFERENCE,
+            "sublabel": f"Root cause at {scenario.root_airport_icao}",
+            "depth": 0,
+            "at_risk": True,
+            "has_evidence": True,
+            "role": None,
+        }
+    ]
+    edges = []
+
+    for spec in scenario.affected:
+        flight = spec.flight
+        ref = f"flight:{flight.flight_id}"
+        nodes.append(
+            {
+                "ref": ref,
+                "kind": "flight",
+                "label": flight.flight_number,
+                "sublabel": (
+                    f"{_route(flight.origin_icao, flight.destination_icao)}, "
+                    f"+{flight.delay_minutes} min"
+                ),
+                "depth": 1,
+                "at_risk": True,
+                "has_evidence": True,
+                "role": spec.membership_role,
+            }
+        )
+        edges.append(
+            {
+                "source_ref": event_ref,
+                "target_ref": ref,
+                "edge_kind": "root_cause",
+                "mechanism": None,
+                "detail": "Delay risk assessed against the recorded weather and runway state.",
+                "depth": 1,
+                "derived_from": "fixture",
+            }
+        )
+
+    flights_by_number = {
+        flight.flight_number: flight.flight_id for flight in scenario.flights_by_id.values()
+    }
+    for impact in at_risk:
+        ref = f"pairing:{impact.pairing_id}"
+        nodes.append(
+            {
+                "ref": ref,
+                "kind": "pairing",
+                "label": impact.pairing_reference,
+                "sublabel": f"Base {impact.base_icao}",
+                "depth": 2,
+                "at_risk": True,
+                "has_evidence": True,
+                "role": None,
+            }
+        )
+        source_id = flights_by_number.get(impact.source_flight_number, impact.source_flight_id)
+        edges.append(
+            {
+                "source_ref": f"flight:{source_id}",
+                "target_ref": ref,
+                "edge_kind": "crew",
+                "mechanism": impact.mechanism.value,
+                "detail": impact.detail,
+                "depth": 2,
+                "derived_from": "fixture",
+            }
+        )
+
+    counts: dict[str, int] = {}
+    for edge in edges:
+        counts[edge["edge_kind"]] = counts.get(edge["edge_kind"], 0) + 1
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "edge_counts_by_kind": counts,
+        "completeness": {
+            "member_flight_count": len(scenario.affected),
+            "flights_with_evidence": len(scenario.affected),
+            "is_complete": True,
+            "note": f"All {len(scenario.affected)} declared flights carry recorded evidence.",
+        },
+        "note": (
+            "Nodes are references to rows that already exist; there is no node table. Edge "
+            "provenance is a fixture marker, not a row id — the live projection carries a real "
+            "action or prediction reference."
+        ),
+    }
+
+
+def _blast_radius(scenario: CascadeScenario, rollups: dict) -> dict:
+    """Composition only: every value is repeated from `rollups`, none is calculated here.
+
+    Reports **completeness**, never confidence. Completeness is countable — eight of eight
+    flights assessed. A confidence percentage would be a probability nothing in this system is
+    calibrated to produce, and one uncheckable figure sitting next to five checkable ones takes
+    the credibility of all six.
+    """
+    dimensions = [
+        {
+            "key": "flights",
+            "label": "Flights in the cascade",
+            "value": rollups["flights_affected"],
+            "unit": "flights",
+            "measured_by": "incident_group_flight",
+            "is_complete": True,
+            "note": "Declared membership, so this figure does not depend on work completed.",
+        },
+        {
+            "key": "passengers",
+            "label": "Passengers on those flights",
+            "value": rollups["passengers_affected"],
+            "unit": "passengers",
+            "measured_by": "booking_segment",
+            "is_complete": True,
+            "note": "Counted from booking rows against the declared flights.",
+        },
+        {
+            "key": "connections",
+            "label": "Connections that break",
+            "value": rollups["connections_at_risk"],
+            "unit": "connections",
+            "measured_by": "connection",
+            "is_complete": True,
+            "note": "The union of distinct bookings, so nobody is counted twice.",
+        },
+        {
+            "key": "crew_pairings",
+            "label": "Crew rotations at risk",
+            "value": rollups["crew_pairings_affected"],
+            "unit": "rotations",
+            "measured_by": "crew_impact",
+            "is_complete": True,
+            "note": "Direct impacts only. Second-order expansion is reported separately.",
+        },
+        {
+            "key": "candidate_hotels",
+            "label": "Hotels within search range",
+            "value": rollups["candidate_hotels"],
+            "unit": "hotels",
+            "measured_by": "hotel",
+            "is_complete": True,
+            "note": "A search space, not an allocation.",
+        },
+    ]
+    return {
+        "basis": "composed_from_recorded_findings",
+        "dimensions": dimensions,
+        "completeness": {
+            "flights_declared": rollups["flights_affected"],
+            "flights_assessed": rollups["flights_affected"],
+            "ratio": f"{rollups['flights_affected']}/{rollups['flights_affected']}",
+            "is_complete": True,
+        },
+        "gaps": [],
+        "note": (
+            "Every figure is repeated from the arrays above. Nothing is estimated, scored or "
+            "inferred, and there is deliberately no confidence value."
+        ),
+    }
+
+
 def build_payload(scenario: CascadeScenario = BENGALURU_STORM) -> dict:
     impacts = attribute_pairing_impacts(
         affected_flights=scenario.affected_flights,
@@ -99,6 +280,14 @@ def build_payload(scenario: CascadeScenario = BENGALURU_STORM) -> dict:
     ]
 
     opened_at = scenario.injected_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rollups = {
+        "flights_affected": len(flights),
+        "passengers_affected": sum(flight["passengers"] for flight in flights),
+        "connections_at_risk": sum(scenario.at_risk_connections_by_flight.values()),
+        "candidate_hotels": scenario.candidate_hotel_target,
+        "crew_pairings_affected": len(crew_pairings),
+        "note": "Each value is the length of the corresponding array, computed server-side.",
+    }
 
     return {
         "generated_by": GENERATED_BY,
@@ -106,22 +295,19 @@ def build_payload(scenario: CascadeScenario = BENGALURU_STORM) -> dict:
             "Counts are DERIVED from the arrays below. The UI must never render a hardcoded total."
         ),
         "id": 1,
-        "reference": "GRP-2026-0820-VOBL",
+        "reference": GROUP_REFERENCE,
         "root_cause": "weather",
         "airport_icao": scenario.root_airport_icao,
         "severity": "high",
         "state": "executing",
         "opened_at": opened_at,
-        "rollups": {
-            "flights_affected": len(flights),
-            "passengers_affected": sum(flight["passengers"] for flight in flights),
-            "connections_at_risk": sum(scenario.at_risk_connections_by_flight.values()),
-            "candidate_hotels": scenario.candidate_hotel_target,
-            "crew_pairings_affected": len(crew_pairings),
-            "note": "Each value is the length of the corresponding array, computed server-side.",
-        },
+        "rollups": rollups,
         "flights": flights,
         "crew_pairings": crew_pairings,
+        # Phase 2, additive. Every key above is unchanged, so the existing console keeps
+        # rendering while the graph and blast-radius views are built against these.
+        "graph": _graph(scenario, at_risk),
+        "blast_radius": _blast_radius(scenario, rollups),
         "mechanism_legend": MECHANISM_LEGEND,
         "why_nine_not_eight": _why_nine_not_eight(impacts),
         "provenance": {
