@@ -97,12 +97,21 @@ class TestRun:
         assert "operator decision" in (body["note"] or "")
 
     def test_the_low_risk_tasks_really_executed(self, client, incident):
-        """Not refused, not faked: two Stream C services ran and recorded a result."""
+        """Not refused, not faked: three Stream C services ran and recorded a result.
+
+        `find_hotel_options` joined this set when Phase 2 registered the hotel services. It is
+        listed explicitly rather than asserted loosely, because "some services ran" would still
+        pass if one silently stopped running.
+        """
         client.post(f"{PREFIX}/incidents/{incident}/run")
         body = client.get(f"{PREFIX}/incidents/{incident}").json()
 
         done = {a["action_type"]: a for a in body["actions"]}
-        assert set(done) == {"check_connections", "assess_crew_impact"}
+        assert set(done) == {
+            "check_connections",
+            "find_hotel_options",
+            "assess_crew_impact",
+        }
         for action in done.values():
             assert action["status"] == "success"
             assert "SERVICE_NOT_IMPLEMENTED" not in action["reason"]
@@ -127,22 +136,26 @@ class TestRun:
 
         assert [t["action_type"] for t in plan["tasks"]] == [
             "check_connections",
+            "find_hotel_options",
             "assess_crew_impact",
             "notify_passengers",
         ]
-        assert "find_hotel_options" in plan["rationale"]
+        # One deferral left. `evaluate_entitlements` still has no registered service, and the
+        # omission is written into the rationale rather than left for a reader to notice.
         assert "evaluate_entitlements" in plan["rationale"]
         assert "no deterministic service is available" in plan["rationale"]
+        # And the converse: a registered action must NOT be described as deferred.
+        assert "find_hotel_options" not in plan["rationale"]
 
     def test_the_deferral_is_on_the_timeline_too(self, client, incident):
         client.post(f"{PREFIX}/incidents/{incident}/run")
         entries = client.get(f"{PREFIX}/incidents/{incident}/timeline").json()["entries"]
 
         proposed = next(e for e in entries if e["event_type"] == "PLAN_PROPOSED")
-        assert proposed["detail"]["deferred_actions"] == [
-            "evaluate_entitlements",
-            "find_hotel_options",
-        ]
+        # One action still has no registered service. The list shrank when Phase 2 registered
+        # the hotel services, which is the point: a deferral is a statement about what exists,
+        # so it has to move when that changes.
+        assert proposed["detail"]["deferred_actions"] == ["evaluate_entitlements"]
 
     def test_a_replayed_idempotency_key_returns_the_original_result(self, client, incident):
         headers = {"Idempotency-Key": "run-abc-123"}

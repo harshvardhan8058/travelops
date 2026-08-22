@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, Header
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.actors import ACTOR_KINDS, actor_kind
 from app.db.session import get_session
 from app.errors import EntityNotFound
 from app.models.enums import IncidentState
@@ -31,6 +32,7 @@ from app.models.workflow import (
     Action,
     AssuranceEvaluation,
     DecisionLog,
+    HumanDecision,
     Incident,
     IncidentGroup,
     Plan,
@@ -40,6 +42,7 @@ from app.models.workflow import PlanTask as PlanTaskRow
 from app.observability.logging import correlation_id_var, get_logger
 from app.orchestrator.engine import Orchestrator
 from app.schemas.incidents import (
+    ActionDetailResponse,
     ActionSummary,
     FlightSummary,
     IncidentDetailResponse,
@@ -81,15 +84,6 @@ _TERMINAL_BRANCHES: tuple[IncidentState, ...] = (
     IncidentState.failed,
 )
 
-#: actor -> actor_kind, so the UI groups without string matching. `assurance_gate` is part
-#: of the deterministic control plane, which is why it is not its own kind.
-_ACTOR_KINDS: dict[str, str] = {
-    "orchestrator": "orchestrator",
-    "assurance_gate": "orchestrator",
-    "human": "human",
-    "provider": "provider",
-}
-
 RUN_EVENT = "WORKFLOW_RUN_REQUESTED"
 
 IdempotencyKey = Annotated[
@@ -101,15 +95,11 @@ IdempotencyKey = Annotated[
 ]
 
 
-def _actor_kind(actor: str) -> str:
-    """Classify an actor for the UI, which groups by kind rather than by name."""
-    if actor in _ACTOR_KINDS:
-        return _ACTOR_KINDS[actor]
-    if actor.endswith("_service"):
-        return "service"
-    if actor.endswith("_agent"):
-        return "agent"
-    return "orchestrator"
+#: Re-exported so existing callers and tests keep working. The mapping itself lives in
+#: `app.api.actors` because replay needs the same one — two copies would let the timeline and
+#: replay disagree about whether a human authorised something.
+_actor_kind = actor_kind
+_ACTOR_KINDS = ACTOR_KINDS
 
 
 async def _load_incident(session: AsyncSession, key: str) -> Incident:
@@ -418,9 +408,82 @@ async def _actions(session: AsyncSession, incident_id: int) -> list[ActionSummar
             provenance_kind=action.provenance_kind,
             executed_at=_as_utc(action.executed_at),
             idempotency_key=action.idempotency_key,
+            reason_code=_reason_code(action.payload),
+            decision_scope=None,
+            plan_approval_id=action.plan_approval_id,
         )
         for action, task_row in (await session.execute(stmt)).all()
     ]
+
+
+def _reason_code(payload: Any) -> str | None:
+    """Lift the recorded reason code out of the service payload.
+
+    Not a new value: `dispatch.py` and the service adapters already write it. Promoting it means
+    the console can render refusal copy from a token instead of prefix-matching prose, and the
+    two can never drift because there is still only one place it was written.
+    """
+    if isinstance(payload, dict):
+        code = payload.get("reason_code")
+        if isinstance(code, str) and code:
+            return code
+    return None
+
+
+@router.get(
+    "/incidents/{incident_id}/actions/{action_id}",
+    response_model=ActionDetailResponse,
+    summary="One action with the payload the service recorded",
+)
+async def get_action(
+    incident_id: str,
+    action_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ActionDetailResponse:
+    """The per-entity impact the services computed, exposed rather than re-derived.
+
+    The services already persist which itineraries broke and which rooms were held; without this
+    endpoint the console could only see a sentence, and parsing digits out of prose is
+    fabrication with extra steps.
+    """
+    incident = await _load_incident(session, incident_id)
+    stmt = (
+        select(Action, PlanTaskRow)
+        .join(PlanTaskRow, PlanTaskRow.id == Action.plan_task_id)
+        .join(Plan, PlanTaskRow.plan_id == Plan.id)
+        .where(Plan.incident_id == incident.id, Action.id == action_id)
+        .limit(1)
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None:
+        raise EntityNotFound(
+            "action not found for this incident",
+            details={"incident_reference": incident.reference, "action_id": action_id},
+        )
+    action, task_row = row
+    scope = None
+    if action.human_decision_id is not None:
+        decision = await session.get(HumanDecision, action.human_decision_id)
+        scope = decision.scope if decision else None
+    return ActionDetailResponse(
+        id=action.id,
+        plan_task_id=action.plan_task_id,
+        action_type=task_row.action_type,
+        assurance_id=action.assurance_id,
+        human_decision_id=action.human_decision_id,
+        actor=action.actor,
+        status=str(action.status),
+        reason=action.reason,
+        cost_inr=action.cost_inr,
+        provenance_kind=action.provenance_kind,
+        executed_at=_as_utc(action.executed_at),
+        idempotency_key=action.idempotency_key,
+        reason_code=_reason_code(action.payload),
+        decision_scope=scope,
+        plan_approval_id=action.plan_approval_id,
+        payload=action.payload if isinstance(action.payload, dict) else {},
+        incident_reference=incident.reference,
+    )
 
 
 @router.get(

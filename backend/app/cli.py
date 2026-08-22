@@ -276,7 +276,7 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-async def _inject(session: AsyncSession, scenario: str) -> int:
+async def _inject(session: AsyncSession, scenario: str, *, cascade: bool = False) -> int:
     """Open the scenario's incident, idempotently.
 
     The scenario clock comes from the seeded `incident_group.opened_at`, which Stream C
@@ -319,7 +319,6 @@ async def _inject(session: AsyncSession, scenario: str) -> int:
         )
 
     registered = register_stage2_services()
-    flight_id, flight_number, delay = await _select_primary_flight(session, group.airport_icao)
     injected_at = _utc(group.opened_at)
 
     bus = None
@@ -334,6 +333,34 @@ async def _inject(session: AsyncSession, scenario: str) -> int:
     # when the disruption happened; it must not backdate the audit entries that record when
     # this command actually ran.
     orchestrator = Orchestrator(session, bus=bus)
+
+    print(f"scenario     {scenario}")
+    print(f"group        {group.reference} at {group.airport_icao}")
+    print(f"injected_at  {injected_at.isoformat()}")
+
+    if cascade:
+        # Membership is declared data, so the cascade opens exactly the flights
+        # `incident_group_flight` names. Deriving it from `origin_icao` would return seven of
+        # the eight, because UK 705 arrives into VOBL rather than departing from it.
+        from app.orchestrator.group import GroupOrchestrator
+
+        ctx_group = await GroupOrchestrator(session, orchestrator=orchestrator).open_group(
+            group.id, opened_at=injected_at
+        )
+        print(f"members      {len(ctx_group.members)} declared flights")
+        for member in ctx_group.members:
+            state = member.state.value if member.state else "-"
+            print(
+                f"  {member.role:9} {member.flight_number:9} "
+                f"{member.incident_reference or '-':28} {state}"
+            )
+        print(f"group state  {ctx_group.state.value} (derived from members)")
+        print(f"services     {len(registered)} dispatchable: {', '.join(registered)}")
+        print()
+        print(f"Next: POST /api/v1/incident-groups/{group.reference}/run")
+        return 0
+
+    flight_id, flight_number, delay = await _select_primary_flight(session, group.airport_icao)
     ctx = await orchestrator.open_incident(
         flight_id,
         group.root_cause,
@@ -344,9 +371,6 @@ async def _inject(session: AsyncSession, scenario: str) -> int:
         opened_at=injected_at,
     )
 
-    print(f"scenario     {scenario}")
-    print(f"group        {group.reference} at {group.airport_icao}")
-    print(f"injected_at  {injected_at.isoformat()}")
     print(f"flight       {flight_number} (id {flight_id}), delayed {delay} min")
     print(f"incident     {ctx.incident_reference} in '{ctx.state.value}'")
     print(f"services     {len(registered)} dispatchable: {', '.join(registered)}")
@@ -355,11 +379,11 @@ async def _inject(session: AsyncSession, scenario: str) -> int:
     return 0
 
 
-def cmd_inject(scenario: str) -> int:
-    return asyncio.run(_with_session(lambda session: _inject(session, scenario)))
+def cmd_inject(scenario: str, *, cascade: bool = False) -> int:
+    return asyncio.run(_with_session(lambda session: _inject(session, scenario, cascade=cascade)))
 
 
-async def _demo_reset(session: AsyncSession, scenario: str) -> int:
+async def _demo_reset(session: AsyncSession, scenario: str, *, cascade: bool = False) -> int:
     """Reset only demo-owned records, re-seed, then re-inject."""
     from app.db.seed import seed_demo_dataset
 
@@ -373,11 +397,13 @@ async def _demo_reset(session: AsyncSession, scenario: str) -> int:
     print(report.summary())
     # Flush so the re-seeded rows are visible to the injection in this same transaction.
     await session.flush()
-    return await _inject(session, scenario)
+    return await _inject(session, scenario, cascade=cascade)
 
 
-def cmd_demo_reset(scenario: str) -> int:
-    return asyncio.run(_with_session(lambda session: _demo_reset(session, scenario)))
+def cmd_demo_reset(scenario: str, *, cascade: bool = False) -> int:
+    return asyncio.run(
+        _with_session(lambda session: _demo_reset(session, scenario, cascade=cascade))
+    )
 
 
 # ------------------------------------------------------------------------------------ main
@@ -393,9 +419,19 @@ def main(argv: list[str] | None = None) -> int:
 
     demo_reset = sub.add_parser("demo-reset", help="reset demo-owned records and re-inject")
     demo_reset.add_argument("--scenario", default="bengaluru_storm")
+    demo_reset.add_argument(
+        "--cascade",
+        action="store_true",
+        help="open every declared member flight, not just the primary",
+    )
 
     inject = sub.add_parser("inject", help="inject a demo scenario")
     inject.add_argument("--scenario", default="bengaluru_storm")
+    inject.add_argument(
+        "--cascade",
+        action="store_true",
+        help="open one incident per declared member flight (the network event)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -413,9 +449,9 @@ def main(argv: list[str] | None = None) -> int:
             case "reset":
                 return cmd_reset()
             case "demo-reset":
-                return cmd_demo_reset(args.scenario)
+                return cmd_demo_reset(args.scenario, cascade=args.cascade)
             case "inject":
-                return cmd_inject(args.scenario)
+                return cmd_inject(args.scenario, cascade=args.cascade)
             case _:
                 parser.error(f"unknown command {args.command}")
                 return 2

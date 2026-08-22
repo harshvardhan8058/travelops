@@ -37,6 +37,7 @@ from app.models.workflow import AssuranceEvaluation, DecisionLog, HumanDecision,
 from app.models.workflow import PlanTask as PlanTaskRow
 from app.observability.logging import correlation_id_var, get_logger
 from app.orchestrator.engine import ACTOR_HUMAN, STAGE_ASSURE
+from app.orchestrator.plan_approval import enforce_action_approval
 from app.schemas.assurance_api import (
     AssuranceEvaluationOut,
     AssuranceResponse,
@@ -201,6 +202,13 @@ async def record_decision(
         raise EntityNotFound(
             "assurance evaluation not found", details={"assurance_id": assurance_id}
         )
+
+    # P2-D3, enforced server-side: approval covers risk, never failed evidence, stale sources,
+    # unresolved entities or policy failure. A rejection is always allowed — refusing to act is
+    # never gated. The console hiding a button is not a control; a direct API call must be
+    # refused the same way.
+    if payload.decision is HumanDecisionType.approved:
+        enforce_action_approval(evaluation)
 
     existing = (
         (

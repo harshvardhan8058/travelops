@@ -51,27 +51,6 @@ async def list_sources() -> Any:
 
 
 # ---------------------------------------------------------------- Stream A
-@router.get("/incident-groups", summary="Cascade summaries [fixture]")
-async def list_incident_groups() -> Any:
-    return _load("incident_groups")
-
-
-@router.get("/incident-groups/{group_id}", summary="Cascade detail [fixture]")
-async def get_incident_group(group_id: str) -> Any:
-    payload = _load("incident_group_detail")
-    if payload.get("reference") != group_id and group_id not in {"current", payload.get("id")}:
-        # Wave 0 serves a single canonical fixture; accept the alias so the UI can link.
-        payload = {**payload, "requested_id": group_id}
-    return payload
-
-
-# /incidents/{id}, /incidents/{id}/timeline and /incidents/{id}/assurance were served from
-# here in Wave 0. They are now real, in app/api/incidents.py and app/api/assurance_router.py,
-# and their fixture routes were deleted in the same commit so there is never a period where
-# two implementations of one path exist.
-
-
-# ---------------------------------------------------------------- Stream B
 @router.get("/incidents/{incident_id}/policy", summary="Policy evaluation [fixture]")
 async def get_policy(incident_id: str) -> Any:
     payload = _load("policy")
