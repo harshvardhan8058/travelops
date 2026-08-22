@@ -69,8 +69,17 @@ make seed            # load the fixed-seed dataset: 2093 rows, digest fa9564fc4a
 make demo            # inject bengaluru_storm -> one incident, risk 80 (severe)
 ```
 
-`make seed` and `make demo` are not optional. Without them the database is empty, there is no
-incident, and every incident endpoint correctly returns `ENTITY_NOT_FOUND`.
+For the **network event** — the Phase 2 story — inject the whole cascade instead of one flight:
+
+```bash
+make demo-cascade    # one incident per declared member flight: 8 flights, 604 passengers
+```
+
+`make demo` and `make demo-cascade` are alternatives, not steps. Both are idempotent: membership is
+declared in `incident_group_flight`, so re-running opens nothing new.
+
+`make seed` and one of the two injects are not optional. Without them the database is empty, there
+is no incident, and every incident endpoint correctly returns `ENTITY_NOT_FOUND`.
 
 Then open <http://127.0.0.1:8000/docs> for the API and <http://127.0.0.1:5173> for the console.
 
@@ -118,6 +127,29 @@ It drives the approval itself, checks thirteen things — dependencies, migratio
 injection, the gate holding the bulk action, approval persistence and replay, the terminal
 state, and the audit trail — and exits non-zero on any failure. PowerShell aliases `curl` to
 `Invoke-WebRequest`, which does not accept `-X POST -d`, so the `curl` block above is bash-only.
+
+### The network recovery, end to end
+
+After `make demo-cascade`, the whole Phase 2 journey has its own self-verifying script. It opens
+the cascade, advances it, checks the figures, drives the approvals and reaches `resolved`:
+
+```bash
+make verify-phase2                                                        # or, directly:
+docker compose exec -T api python - < scripts/verify_phase2.py            # bash
+Get-Content scripts/verify_phase2.py | docker compose exec -T api python - # PowerShell
+```
+
+Twenty-two checks: declared membership, the verified figures (8 flights, 604 passengers, 22
+connections, 9 rotations, 11 hotels), that group figures are **unions and not sums**, blast radius
+with every dimension naming its source, graph edges with provenance, candidate plans, a zero-write
+comparison and what-if, group plan assurance, that **no high-risk action is covered by a plan
+approval**, resolution, and replay.
+
+To check the console itself rather than the API, drive it in a real browser at projector size:
+
+```bash
+make verify-console      # 9 routes at 1920x1080: real figures, no overflow, no fixture fallback
+```
 
 What that produces, all of it computed from seeded records:
 

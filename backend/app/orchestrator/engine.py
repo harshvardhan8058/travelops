@@ -53,7 +53,6 @@ from app.events.types import (
 from app.models.enums import (
     ActionStatus,
     ActionType,
-    AssuranceDecision,
     HumanDecisionType,
     IncidentState,
     TaskState,
@@ -1480,7 +1479,32 @@ class Orchestrator:
     # ------------------------------------------------------------------------- plan reads
 
     async def _current_plan(self, incident_id: int) -> Plan | None:
-        stmt = select(Plan).where(Plan.incident_id == incident_id).order_by(Plan.id.desc()).limit(1)
+        """The plan this incident is being driven by.
+
+        Order matters, and it is not "the latest".
+
+        1. **The selected plan**, when an operator chose one (migration 0005). That is an explicit,
+           attributed decision and it wins.
+        2. Otherwise **the earliest** plan — the one the run started with.
+
+        Taking the latest was correct while an incident could only have one plan. It stopped being
+        correct when candidates arrived: opening the comparison screen creates sibling plans, and
+        "latest" then silently switches a *running* incident onto a fresh plan whose tasks have
+        never been assured. The operator's approval still points at the old plan's task, so the
+        incident asks for approval again and blocks — which is exactly what happened to the primary
+        flight before this was fixed. A read must never re-route a live run.
+        """
+        stmt = (
+            select(Plan)
+            .where(Plan.incident_id == incident_id, Plan.selection_state == "selected")
+            .order_by(Plan.id)
+            .limit(1)
+        )
+        selected = (await self._session.execute(stmt)).scalars().first()
+        if selected is not None:
+            return selected
+
+        stmt = select(Plan).where(Plan.incident_id == incident_id).order_by(Plan.id).limit(1)
         return (await self._session.execute(stmt)).scalars().first()
 
     async def _plan_tasks(self, ctx: WorkflowContext) -> list[PlanTaskRow]:
@@ -1782,43 +1806,8 @@ def _task_state_for(status: ActionStatus) -> TaskState:
 
 
 def _result_from_row(row: AssuranceEvaluation) -> AssuranceResult:
-    """Reconstruct the decision that authorised a task, from its immutable row.
+    """Delegates to the adapter, which is the one place this reconstruction lives.
 
-    Replay must use the semantics recorded at decision time, which is why the evaluation
-    stores its own config version and hash rather than reading today's config.
+    Kept as a module-level name because tests and the replay path already import it.
     """
-    from app.assurance.contract import CheckName, CheckResult, ReasonCode
-    from app.models.enums import CheckState, RiskTier
-
-    checks: list[CheckResult] = []
-    for name, payload in (row.check_results or {}).items():
-        try:
-            check_name = CheckName(name)
-        except ValueError:
-            continue
-        data = payload if isinstance(payload, dict) else {}
-        checks.append(
-            CheckResult(
-                name=check_name,
-                state=CheckState(data.get("state", CheckState.failed.value)),
-                reason_code=ReasonCode(data.get("reason_code", ReasonCode.OK.value)),
-                reason=data.get("reason"),
-                tier=RiskTier(data["tier"]) if data.get("tier") else None,
-            )
-        )
-    blocking = []
-    for name in row.blocking_reasons or []:
-        try:
-            blocking.append(CheckName(name))
-        except ValueError:
-            continue
-    return AssuranceResult(
-        decision=AssuranceDecision(row.decision),
-        risk_tier=RiskTier(row.risk_tier),
-        checks=checks,
-        blocking=blocking,
-        evidence_refs=list(row.evidence_refs or []),
-        config_version=row.config_version,
-        config_hash=row.config_hash,
-        evaluated_at=row.evaluated_at,
-    )
+    return assurance_adapter.result_from_row(row)

@@ -78,10 +78,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Local development only. The frontend is served from a loopback port.
+# Local development only. The console is served from a loopback port, which is a different
+# origin from the API, so this is load-bearing rather than boilerplate: without it every screen
+# renders empty and the reason appears only in the browser console — which reads as "the backend
+# is down" when the backend is answering perfectly.
+#
+# Configured rather than hardcoded, because the port is not always 5173: `vite preview` uses 4173,
+# and a rehearsal on a spare port is exactly when nobody wants to debug CORS.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=[
+        origin.strip() for origin in get_settings().cors_origins.split(",") if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

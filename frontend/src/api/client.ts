@@ -9,19 +9,30 @@
  */
 
 import type {
+  ActionDetail,
   AssuranceResponse,
+  CandidateComparisonResponse,
+  CandidatePlansResponse,
+  CascadeGraph,
   DecisionResponse,
   FlightsResponse,
+  GroupAssuranceResponse,
+  GroupRunResponse,
   IncidentDetail,
   IncidentGroupDetail,
   IncidentGroupsResponse,
-  ReportResponse,
-  SourcesResponse,
+  IncidentGroupSummary,
+  PlanApprovalResponse,
   PolicyResponse,
   ReadyStatus,
+  ReportResponse,
   RunResponse,
+  ServerBlastRadius,
+  ServerReplayResponse,
+  SourcesResponse,
   SystemMode,
   TimelineResponse,
+  WhatIfResponse,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000/api/v1';
@@ -154,4 +165,89 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ decision, reason, actor_id: actorId }),
     }),
+
+  // ------------------------------------------------------------------ Phase 2: cascade
+
+  /** The most recently opened group. 404 when nothing is open, never an empty placeholder. */
+  currentGroup: () => request<IncidentGroupSummary>('/incident-groups/current'),
+
+  blastRadius: (groupRef: string) =>
+    request<ServerBlastRadius>(`/incident-groups/${groupRef}/blast-radius`),
+
+  cascadeGraph: (groupRef: string) => request<CascadeGraph>(`/incident-groups/${groupRef}/graph`),
+
+  /** Opens one incident per declared member flight. Idempotent: a repeat opens nothing new. */
+  openGroup: (groupRef: string, idempotencyKey?: string) =>
+    request<GroupRunResponse>(`/incident-groups/${groupRef}/open`, {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+    }),
+
+  /**
+   * Advance every non-terminal member.
+   *
+   * A member whose service refuses does not stop the others: the group ends `blocked` naming
+   * what did not resolve. One flight without a hotel must not strand the other seven.
+   */
+  runGroup: (groupRef: string, idempotencyKey?: string) =>
+    request<GroupRunResponse>(`/incident-groups/${groupRef}/run`, {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+    }),
+
+  // ---------------------------------------------------------- Phase 2: plan assurance
+
+  /**
+   * Group-scoped plan assurance. One request, not client-side fan-out over N incidents: a
+   * fan-out makes the group view N+1 requests and lets a partial failure read as a pass.
+   */
+  groupAssurance: (groupRef: string) =>
+    request<GroupAssuranceResponse>(`/incident-groups/${groupRef}/assurance`),
+
+  /**
+   * Plan approval. Covers low and medium risk only; high risk always needs its own decision,
+   * and no approval ever covers a failed check.
+   *
+   * The server partitions and returns both lists. The UI must render the excluded set — a
+   * reviewer has to see that the control was *unable* to cover something.
+   */
+  approveGroupPlan: (groupRef: string, reason: string, actorId = 'operator-1') =>
+    request<PlanApprovalResponse>(`/incident-groups/${groupRef}/assurance/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, actor_id: actorId }),
+    }),
+
+  // ------------------------------------------------------------ Phase 2: candidate plans
+
+  plans: (incidentId: string) => request<CandidatePlansResponse>(`/incidents/${incidentId}/plans`),
+
+  /** Re-evaluation over the same recorded facts. Writes nothing, projects nothing. */
+  planComparison: (incidentId: string) =>
+    request<CandidateComparisonResponse>(`/incidents/${incidentId}/plans/comparison`),
+
+  /** Immutable once made: a second, different selection is a 409. */
+  selectPlan: (incidentId: string, planId: number, reason: string, actorId = 'operator-1') =>
+    request<CandidatePlansResponse>(`/incidents/${incidentId}/plans/${planId}/select`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, actor_id: actorId }),
+    }),
+
+  // --------------------------------------------------------- Phase 2: what-if and replay
+
+  /** Bounded, zero-write, deterministic. Not a simulation engine and not a digital twin. */
+  groupWhatIf: (groupRef: string, levers: Record<string, unknown>) =>
+    request<WhatIfResponse>(`/incident-groups/${groupRef}/what-if`, {
+      method: 'POST',
+      body: JSON.stringify(levers),
+    }),
+
+  incidentReplay: (incidentId: string) =>
+    request<ServerReplayResponse>(`/incidents/${incidentId}/replay`),
+
+  groupReplay: (groupRef: string) =>
+    request<ServerReplayResponse>(`/incident-groups/${groupRef}/replay`),
+
+  /** The per-entity impact the services recorded. Without it the UI can only see a sentence. */
+  actionDetail: (incidentId: string, actionId: number) =>
+    request<ActionDetail>(`/incidents/${incidentId}/actions/${actionId}`),
 };

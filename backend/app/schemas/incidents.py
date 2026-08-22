@@ -149,6 +149,32 @@ class ActionSummary(BaseModel):
     provenance_kind: str
     executed_at: datetime | None = None
     idempotency_key: str
+    #: Promoted from `action.payload["reason_code"]`, where dispatch and the services already
+    #: record it. A short bounded token, which is exactly what a list view needs — the console
+    #: was prefix-matching `reason` prose only because the structured value was buried.
+    reason_code: str | None = None
+    #: `action` or `plan` when a human authorised this. Both are a person's act; an auditor
+    #: still has to tell a per-action signature from a plan-wide one.
+    decision_scope: str | None = None
+    plan_approval_id: int | None = None
+
+
+class ActionDetailResponse(ActionSummary):
+    """One action with the payload the services recorded.
+
+    A separate endpoint rather than a `payload` field on `ActionSummary`, for two reasons.
+    `ActionSummary` appears in list responses, so inlining an unbounded service dict would make
+    every incident detail carry every service's internal structure. And `action.payload` is
+    service-shaped and unversioned — exposing it verbatim on the list contract would silently
+    promote Stream C's private dicts to public API. `payload_schema_version` makes a future
+    refactor detectable rather than mysterious.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    payload: dict[str, Any] = Field(default_factory=dict)
+    payload_schema_version: int = 1
+    incident_reference: str
 
 
 class IncidentDetailResponse(BaseModel):

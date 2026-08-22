@@ -494,6 +494,115 @@ export interface ReportResponse {
   caveats?: string[];
 }
 
+/** One declared member flight of the cascade. */
+export interface GroupFlight {
+  id: number;
+  flight_number: string;
+  route: string;
+  delay_minutes: number;
+  passengers: number;
+  state: string;
+  /** `primary`, `affected_departure`, `affected_arrival`. Declared, never inferred. */
+  role: string;
+  /**
+   * `null` means the group declares this flight but no incident is open for it yet — "affected,
+   * not yet being worked". Meaningful, and different from missing.
+   */
+  incident_reference: string | null;
+}
+
+/**
+ * Whether the rollup describes the whole group or only part of it.
+ *
+ * A partial rollup must render as partial. Eight flights' worth of caption over six flights' worth
+ * of evidence is the failure mode this block exists to prevent.
+ */
+export interface GroupRollupStatus {
+  is_complete: boolean;
+  computed_at: string | null;
+  note: string;
+  /** Named, not counted, so the gap is actionable. */
+  flights_without_incident: number[];
+  membership_is_declared: boolean;
+}
+
+/** One measured dimension of reach, with the service that measured it named. */
+export interface BlastRadiusDimension {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  /** Empty means declared data rather than a service finding. */
+  measured_by: string;
+  /** False makes the value a floor rather than a total. */
+  is_complete: boolean;
+  note: string;
+}
+
+/**
+ * The server's blast radius. Composed from recorded findings; nothing originates in the UI.
+ *
+ * `basis` is a literal on the server contract, so a `confidence` field cannot appear without a
+ * deliberate type change. `headline` carries its own caveat inside one string on purpose — split
+ * into two fields, a UI renders the totals and drops the qualification.
+ */
+export interface ServerBlastRadius {
+  group_reference: string;
+  headline: string;
+  basis: 'composed_from_recorded_findings';
+  dimensions: BlastRadiusDimension[];
+  completeness: {
+    flights_declared: number;
+    flights_assessed: number;
+    ratio: string;
+    is_complete: boolean;
+  };
+  /** Named, countable gaps. Never a score. */
+  gaps: string[];
+}
+
+export interface CascadeGraphNode {
+  ref: string;
+  kind: string;
+  label: string;
+  sublabel?: string | null;
+  depth: number;
+  at_risk: boolean;
+  /** False when declared but not yet assessed. Rendered as a gap, never dropped. */
+  has_evidence: boolean;
+  role?: string | null;
+}
+
+export interface CascadeGraphEdge {
+  source_ref: string;
+  target_ref: string;
+  edge_kind: string;
+  mechanism?: string | null;
+  detail?: string | null;
+  depth: number;
+  is_at_risk: boolean;
+  /** Exactly one is set. An edge without provenance is an assertion, not evidence. */
+  derived_from_action_id: number | null;
+  derived_from_prediction_id: number | null;
+}
+
+export interface CascadeGraph {
+  group_reference: string;
+  rule_version: string;
+  nodes: CascadeGraphNode[];
+  edges: CascadeGraphEdge[];
+  edge_counts_by_kind: Record<string, number>;
+  completeness: {
+    member_flight_count: number;
+    flights_with_evidence: number;
+    is_complete: boolean;
+    note: string;
+  };
+  source_action_ids: number[];
+  source_prediction_ids: number[];
+  snapshot_hash: string;
+}
+
 export interface IncidentGroupDetail {
   id: number;
   reference: string;
@@ -503,11 +612,290 @@ export interface IncidentGroupDetail {
   state: IncidentState;
   /** Derived server-side from the arrays. The UI never hardcodes a total. */
   rollups: Record<string, number | string>;
-  flights: Record<string, unknown>[];
+  flights: GroupFlight[];
   crew_pairings: CrewPairingImpact[];
   mechanism_legend: Record<PairingMechanism, string>;
   why_nine_not_eight: string;
   provenance: Provenance;
+  /** Present on the real endpoint; absent from the committed fixture. */
+  rollup_status?: GroupRollupStatus;
+  blast_radius?: ServerBlastRadius;
+  graph?: CascadeGraph;
+  awaiting_approval_count?: number;
+}
+
+export interface GroupMember {
+  flight_id: number;
+  flight_number: string;
+  role: string;
+  incident_id: number | null;
+  incident_reference: string | null;
+  state: string | null;
+  note: string | null;
+}
+
+export interface GroupRunResponse {
+  group_reference: string;
+  state: IncidentState;
+  members: GroupMember[];
+  opened_incident_ids: number[];
+  blocked_reason: string | null;
+  awaiting_approval_count: number;
+  replayed: boolean;
+}
+
+// ---------------------------------------------------------------- candidate plans
+
+export interface CandidatePlanTask {
+  id: number;
+  action_type: string;
+  task_order: number;
+  state: string;
+  target_refs: string[];
+  depends_on: number[];
+}
+
+export interface CandidatePlan {
+  id: number;
+  incident_reference: string;
+  variant_key: string | null;
+  generator: string;
+  generated_at: string;
+  rationale: string | null;
+  selection_state: string;
+  selected_at: string | null;
+  selected_by: string | null;
+  plan_hash: string | null;
+  tasks: CandidatePlanTask[];
+}
+
+export interface CandidatePlansResponse {
+  incident_reference: string;
+  plans: CandidatePlan[];
+  selected_plan_id: number | null;
+}
+
+/**
+ * One candidate's figures. Arithmetic only.
+ *
+ * There is deliberately no rank, score or `recommended` flag: choosing between recovery plans is a
+ * judgement, and a judgement has an owner. The UI must not invent one either.
+ */
+export interface CandidateComparisonRow {
+  candidate_id: string;
+  variant_key: string;
+  plan_id: number | null;
+  plan_hash: string;
+  admissible: boolean;
+  decision: string;
+  plan_risk_tier: string;
+  task_count: number;
+  exposure_inr: number | null;
+  passengers_affected: number | null;
+  rooms_committed: number | null;
+  external_effects: number | null;
+  high_risk_actions: number;
+  approvals_required: number;
+  uncovered_entities: number;
+  blocking_checks: string[];
+  unresolved_cohorts: string[];
+  selection_state: string | null;
+  rationale: string | null;
+}
+
+export interface CandidateComparisonResponse {
+  incident_reference: string;
+  /** A literal on the server contract: this response cannot express a projection. */
+  basis: 'recorded_evidence';
+  not_a_forecast: string;
+  decision: string;
+  admissible: string[];
+  blocking_reasons: string[];
+  seed: number | null;
+  what_if: Record<string, unknown> | null;
+  candidates: CandidateComparisonRow[];
+}
+
+// ---------------------------------------------------------------- group assurance
+
+export interface PlanCheck {
+  name: string;
+  state: CheckState;
+  reason_code: string;
+  reason: string | null;
+  tier: string | null;
+  offending_refs: string[];
+}
+
+export interface PlanTaskOutcome {
+  task_id: string;
+  action_type: string;
+  decision: string;
+  risk_tier: string;
+  blocking_kinds: string[];
+  approvable: boolean;
+  evaluation_id: number | null;
+  target_refs: string[];
+  depends_on: string[];
+}
+
+export interface IncidentPlanAssurance {
+  incident_reference: string;
+  plan_id: number;
+  variant_key: string | null;
+  task_count: number;
+  tasks: PlanTaskOutcome[];
+  awaiting_approval_count: number;
+  config_version: string;
+  config_hash: string;
+}
+
+export interface CoveredEvaluation {
+  evaluation_id: number;
+  plan_task_id: number;
+  incident_reference: string;
+  action_type: string;
+  risk_tier: string;
+  human_decision_id: number;
+}
+
+export interface ExcludedEvaluation {
+  evaluation_id: number;
+  plan_task_id: number;
+  incident_reference: string;
+  action_type: string;
+  risk_tier: string;
+  reason_code: string;
+  reason: string;
+}
+
+export interface PlanApprovalPreview {
+  plan_id: number | null;
+  plan_hash: string;
+  covered: CoveredEvaluation[];
+  excluded: ExcludedEvaluation[];
+  covered_count: number;
+  excluded_count: number;
+  refusal: string | null;
+  refusal_reason: string | null;
+}
+
+/**
+ * Group-scoped plan assurance.
+ *
+ * `authorises_no_action` is a literal `true` on the server contract. This response aggregates for
+ * display and grants nothing — every action still passes its own gate at execution time. There is
+ * no aggregate score at any level: a fail-closed, ordered gate has no average.
+ */
+export interface GroupAssuranceResponse {
+  group_reference: string;
+  decision: string;
+  plan_risk_tier: string;
+  task_count: number;
+  checks: PlanCheck[];
+  blocking: string[];
+  admissible: boolean;
+  requires_human: boolean;
+  authorises_no_action: true;
+  plan_hash: string;
+  config_version: string;
+  config_hash: string;
+  /** False when member incidents were judged under different config hashes. Must be surfaced. */
+  config_hash_uniform: boolean;
+  evaluated_at: string;
+  exposure: Record<string, unknown>;
+  incidents: IncidentPlanAssurance[];
+  approval_preview: PlanApprovalPreview | null;
+}
+
+export interface PlanApprovalResponse extends PlanApprovalPreview {
+  plan_approval_id: number | null;
+  replayed: boolean;
+}
+
+// ---------------------------------------------------------------- what-if and replay
+
+export interface WhatIfDelta {
+  key: string;
+  label: string;
+  baseline: number;
+  scenario: number;
+  delta: number;
+  summary: string;
+}
+
+/**
+ * A bounded, zero-write, deterministic re-evaluation.
+ *
+ * `basis` and `wrote_rows` are literals on the server contract, so this cannot claim a projection
+ * or a write. It is explicitly not a simulation engine and not a digital twin.
+ */
+export interface WhatIfResponse {
+  group_reference: string;
+  rule_version: string;
+  basis: 'recorded_evidence';
+  wrote_rows: false;
+  boundary_note: string;
+  headline: string;
+  permitted: boolean;
+  refusals: string[];
+  seed: number | null;
+  recorded_baseline: Record<string, number>;
+  levers_applied: Record<string, unknown>;
+  levers_available: string[];
+  levers_rejected: { lever: string; reason: string }[];
+  deltas: WhatIfDelta[];
+}
+
+export interface ReplayFrame {
+  sequence: number;
+  occurred_at: string;
+  stage: string;
+  actor: string;
+  actor_kind: string;
+  event_type: string;
+  summary: string;
+  state_before: string | null;
+  state_after: string | null;
+  incident_reference: string | null;
+  evidence_refs: string[];
+  assurance_id: number | null;
+  human_decision_id: number | null;
+  /** `action` or `plan`. Both are a person's act; an auditor tells them apart. */
+  decision_scope: string | null;
+  plan_approval_id: number | null;
+  detail: Record<string, unknown>;
+}
+
+export interface ServerReplayResponse {
+  incident_reference: string | null;
+  group_reference: string | null;
+  frame_count: number;
+  frames: ReplayFrame[];
+  is_read_only: boolean;
+  note: string;
+}
+
+export interface ActionDetail {
+  id: number;
+  plan_task_id: number;
+  action_type: string;
+  assurance_id: number;
+  human_decision_id: number | null;
+  actor: string;
+  status: string;
+  reason: string;
+  cost_inr: number | null;
+  provenance_kind: string;
+  executed_at: string | null;
+  idempotency_key: string;
+  reason_code: string | null;
+  decision_scope: string | null;
+  plan_approval_id: number | null;
+  /** Recorded verbatim by the service. Service-shaped; version-gated by the field below. */
+  payload: Record<string, unknown>;
+  payload_schema_version: number;
+  incident_reference: string;
 }
 
 // ---------------------------------------------------------------- policy

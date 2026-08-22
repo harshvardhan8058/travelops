@@ -302,7 +302,12 @@ class TestRealServiceResults:
         body = self._resolve(storm_client, injected)
         actions = {a["action_type"]: a for a in body["actions"]}
 
-        assert set(actions) == {"check_connections", "assess_crew_impact", "notify_passengers"}
+        assert set(actions) == {
+            "check_connections",
+            "find_hotel_options",
+            "assess_crew_impact",
+            "notify_passengers",
+        }
         for action in actions.values():
             assert action["status"] == "success"
             assert "SERVICE_NOT_IMPLEMENTED" not in action["reason"]

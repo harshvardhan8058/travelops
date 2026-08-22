@@ -1,8 +1,9 @@
 {
   "components": {
     "schemas": {
-      "ActionSummary": {
+      "ActionDetailResponse": {
         "additionalProperties": false,
+        "description": "One action with the payload the services recorded.\n\nA separate endpoint rather than a `payload` field on `ActionSummary`, for two reasons.\n`ActionSummary` appears in list responses, so inlining an unbounded service dict would make\nevery incident detail carry every service's internal structure. And `action.payload` is\nservice-shaped and unversioned \u2014 exposing it verbatim on the list contract would silently\npromote Stream C's private dicts to public API. `payload_schema_version` makes a future\nrefactor detectable rather than mysterious.",
         "properties": {
           "action_type": {
             "title": "Action Type",
@@ -26,6 +27,17 @@
               }
             ],
             "title": "Cost Inr"
+          },
+          "decision_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Scope"
           },
           "executed_at": {
             "anyOf": [
@@ -58,6 +70,31 @@
             "title": "Idempotency Key",
             "type": "string"
           },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "payload_schema_version": {
+            "default": 1,
+            "title": "Payload Schema Version",
+            "type": "integer"
+          },
+          "plan_approval_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Approval Id"
+          },
           "plan_task_id": {
             "title": "Plan Task Id",
             "type": "integer"
@@ -69,6 +106,139 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "plan_task_id",
+          "action_type",
+          "assurance_id",
+          "actor",
+          "status",
+          "reason",
+          "provenance_kind",
+          "idempotency_key",
+          "incident_reference"
+        ],
+        "title": "ActionDetailResponse",
+        "type": "object"
+      },
+      "ActionSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "assurance_id": {
+            "title": "Assurance Id",
+            "type": "integer"
+          },
+          "cost_inr": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Inr"
+          },
+          "decision_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Scope"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          },
+          "human_decision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Decision Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "plan_approval_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Approval Id"
+          },
+          "plan_task_id": {
+            "title": "Plan Task Id",
+            "type": "integer"
+          },
+          "provenance_kind": {
+            "title": "Provenance Kind",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
           },
           "status": {
             "title": "Status",
@@ -224,6 +394,616 @@
         "title": "AssuranceResponse",
         "type": "object"
       },
+      "BlastRadiusCompleteness": {
+        "additionalProperties": false,
+        "properties": {
+          "flights_assessed": {
+            "title": "Flights Assessed",
+            "type": "integer"
+          },
+          "flights_declared": {
+            "title": "Flights Declared",
+            "type": "integer"
+          },
+          "is_complete": {
+            "title": "Is Complete",
+            "type": "boolean"
+          },
+          "ratio": {
+            "title": "Ratio",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flights_declared",
+          "flights_assessed",
+          "ratio",
+          "is_complete"
+        ],
+        "title": "BlastRadiusCompleteness",
+        "type": "object"
+      },
+      "BlastRadiusDimensionOut": {
+        "additionalProperties": false,
+        "description": "One measured dimension, with the service that measured it named.\n\nMirrors `services/blast_radius.BlastRadiusDimension` field for field. Stream A types the\nboundary; it does not recompute a single value. `is_complete=False` makes a value a floor,\nwhich is why `measured_by` travels with it \u2014 a floor from a named source is evidence, a\nfloor from nowhere is a guess.",
+        "properties": {
+          "is_complete": {
+            "title": "Is Complete",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "measured_by": {
+            "title": "Measured By",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "unit",
+          "measured_by",
+          "is_complete"
+        ],
+        "title": "BlastRadiusDimensionOut",
+        "type": "object"
+      },
+      "BlastRadiusOut": {
+        "additionalProperties": false,
+        "description": "Reach composed from recorded findings.\n\n`basis` is a `Literal` in Stream C's model and stays one here, so a `confidence` field\ncannot be slipped in without changing the type and forcing the conversation. `headline`\ndeliberately carries its own caveat inside one string, so a UI cannot render the totals and\ndrop the qualification.",
+        "properties": {
+          "basis": {
+            "const": "composed_from_recorded_findings",
+            "default": "composed_from_recorded_findings",
+            "title": "Basis",
+            "type": "string"
+          },
+          "completeness": {
+            "$ref": "#/components/schemas/BlastRadiusCompleteness"
+          },
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/BlastRadiusDimensionOut"
+            },
+            "title": "Dimensions",
+            "type": "array"
+          },
+          "gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "group_reference": {
+            "title": "Group Reference",
+            "type": "string"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_reference",
+          "headline",
+          "completeness"
+        ],
+        "title": "BlastRadiusOut",
+        "type": "object"
+      },
+      "CandidateComparisonResponse": {
+        "additionalProperties": false,
+        "description": "Comparison over the same recorded facts \u2014 P2-D2.\n\n`basis` is a `Literal`, so the contract cannot express a projection. `not_a_forecast` is\nrendered verbatim by the console.",
+        "properties": {
+          "admissible": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Admissible",
+            "type": "array"
+          },
+          "basis": {
+            "const": "recorded_evidence",
+            "default": "recorded_evidence",
+            "title": "Basis",
+            "type": "string"
+          },
+          "blocking_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateComparisonRow"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "not_a_forecast": {
+            "title": "Not A Forecast",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "what_if": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "What If"
+          }
+        },
+        "required": [
+          "incident_reference",
+          "not_a_forecast",
+          "decision"
+        ],
+        "title": "CandidateComparisonResponse",
+        "type": "object"
+      },
+      "CandidateComparisonRow": {
+        "additionalProperties": false,
+        "description": "One candidate's figures. Arithmetic only \u2014 there is deliberately no rank or score.\n\nStream B provides no `recommended` flag and a test asserts its absence, because ranking\nrecovery plans is a judgement with an owner, and the owner is a person.",
+        "properties": {
+          "admissible": {
+            "title": "Admissible",
+            "type": "boolean"
+          },
+          "approvals_required": {
+            "default": 0,
+            "title": "Approvals Required",
+            "type": "integer"
+          },
+          "blocking_checks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Checks",
+            "type": "array"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "exposure_inr": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure Inr"
+          },
+          "external_effects": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Effects"
+          },
+          "high_risk_actions": {
+            "default": 0,
+            "title": "High Risk Actions",
+            "type": "integer"
+          },
+          "passengers_affected": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passengers Affected"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "plan_risk_tier": {
+            "title": "Plan Risk Tier",
+            "type": "string"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "rooms_committed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rooms Committed"
+          },
+          "selection_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection State"
+          },
+          "task_count": {
+            "title": "Task Count",
+            "type": "integer"
+          },
+          "uncovered_entities": {
+            "default": 0,
+            "title": "Uncovered Entities",
+            "type": "integer"
+          },
+          "unresolved_cohorts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Cohorts",
+            "type": "array"
+          },
+          "variant_key": {
+            "title": "Variant Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "variant_key",
+          "plan_hash",
+          "admissible",
+          "decision",
+          "plan_risk_tier",
+          "task_count"
+        ],
+        "title": "CandidateComparisonRow",
+        "type": "object"
+      },
+      "CandidatePlanOut": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "generator": {
+            "title": "Generator",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "plan_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Hash"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "selected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected At"
+          },
+          "selected_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected By"
+          },
+          "selection_state": {
+            "title": "Selection State",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/PlanTaskOut"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "id",
+          "incident_reference",
+          "generator",
+          "generated_at",
+          "selection_state"
+        ],
+        "title": "CandidatePlanOut",
+        "type": "object"
+      },
+      "CandidatePlansResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/CandidatePlanOut"
+            },
+            "title": "Plans",
+            "type": "array"
+          },
+          "selected_plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Plan Id"
+          }
+        },
+        "required": [
+          "incident_reference"
+        ],
+        "title": "CandidatePlansResponse",
+        "type": "object"
+      },
+      "CascadeGraphOut": {
+        "additionalProperties": false,
+        "properties": {
+          "completeness": {
+            "$ref": "#/components/schemas/GraphCompleteness"
+          },
+          "edge_counts_by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Edge Counts By Kind",
+            "type": "object"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "group_reference": {
+            "title": "Group Reference",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeOut"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "snapshot_hash": {
+            "title": "Snapshot Hash",
+            "type": "string"
+          },
+          "source_action_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Action Ids",
+            "type": "array"
+          },
+          "source_prediction_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Prediction Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "group_reference",
+          "rule_version",
+          "completeness",
+          "snapshot_hash"
+        ],
+        "title": "CascadeGraphOut",
+        "type": "object"
+      },
+      "CascadePairingOut": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_leg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Affected Leg"
+          },
+          "at_risk": {
+            "default": true,
+            "title": "At Risk",
+            "type": "boolean"
+          },
+          "base_icao": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Icao"
+          },
+          "depth": {
+            "default": 1,
+            "title": "Depth",
+            "type": "integer"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "mechanism": {
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "pairing_reference": {
+            "title": "Pairing Reference",
+            "type": "string"
+          },
+          "source_flight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Flight"
+          }
+        },
+        "required": [
+          "pairing_reference",
+          "mechanism"
+        ],
+        "title": "CascadePairingOut",
+        "type": "object"
+      },
       "CheckName": {
         "enum": [
           "evidence_complete",
@@ -295,6 +1075,45 @@
         "title": "CheckState",
         "type": "string"
       },
+      "CoveredEvaluationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "integer"
+          },
+          "human_decision_id": {
+            "title": "Human Decision Id",
+            "type": "integer"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "plan_task_id": {
+            "title": "Plan Task Id",
+            "type": "integer"
+          },
+          "risk_tier": {
+            "title": "Risk Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "plan_task_id",
+          "incident_reference",
+          "action_type",
+          "risk_tier",
+          "human_decision_id"
+        ],
+        "title": "CoveredEvaluationOut",
+        "type": "object"
+      },
       "DecisionRequest": {
         "additionalProperties": false,
         "description": "An operator approving or rejecting one evaluation.",
@@ -361,6 +1180,50 @@
         "title": "DecisionResponse",
         "type": "object"
       },
+      "ExcludedEvaluationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "evaluation_id": {
+            "title": "Evaluation Id",
+            "type": "integer"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "plan_task_id": {
+            "title": "Plan Task Id",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "risk_tier": {
+            "title": "Risk Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "plan_task_id",
+          "incident_reference",
+          "action_type",
+          "risk_tier",
+          "reason_code",
+          "reason"
+        ],
+        "title": "ExcludedEvaluationOut",
+        "type": "object"
+      },
       "FlightSummary": {
         "additionalProperties": false,
         "properties": {
@@ -422,6 +1285,572 @@
           "block_time_minutes"
         ],
         "title": "FlightSummary",
+        "type": "object"
+      },
+      "GraphCompleteness": {
+        "additionalProperties": false,
+        "properties": {
+          "flights_with_evidence": {
+            "title": "Flights With Evidence",
+            "type": "integer"
+          },
+          "is_complete": {
+            "title": "Is Complete",
+            "type": "boolean"
+          },
+          "member_flight_count": {
+            "title": "Member Flight Count",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_flight_count",
+          "flights_with_evidence",
+          "is_complete",
+          "note"
+        ],
+        "title": "GraphCompleteness",
+        "type": "object"
+      },
+      "GraphEdgeOut": {
+        "additionalProperties": false,
+        "description": "One edge, naming the recorded row it came from.\n\nAn edge with no provenance would be an assertion rather than evidence, which is why Stream\nC enforces it with an exclusive-arc CHECK: a root-cause edge cites a `prediction`, because\nthe weather is not an action anyone took.",
+        "properties": {
+          "depth": {
+            "default": 1,
+            "title": "Depth",
+            "type": "integer"
+          },
+          "derived_from_action_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived From Action Id"
+          },
+          "derived_from_prediction_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived From Prediction Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "edge_kind": {
+            "title": "Edge Kind",
+            "type": "string"
+          },
+          "is_at_risk": {
+            "default": true,
+            "title": "Is At Risk",
+            "type": "boolean"
+          },
+          "mechanism": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mechanism"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          },
+          "target_ref": {
+            "title": "Target Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_ref",
+          "target_ref",
+          "edge_kind"
+        ],
+        "title": "GraphEdgeOut",
+        "type": "object"
+      },
+      "GraphNodeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "at_risk": {
+            "default": true,
+            "title": "At Risk",
+            "type": "boolean"
+          },
+          "depth": {
+            "default": 1,
+            "title": "Depth",
+            "type": "integer"
+          },
+          "has_evidence": {
+            "default": true,
+            "title": "Has Evidence",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "sublabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sublabel"
+          }
+        },
+        "required": [
+          "ref",
+          "kind",
+          "label"
+        ],
+        "title": "GraphNodeOut",
+        "type": "object"
+      },
+      "GroupAssuranceResponse": {
+        "additionalProperties": false,
+        "description": "Group-scoped plan assurance \u2014 P2-D1.\n\n**`authorises_no_action` is `Literal[True]`.** This response aggregates for display and\ngrants nothing; every action still needs its own persisted evaluation and, where the gate\ndemanded one, its own human decision. A reviewer can find the boundary by grepping for the\nfield name.\n\nThere is no aggregate assurance score at task, plan or group level. The gate is fail-closed\nand ordered \u2014 a mean of six checks would be a fiction \u2014 and a group is not \"assured\" because\nmost of its incidents are.",
+        "properties": {
+          "admissible": {
+            "title": "Admissible",
+            "type": "boolean"
+          },
+          "approval_preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanApprovalPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorises_no_action": {
+            "const": true,
+            "default": true,
+            "title": "Authorises No Action",
+            "type": "boolean"
+          },
+          "blocking": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/PlanCheckOut"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "config_hash_uniform": {
+            "default": true,
+            "title": "Config Hash Uniform",
+            "type": "boolean"
+          },
+          "config_version": {
+            "title": "Config Version",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "exposure": {
+            "additionalProperties": true,
+            "title": "Exposure",
+            "type": "object"
+          },
+          "group_reference": {
+            "title": "Group Reference",
+            "type": "string"
+          },
+          "incidents": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentPlanAssuranceOut"
+            },
+            "title": "Incidents",
+            "type": "array"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "plan_risk_tier": {
+            "title": "Plan Risk Tier",
+            "type": "string"
+          },
+          "requires_human": {
+            "title": "Requires Human",
+            "type": "boolean"
+          },
+          "task_count": {
+            "title": "Task Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group_reference",
+          "decision",
+          "plan_risk_tier",
+          "task_count",
+          "admissible",
+          "requires_human",
+          "plan_hash",
+          "config_version",
+          "config_hash",
+          "evaluated_at"
+        ],
+        "title": "GroupAssuranceResponse",
+        "type": "object"
+      },
+      "GroupFlightOut": {
+        "additionalProperties": false,
+        "description": "One member flight.\n\n`incident_reference` is nullable on purpose: a flight the group declares but has no incident\nfor yet is \"affected, not yet being worked\", which is meaningful and different from missing.",
+        "properties": {
+          "delay_minutes": {
+            "title": "Delay Minutes",
+            "type": "integer"
+          },
+          "flight_number": {
+            "title": "Flight Number",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "incident_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Reference"
+          },
+          "passengers": {
+            "title": "Passengers",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "flight_number",
+          "route",
+          "delay_minutes",
+          "passengers",
+          "state",
+          "role"
+        ],
+        "title": "GroupFlightOut",
+        "type": "object"
+      },
+      "GroupMemberOut": {
+        "additionalProperties": false,
+        "properties": {
+          "flight_id": {
+            "title": "Flight Id",
+            "type": "integer"
+          },
+          "flight_number": {
+            "title": "Flight Number",
+            "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "incident_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Reference"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "flight_id",
+          "flight_number",
+          "role"
+        ],
+        "title": "GroupMemberOut",
+        "type": "object"
+      },
+      "GroupRollups": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_hotels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Hotels"
+          },
+          "connections_at_risk": {
+            "title": "Connections At Risk",
+            "type": "integer"
+          },
+          "crew_pairings_affected": {
+            "title": "Crew Pairings Affected",
+            "type": "integer"
+          },
+          "flights_affected": {
+            "title": "Flights Affected",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "passengers_affected": {
+            "title": "Passengers Affected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flights_affected",
+          "passengers_affected",
+          "connections_at_risk",
+          "crew_pairings_affected"
+        ],
+        "title": "GroupRollups",
+        "type": "object"
+      },
+      "GroupRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "awaiting_approval_count": {
+            "default": 0,
+            "title": "Awaiting Approval Count",
+            "type": "integer"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "group_reference": {
+            "title": "Group Reference",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "opened_incident_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Opened Incident Ids",
+            "type": "array"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          }
+        },
+        "required": [
+          "group_reference",
+          "state"
+        ],
+        "title": "GroupRunResponse",
+        "type": "object"
+      },
+      "GroupSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "airport_icao": {
+            "title": "Airport Icao",
+            "type": "string"
+          },
+          "awaiting_approval_count": {
+            "title": "Awaiting Approval Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceBlock"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "rollup_status": {
+            "$ref": "#/components/schemas/RollupStatus"
+          },
+          "rollups": {
+            "$ref": "#/components/schemas/GroupRollups"
+          },
+          "root_cause": {
+            "title": "Root Cause",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "root_cause",
+          "airport_icao",
+          "severity",
+          "state",
+          "opened_at",
+          "rollups",
+          "awaiting_approval_count",
+          "provenance",
+          "rollup_status"
+        ],
+        "title": "GroupSummary",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -624,6 +2053,200 @@
         "title": "IncidentEvidence",
         "type": "object"
       },
+      "IncidentGroupDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "airport_icao": {
+            "title": "Airport Icao",
+            "type": "string"
+          },
+          "awaiting_approval_count": {
+            "default": 0,
+            "title": "Awaiting Approval Count",
+            "type": "integer"
+          },
+          "blast_radius": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlastRadiusOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "crew_pairings": {
+            "items": {
+              "$ref": "#/components/schemas/CascadePairingOut"
+            },
+            "title": "Crew Pairings",
+            "type": "array"
+          },
+          "flights": {
+            "items": {
+              "$ref": "#/components/schemas/GroupFlightOut"
+            },
+            "title": "Flights",
+            "type": "array"
+          },
+          "generated_by": {
+            "default": "stream-a",
+            "title": "Generated By",
+            "type": "string"
+          },
+          "graph": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CascadeGraphOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "mechanism_legend": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Mechanism Legend",
+            "type": "object"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceBlock"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "rollup_status": {
+            "$ref": "#/components/schemas/RollupStatus"
+          },
+          "rollups": {
+            "$ref": "#/components/schemas/GroupRollups"
+          },
+          "root_cause": {
+            "title": "Root Cause",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          },
+          "why_nine_not_eight": {
+            "title": "Why Nine Not Eight",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note",
+          "id",
+          "reference",
+          "root_cause",
+          "airport_icao",
+          "severity",
+          "state",
+          "opened_at",
+          "rollups",
+          "rollup_status",
+          "why_nine_not_eight",
+          "provenance"
+        ],
+        "title": "IncidentGroupDetailResponse",
+        "type": "object"
+      },
+      "IncidentGroupListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_by": {
+            "default": "stream-a",
+            "title": "Generated By",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupSummary"
+            },
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "title": "IncidentGroupListResponse",
+        "type": "object"
+      },
+      "IncidentPlanAssuranceOut": {
+        "additionalProperties": false,
+        "description": "One member incident's row in the group matrix.",
+        "properties": {
+          "awaiting_approval_count": {
+            "default": 0,
+            "title": "Awaiting Approval Count",
+            "type": "integer"
+          },
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "config_version": {
+            "title": "Config Version",
+            "type": "string"
+          },
+          "incident_reference": {
+            "title": "Incident Reference",
+            "type": "string"
+          },
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "integer"
+          },
+          "task_count": {
+            "title": "Task Count",
+            "type": "integer"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/PlanTaskOutcomeOut"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "incident_reference",
+          "plan_id",
+          "task_count",
+          "config_version",
+          "config_hash"
+        ],
+        "title": "IncidentPlanAssuranceOut",
+        "type": "object"
+      },
       "IncidentState": {
         "description": "Canonical incident lifecycle (docs/26-implementation-contracts.md).\n\ndetected -> assessing -> planning -> assuring\n                                 -> awaiting_approval\n                                 -> executing -> resolved\n                                 -> blocked\nany active state -> failed",
         "enum": [
@@ -639,6 +2262,231 @@
         ],
         "title": "IncidentState",
         "type": "string"
+      },
+      "PlanApprovalPreview": {
+        "additionalProperties": false,
+        "description": "What a plan approval would cover, before the operator commits.\n\nBoth lists are returned. The excluded set is visible rather than hidden, so a reviewer sees\nthe control was *unable* to cover something instead of assuming it chose not to.",
+        "properties": {
+          "covered": {
+            "items": {
+              "$ref": "#/components/schemas/CoveredEvaluationOut"
+            },
+            "title": "Covered",
+            "type": "array"
+          },
+          "covered_count": {
+            "default": 0,
+            "title": "Covered Count",
+            "type": "integer"
+          },
+          "excluded": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedEvaluationOut"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "excluded_count": {
+            "default": 0,
+            "title": "Excluded Count",
+            "type": "integer"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "refusal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Reason"
+          }
+        },
+        "required": [
+          "plan_hash"
+        ],
+        "title": "PlanApprovalPreview",
+        "type": "object"
+      },
+      "PlanApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "reason"
+        ],
+        "title": "PlanApprovalRequest",
+        "type": "object"
+      },
+      "PlanApprovalResponse": {
+        "additionalProperties": false,
+        "description": "The recorded approval and every decision it produced.\n\n`covered_count` always equals the number of `human_decision` rows actually written, because\nboth come from the same partition. A caller can assert it, and a test does.",
+        "properties": {
+          "covered": {
+            "items": {
+              "$ref": "#/components/schemas/CoveredEvaluationOut"
+            },
+            "title": "Covered",
+            "type": "array"
+          },
+          "covered_count": {
+            "default": 0,
+            "title": "Covered Count",
+            "type": "integer"
+          },
+          "excluded": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedEvaluationOut"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "excluded_count": {
+            "default": 0,
+            "title": "Excluded Count",
+            "type": "integer"
+          },
+          "plan_approval_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Approval Id"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "refusal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Reason"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "plan_hash"
+        ],
+        "title": "PlanApprovalResponse",
+        "type": "object"
+      },
+      "PlanCheckOut": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "offending_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Offending Refs",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          }
+        },
+        "required": [
+          "name",
+          "state",
+          "reason_code"
+        ],
+        "title": "PlanCheckOut",
+        "type": "object"
       },
       "PlanSummary": {
         "additionalProperties": false,
@@ -703,6 +2551,115 @@
           "generated_at"
         ],
         "title": "PlanSummary",
+        "type": "object"
+      },
+      "PlanTaskOut": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "depends_on": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "target_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Refs",
+            "type": "array"
+          },
+          "task_order": {
+            "title": "Task Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "action_type",
+          "task_order",
+          "state"
+        ],
+        "title": "PlanTaskOut",
+        "type": "object"
+      },
+      "PlanTaskOutcomeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "approvable": {
+            "title": "Approvable",
+            "type": "boolean"
+          },
+          "blocking_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Kinds",
+            "type": "array"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "evaluation_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Id"
+          },
+          "risk_tier": {
+            "title": "Risk Tier",
+            "type": "string"
+          },
+          "target_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Refs",
+            "type": "array"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "action_type",
+          "decision",
+          "risk_tier",
+          "approvable"
+        ],
+        "title": "PlanTaskOutcomeOut",
         "type": "object"
       },
       "PlanTaskSummary": {
@@ -809,6 +2766,30 @@
         "title": "Provenance",
         "type": "object"
       },
+      "ProvenanceBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "provider",
+          "source_ref"
+        ],
+        "title": "ProvenanceBlock",
+        "type": "object"
+      },
       "ProvenanceKind": {
         "enum": [
           "real",
@@ -841,6 +2822,193 @@
         ],
         "title": "ReasonCode",
         "type": "string"
+      },
+      "ReplayFrame": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "assurance_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assurance Id"
+          },
+          "decision_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Scope"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "human_decision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Decision Id"
+          },
+          "incident_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Reference"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "plan_approval_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Approval Id"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "state_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State After"
+          },
+          "state_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Before"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "occurred_at",
+          "stage",
+          "actor",
+          "actor_kind",
+          "event_type",
+          "summary"
+        ],
+        "title": "ReplayFrame",
+        "type": "object"
+      },
+      "ReplayResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "frame_count": {
+            "title": "Frame Count",
+            "type": "integer"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayFrame"
+            },
+            "title": "Frames",
+            "type": "array"
+          },
+          "group_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Reference"
+          },
+          "incident_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Reference"
+          },
+          "is_read_only": {
+            "default": true,
+            "title": "Is Read Only",
+            "type": "boolean"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "frame_count",
+          "note"
+        ],
+        "title": "ReplayResponse",
+        "type": "object"
       },
       "RiskEvidence": {
         "additionalProperties": false,
@@ -966,6 +3134,50 @@
         "title": "RiskTier",
         "type": "string"
       },
+      "RollupStatus": {
+        "additionalProperties": false,
+        "description": "Whether the rollup describes the whole group or only part of it.\n\n`is_complete` is false whenever a declared member flight has no incident or an incident has\nnot been assessed. A partial rollup must render as partial: eight flights' worth of caption\nover six flights' worth of evidence is the failure mode this field exists to prevent.",
+        "properties": {
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "flights_without_incident": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Flights Without Incident",
+            "type": "array"
+          },
+          "is_complete": {
+            "title": "Is Complete",
+            "type": "boolean"
+          },
+          "membership_is_declared": {
+            "default": true,
+            "title": "Membership Is Declared",
+            "type": "boolean"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "is_complete",
+          "note"
+        ],
+        "title": "RollupStatus",
+        "type": "object"
+      },
       "RunResponse": {
         "additionalProperties": false,
         "description": "Result of driving the workflow forward.\n\n`replayed` is true when the Idempotency-Key had already been used, in which case the\nrecorded result is returned and the workflow was not advanced again.",
@@ -1024,6 +3236,29 @@
           "is_terminal"
         ],
         "title": "RunResponse",
+        "type": "object"
+      },
+      "SelectPlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "reason"
+        ],
+        "title": "SelectPlanRequest",
         "type": "object"
       },
       "StateRailEntry": {
@@ -1273,6 +3508,160 @@
         ],
         "title": "WeatherEvidence",
         "type": "object"
+      },
+      "WhatIfDeltaOut": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline": {
+            "title": "Baseline",
+            "type": "integer"
+          },
+          "delta": {
+            "title": "Delta",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "scenario": {
+            "title": "Scenario",
+            "type": "integer"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "baseline",
+          "scenario",
+          "delta",
+          "summary"
+        ],
+        "title": "WhatIfDeltaOut",
+        "type": "object"
+      },
+      "WhatIfLeverRejectionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "lever": {
+            "title": "Lever",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lever",
+          "reason"
+        ],
+        "title": "WhatIfLeverRejectionOut",
+        "type": "object"
+      },
+      "WhatIfResponse": {
+        "additionalProperties": false,
+        "description": "A bounded, zero-write, deterministic re-evaluation \u2014 P2-D2.\n\n`basis` and `wrote_rows` are `Literal`s, so this contract **cannot express a projection and\ncannot claim a write**. The figures describe what the recorded evidence implies under\naltered levers; they are not a forecast, and `boundary_note` says so in the payload rather\nthan only in a document.",
+        "properties": {
+          "basis": {
+            "const": "recorded_evidence",
+            "default": "recorded_evidence",
+            "title": "Basis",
+            "type": "string"
+          },
+          "boundary_note": {
+            "title": "Boundary Note",
+            "type": "string"
+          },
+          "deltas": {
+            "items": {
+              "$ref": "#/components/schemas/WhatIfDeltaOut"
+            },
+            "title": "Deltas",
+            "type": "array"
+          },
+          "group_reference": {
+            "title": "Group Reference",
+            "type": "string"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          },
+          "levers_applied": {
+            "additionalProperties": true,
+            "title": "Levers Applied",
+            "type": "object"
+          },
+          "levers_available": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Levers Available",
+            "type": "array"
+          },
+          "levers_rejected": {
+            "items": {
+              "$ref": "#/components/schemas/WhatIfLeverRejectionOut"
+            },
+            "title": "Levers Rejected",
+            "type": "array"
+          },
+          "permitted": {
+            "default": true,
+            "title": "Permitted",
+            "type": "boolean"
+          },
+          "recorded_baseline": {
+            "additionalProperties": true,
+            "title": "Recorded Baseline",
+            "type": "object"
+          },
+          "refusals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refusals",
+            "type": "array"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "wrote_rows": {
+            "const": false,
+            "default": false,
+            "title": "Wrote Rows",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "group_reference",
+          "rule_version",
+          "boundary_note",
+          "headline"
+        ],
+        "title": "WhatIfResponse",
+        "type": "object"
       }
     }
   },
@@ -1431,30 +3820,64 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response List Incident Groups Api V1 Incident Groups Get"
+                  "$ref": "#/components/schemas/IncidentGroupListResponse"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Cascade summaries [fixture]",
+        "summary": "Every disruption group, with derived rollups",
         "tags": [
-          "fixtures"
+          "cascade"
         ]
       }
     },
-    "/api/v1/incident-groups/{group_id}": {
+    "/api/v1/incident-groups/current": {
       "get": {
-        "operationId": "get_incident_group_api_v1_incident_groups__group_id__get",
+        "description": "The console's landing query. 404 when nothing is open, never an empty placeholder.",
+        "operationId": "current_incident_group_api_v1_incident_groups_current_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "The most recently opened disruption group",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}": {
+      "get": {
+        "operationId": "get_incident_group_api_v1_incident_groups__group_ref__get",
         "parameters": [
           {
             "in": "path",
-            "name": "group_id",
+            "name": "group_ref",
             "required": true,
             "schema": {
-              "title": "Group Id",
+              "title": "Group Ref",
               "type": "string"
+            }
+          },
+          {
+            "description": "Project the disruption graph.",
+            "in": "query",
+            "name": "include_graph",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Project the disruption graph.",
+              "title": "Include Graph",
+              "type": "boolean"
             }
           }
         ],
@@ -1463,7 +3886,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Incident Group Api V1 Incident Groups  Group Id  Get"
+                  "$ref": "#/components/schemas/IncidentGroupDetailResponse"
                 }
               }
             },
@@ -1480,9 +3903,446 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Cascade detail [fixture]",
+        "summary": "One cascade: members, pairings, blast radius and graph",
         "tags": [
-          "fixtures"
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/assurance": {
+      "get": {
+        "description": "Aggregate for display. `authorises_no_action` is a `Literal[True]` in the response.\n\nOne endpoint rather than client-side fan-out over N incidents: a fan-out makes the group\nview N+1 requests and, worse, lets a partial failure read as a pass.",
+        "operationId": "get_group_assurance_api_v1_incident_groups__group_ref__assurance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAssuranceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Group-scoped plan assurance. Authorises nothing.",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/assurance/decision": {
+      "post": {
+        "description": "Record one operator act, and write one `human_decision` per covered evaluation.\n\nThe partition happens server-side. The UI hiding a button is not a control: a direct API\ncall must be refused the same way, which is why `plan_approval_covers` runs here and not\nonly in the console.\n\nOnly evaluations **already awaiting** a person are covered. An evaluation produced later in\nthe run needs its own decision, because forward coverage would be a blank cheque over\nactions nobody had seen.",
+        "operationId": "approve_group_plan_api_v1_incident_groups__group_ref__assurance_decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A repeat returns the recorded result.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A repeat returns the recorded result.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanApprovalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Plan approval: covers low/medium, never high risk, never failed evidence",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/blast-radius": {
+      "get": {
+        "operationId": "get_blast_radius_api_v1_incident_groups__group_ref__blast_radius_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlastRadiusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reach composed from recorded findings",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/graph": {
+      "get": {
+        "operationId": "get_cascade_graph_api_v1_incident_groups__group_ref__graph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CascadeGraphOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The disruption graph, projected from recorded rows",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/open": {
+      "post": {
+        "description": "Idempotent by construction: `open_incident` returns the existing active incident for a\nflight, so a repeated call cannot double the cascade.",
+        "operationId": "open_group_api_v1_incident_groups__group_ref__open_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A repeat returns the recorded result.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A repeat returns the recorded result.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open one incident per declared member flight",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/replay": {
+      "get": {
+        "operationId": "replay_group_api_v1_incident_groups__group_ref__replay_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconstruct the whole cascade, interleaved chronologically",
+        "tags": [
+          "replay"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/run": {
+      "post": {
+        "description": "Drive the cascade forward.\n\nA member whose service refuses does not stop the others: each advances independently and\nthe group ends `blocked` naming what did not resolve. One flight without a hotel must not\nstrand the other seven.",
+        "operationId": "run_group_api_v1_incident_groups__group_ref__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bound how many members advance in this call.",
+            "in": "query",
+            "name": "max_incidents",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 64,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bound how many members advance in this call.",
+              "title": "Max Incidents"
+            }
+          },
+          {
+            "description": "A repeat returns the recorded result.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A repeat returns the recorded result.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Advance every non-terminal member incident",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/what-if": {
+      "post": {
+        "description": "Re-evaluate the recorded facts under substituted inputs. Writes nothing.\n\nStream B's `assert_zero_write` runs FIRST. If it refuses \u2014 a live provider, a missing seed,\ntoo many candidates \u2014 nothing is evaluated at all, rather than a comparison being produced\nunder conditions it was not safe to produce one in.\n\nThis is not a simulation engine and not a digital twin. `basis` and `wrote_rows` are\n`Literal`s in the response contract, so it cannot express a projection or claim a write.",
+        "operationId": "group_what_if_api_v1_incident_groups__group_ref__what_if_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Levers",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatIfResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bounded, zero-write, deterministic re-evaluation (P2-D2)",
+        "tags": [
+          "cascade"
         ]
       }
     },
@@ -1523,6 +4383,58 @@
           }
         },
         "summary": "Incident state, plan, tasks and recorded evidence",
+        "tags": [
+          "incidents"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/actions/{action_id}": {
+      "get": {
+        "description": "The per-entity impact the services computed, exposed rather than re-derived.\n\nThe services already persist which itineraries broke and which rooms were held; without this\nendpoint the console could only see a sentence, and parsing digits out of prose is\nfabrication with extra steps.",
+        "operationId": "get_action_api_v1_incidents__incident_id__actions__action_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "One action with the payload the service recorded",
         "tags": [
           "incidents"
         ]
@@ -1570,6 +4482,171 @@
         ]
       }
     },
+    "/api/v1/incidents/{incident_id}/plans": {
+      "get": {
+        "operationId": "list_plans_api_v1_incidents__incident_id__plans_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidatePlansResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Candidate recovery plans for one incident",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/plans/comparison": {
+      "get": {
+        "description": "What-if as plan comparison \u2014 P2-D2.\n\nEvery figure was re-evaluated against evidence already recorded for this incident. No world\nstate is modelled, no outcome is claimed, and `basis` is a `Literal` so the contract cannot\nexpress a projection.",
+        "operationId": "compare_plans_api_v1_incidents__incident_id__plans_comparison_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateComparisonResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare candidates against the same recorded facts. Writes nothing.",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/plans/{plan_id}/select": {
+      "post": {
+        "description": "A second, different selection is a 409.\n\nThe same shape `human_decision` already uses: a choice is a record of what somebody\ndecided, not a mutable setting. The partial unique index\n`uq_plan_selected_per_incident` enforces it in the database as well, so a race becomes a\nconflict rather than a lost write.",
+        "operationId": "select_plan_api_v1_incidents__incident_id__plans__plan_id__select_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "A repeat returns the recorded selection.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A repeat returns the recorded selection.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidatePlansResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record which candidate an operator chose. Immutable.",
+        "tags": [
+          "plans"
+        ]
+      }
+    },
     "/api/v1/incidents/{incident_id}/policy": {
       "get": {
         "operationId": "get_policy_api_v1_incidents__incident_id__policy_get",
@@ -1609,6 +4686,48 @@
         "summary": "Policy evaluation [fixture]",
         "tags": [
           "fixtures"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/replay": {
+      "get": {
+        "operationId": "replay_incident_api_v1_incidents__incident_id__replay_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconstruct one incident from its immutable record",
+        "tags": [
+          "replay"
         ]
       }
     },
