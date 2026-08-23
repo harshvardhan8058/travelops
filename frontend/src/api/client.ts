@@ -15,6 +15,7 @@ import type {
   CandidatePlansResponse,
   CascadeGraph,
   DecisionResponse,
+  ExplanationResponse,
   FlightsResponse,
   GroupAssuranceResponse,
   GroupImpactResponse,
@@ -136,6 +137,10 @@ export const api = {
   policy: (id: string) => request<PolicyResponse>(`/incidents/${id}/policy`),
   incidentGroup: (id: string) => request<IncidentGroupDetail>(`/incident-groups/${id}`),
   report: (id: string) => request<ReportResponse>(`/reports/${id}`),
+
+  /** Phase 3: natural-language explanation from the Explainer agent. */
+  explanation: (incidentId: string) =>
+    request<ExplanationResponse>(`/incidents/${incidentId}/explanation`),
 
   /**
    * Advance the workflow. Stopping at `awaiting_approval` is a SUCCESS response with
