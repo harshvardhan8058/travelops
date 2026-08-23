@@ -97,6 +97,60 @@ class TestBlastRadiusComputesNothing:
                 source = ast.unparse(node)
                 assert "payload" not in source, f"aggregating a payload: {source}"
 
+    def test_the_group_api_does_not_accumulate_a_payload_in_a_loop_either(self):
+        """`sum(...)` was too narrow a guard, and something slipped past it.
+
+        `_recorded_exposure` accumulated rooms with `rooms += int(data.get(...))` inside a `for`,
+        which is the same aggregation written the other way. It also read a key nothing emits and
+        filtered on a status that is not an `ActionStatus` member, so it matched no rows at all and
+        reported group exposure as permanently unknown. A guard that only looks for `sum` would
+        never have found it.
+        """
+        tree = _module("api", "incident_groups.py")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Add):
+                source = ast.unparse(node)
+                assert "payload" not in source and "data.get" not in source, (
+                    f"accumulating a payload: {source}"
+                )
+
+    def test_the_group_api_never_reaches_for_an_action_row(self):
+        """The strongest form of the same rule, and the one that closes the class.
+
+        Aggregation over recorded findings belongs to a service. If this module cannot name the
+        `Action` model it cannot query one, so it cannot grow a second definition of a figure a
+        service already owns — whether written as `sum`, as `+=`, or as anything else.
+        """
+        text = (APP / "api" / "incident_groups.py").read_text(encoding="utf-8")
+        assert "import Action" not in text and "Action," not in text, (
+            "the group API imports the Action model; read findings through a service instead"
+        )
+
+    def test_no_module_filters_actions_on_a_task_state_value(self):
+        """`ActionStatus` has `success`; `TaskState` has `succeeded`. They are not interchangeable.
+
+        Comparing `Action.status` to `"succeeded"` is always false, so the query returns nothing and
+        the caller reports "unknown" forever. That reads as caution rather than as a bug, which is
+        what made it survive. Pinned across the whole app because the mistake is one keystroke and
+        the symptom is silence.
+        """
+        offenders: list[str] = []
+        for path in APP.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                # Over the AST, not the text: this file's own explanation of the bug quotes the
+                # broken comparison, and a substring search cannot tell prose from code.
+                if not isinstance(node, ast.Compare):
+                    continue
+                left = ast.unparse(node.left)
+                if not left.endswith("Action.status"):
+                    continue
+                for comparator in node.comparators:
+                    value = comparator.value if isinstance(comparator, ast.Constant) else None
+                    if value == "succeeded":
+                        offenders.append(str(path.relative_to(APP)))
+        assert offenders == [], f"comparing an action status to a task state in {offenders}"
+
     def test_the_group_api_imports_the_rollup_rather_than_recomputing(self):
         imported = _imported_modules(_module("api", "incident_groups.py"))
         assert "app.db.scenario_queries" in imported

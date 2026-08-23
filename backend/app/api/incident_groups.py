@@ -30,7 +30,7 @@ from app.db.session import get_session
 from app.errors import EntityNotFound
 from app.models.enums import IncidentState
 from app.models.reference import Booking, BookingSegment, Flight
-from app.models.workflow import Action, AssuranceEvaluation, DecisionLog, IncidentGroup, PlanTask
+from app.models.workflow import AssuranceEvaluation, DecisionLog, IncidentGroup
 from app.observability.logging import correlation_id_var, get_logger
 from app.orchestrator.group import GroupOrchestrator
 from app.orchestrator.plan_approval import PlanApprovalService, approval_payload
@@ -734,34 +734,40 @@ async def _config_identity(
 
 
 async def _recorded_exposure(session: AsyncSession, group_id: int) -> tuple[int | None, int | None]:
-    """Rooms committed and money committed, read from recorded actions.
+    """Rooms committed and money committed, from the one service that owns the aggregation.
 
-    `None` when nothing has been recorded, and it stays `None`: Stream B's exposure check treats
-    an unknown figure as a breach rather than as zero, and substituting a default here would
-    turn "we do not know" into "it is fine".
+    `None` when nothing has been recorded, and it stays `None`: Stream B's exposure check treats an
+    unknown figure as a breach rather than as zero, and substituting a default here would turn "we
+    do not know" into "it is fine".
+
+    This used to sum the figures itself, and did so wrongly in three separate ways that all failed
+    quietly:
+
+    * it filtered on ``Action.status == "succeeded"``, which is a `TaskState` value. `ActionStatus`
+      has `success`, not `succeeded`, so the query matched **no rows ever** — and because no rows
+      means `None`, group plan assurance permanently reported an unknown-exposure breach against a
+      group whose rooms and money were fully recorded in the ledger. A wrong answer would have been
+      caught; a permanent "we cannot tell" looked like caution.
+    * it read a top-level ``rooms_held`` key that no action payload carries — `rooms_held` exists
+      only nested inside a hotel *option*, never on the action.
+    * its fallback read ``rooms_required``, which is demand. `rooms_committed` is a commitment, and
+      those differ by exactly the shortfall this scenario is built around.
+
+    It now delegates to `group_hotel_totals`, which is where the aggregation already lived. That
+    also picks up the two things it gets right and this file did not: partial allocations count,
+    because a `needs_human` allocation that secured 71 rooms committed real inventory and real
+    money; and the totals are summed once, so the exposure check and the blast radius cannot
+    disagree about how many rooms the group holds.
+
+    Hotel allocation is the only action that records a cost in Phase 2, so the hotel total *is* the
+    group's committed money. If another cost-bearing action is ever added, this must widen with it
+    rather than silently under-report — which is why the figure is read from a named service total
+    instead of a `SUM` over a column that happens to be populated by one writer today.
     """
-    from app.models.workflow import Incident, Plan
-
-    stmt = (
-        select(Action.cost_inr, Action.payload)
-        .join(PlanTask, PlanTask.id == Action.plan_task_id)
-        .join(Plan, Plan.id == PlanTask.plan_id)
-        .join(Incident, Incident.id == Plan.incident_id)
-        .where(Incident.group_id == group_id, Action.status == "succeeded")
-    )
-    rows = (await session.execute(stmt)).all()
-    if not rows:
+    totals = await group_hotel_totals(session, group_id=group_id)
+    if totals is None:
         return None, None
-    rooms = 0
-    money = 0
-    saw_rooms = False
-    for cost, payload in rows:
-        money += int(cost or 0)
-        data = payload if isinstance(payload, dict) else {}
-        if "rooms_held" in data or "rooms_required" in data:
-            saw_rooms = True
-            rooms += int(data.get("rooms_held") or data.get("rooms_required") or 0)
-    return (rooms if saw_rooms else None), money
+    return int(totals["rooms_allocated"]), int(totals["total_cost_inr"])
 
 
 @router.get(

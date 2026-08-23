@@ -597,8 +597,13 @@ async def run_entitlements(
 
 # ------------------------------------------------------------------------------- registry
 
-#: `evaluate_entitlements` is implemented (`run_entitlements` below, delegating to
+#: `evaluate_entitlements` is implemented (`run_entitlements`, defined above, delegating to
 #: `CompensationService` and thence to Stream B's policy engine) but deliberately NOT registered.
+#:
+#: It IS a step in the seeded playbook, so every run reaches it and every run gets the explicit
+#: `SERVICE_NOT_IMPLEMENTED` refusal from `dispatch`. That is the intended demo behaviour, not an
+#: oversight: the refusal names a missing service, which is a fact, where the alternative below
+#: would name insufficient evidence, which would not be.
 #:
 #: `gate_requirements` derives 14 required facts for it from the pack itself, and four are not
 #: recorded anywhere in this dataset:
