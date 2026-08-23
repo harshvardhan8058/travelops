@@ -28,7 +28,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/api/client';
 import type { ExcludedEvaluation, PlanCheck } from '@/api/types';
 import { CountBar, Metric } from '@/components/ui/Metric';
-import { planAssuranceDerivation } from '@/components/ui/derivation';
+import { planTotalDerivation } from '@/components/ui/derivation';
 import {
   CheckStateBadge,
   EmptyState,
@@ -195,11 +195,22 @@ export function GroupApprovalQueue() {
   if (!data) return <LoadingState label="Loading the approval queue" />;
 
   const preview = data.approval_preview;
-  const totalTasks = data.incidents.reduce((sum, incident) => sum + incident.task_count, 0);
-  const awaiting = data.incidents.reduce(
-    (sum, incident) => sum + incident.awaiting_approval_count,
-    0,
-  );
+  /*
+   * The only addition this console performs. It is confined to per-plan counts the same response
+   * returned, every summand is listed in the derivation and in the table below, and the plans are
+   * disjoint because each is scoped to one incident. Cascade figures are never treated this way:
+   * those are derived server-side from recorded rows so a client cannot produce a second answer.
+   */
+  const taskContributions = data.incidents.map((incident) => ({
+    incidentReference: incident.incident_reference,
+    value: incident.task_count,
+  }));
+  const awaitingContributions = data.incidents.map((incident) => ({
+    incidentReference: incident.incident_reference,
+    value: incident.awaiting_approval_count,
+  }));
+  const totalTasks = taskContributions.reduce((sum, item) => sum + item.value, 0);
+  const awaiting = awaitingContributions.reduce((sum, item) => sum + item.value, 0);
   const canApprove = api.canWrite && reason.trim().length > 0 && (preview?.covered_count ?? 0) > 0;
 
   return (
@@ -219,12 +230,30 @@ export function GroupApprovalQueue() {
             <span className="text-label uppercase text-fg-muted">Tasks</span>
             <Metric
               value={totalTasks}
-              derivation={planAssuranceDerivation([], data.config_version, data.config_hash)}
+              derivation={planTotalDerivation({
+                label: 'Tasks',
+                field: 'task_count',
+                contributions: taskContributions,
+                configVersion: data.config_version,
+                configHash: data.config_hash,
+              })}
             />
           </span>
           <span className="flex items-baseline gap-2">
-            <span className="text-label uppercase text-fg-muted">Awaiting a person</span>
-            <MonoValue>{awaiting}</MonoValue>
+            {/* "Tasks", not "incidents": the shell's blocked badge counts incidents awaiting a
+                person, and two differently-scoped figures under one word is how a reviewer
+                concludes the console contradicts itself. */}
+            <span className="text-label uppercase text-fg-muted">Tasks awaiting a person</span>
+            <Metric
+              value={awaiting}
+              derivation={planTotalDerivation({
+                label: 'Tasks awaiting a person',
+                field: 'awaiting_approval_count',
+                contributions: awaitingContributions,
+                configVersion: data.config_version,
+                configHash: data.config_hash,
+              })}
+            />
           </span>
         </div>
 

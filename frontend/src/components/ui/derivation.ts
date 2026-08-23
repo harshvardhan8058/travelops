@@ -930,3 +930,50 @@ export function impactCountDerivation(args: {
       : [],
   };
 }
+
+/**
+ * A total the approval queue adds up across the plans the same response returned.
+ *
+ * This is the one place the console adds server figures together, and it is allowed only because
+ * every summand is on screen in the table below it and named here individually. It is not a
+ * cascade figure: `passengers_affected`, `connections_at_risk` and the rest are derived server-side
+ * from recorded rows precisely so a client can never produce a second answer, and nothing here
+ * touches those.
+ *
+ * It exists because this metric previously rendered with an EMPTY derivation — a popover certifying
+ * a number it did not explain, which is worse than showing no popover at all.
+ */
+export function planTotalDerivation(args: {
+  label: string;
+  field: string;
+  contributions: { incidentReference: string; value: number }[];
+  configVersion: string;
+  configHash: string;
+}): Derivation {
+  const total = args.contributions.reduce((sum, item) => sum + item.value, 0);
+  return {
+    title: `${args.label}: ${total}`,
+    subtitle: `sum of ${args.field} over ${args.contributions.length} selected plan${
+      args.contributions.length === 1 ? '' : 's'
+    }`,
+    inputs: args.contributions.map((item) => ({
+      label: item.incidentReference,
+      value: String(item.value),
+    })),
+    rule: {
+      kind: 'formula',
+      id: 'sum over the plans in this response',
+      version: args.configVersion,
+      formula: `${args.contributions.map((item) => item.value).join(' + ')} = ${total}`,
+      refs: [`hash ${args.configHash}`],
+      note: 'Each plan is scoped to one incident, so the summands are disjoint and no task is counted twice. Every one of them is listed above and in the table below.',
+    },
+    absences: [
+      {
+        label: 'group-level total',
+        detail:
+          'GET /incident-groups/{ref}/assurance returns per-plan counts and no group total, so this figure is added up here from the plans it returned rather than read from one field.',
+      },
+    ],
+  };
+}

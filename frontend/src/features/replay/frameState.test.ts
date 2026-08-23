@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ReplayFrame } from '@/api/types';
-import { applyFrameFilters, foldFrames, NO_FRAME_FILTERS } from './replayState';
+import { applyFrameFilters, foldFrames, NO_FRAME_FILTERS, resolveCursor } from './replayState';
 
 function frame(overrides: Partial<ReplayFrame> = {}): ReplayFrame {
   return {
@@ -86,6 +86,53 @@ describe('applyFrameFilters', () => {
         incidentReferences: new Set(['INC-2026-0820-VOBL-01']),
       }),
     ).toHaveLength(0);
+  });
+
+  /*
+   * The three below moved here when the `TimelineEntry` fold and its test file were deleted. They
+   * are the same assertions against the frame contract, kept so removing a duplicate seam does not
+   * quietly remove its coverage too.
+   */
+  it('narrows to the decision subset a reviewer means by "only decisions"', () => {
+    const kept = applyFrameFilters(frames, { ...NO_FRAME_FILTERS, onlyDecisions: true });
+    expect(kept.map((f) => f.event_type)).toEqual([
+      'STATE_CHANGED',
+      'ASSURANCE_EVALUATED',
+      'HUMAN_DECISION_RECORDED',
+      'STATE_CHANGED',
+    ]);
+  });
+
+  it('filters by actor kind and by stage independently', () => {
+    const humans = applyFrameFilters(frames, {
+      ...NO_FRAME_FILTERS,
+      actorKinds: new Set(['human']),
+    });
+    expect(humans).toHaveLength(1);
+    expect(humans[0]?.actor).toBe('duty-manager-2');
+
+    const runStage = applyFrameFilters(frames, {
+      ...NO_FRAME_FILTERS,
+      stages: new Set(['run']),
+      includeBookkeeping: true,
+    });
+    expect(runStage).toHaveLength(1);
+  });
+});
+
+describe('resolveCursor', () => {
+  it('opens on the latest frame, because a reviewer scrubs backwards', () => {
+    expect(resolveCursor(null, 6)).toBe(5);
+  });
+
+  it('clamps a held cursor when a filter shrinks the frame set underneath it', () => {
+    expect(resolveCursor(9, 3)).toBe(2);
+    expect(resolveCursor(-4, 3)).toBe(0);
+  });
+
+  it('does not go negative when there is nothing to fold', () => {
+    expect(resolveCursor(null, 0)).toBe(0);
+    expect(resolveCursor(3, 0)).toBe(0);
   });
 });
 
