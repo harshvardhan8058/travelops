@@ -326,6 +326,18 @@ export interface ActionRecord {
   idempotency_key: string;
   executed_at: string | null;
   provenance_kind?: ProvenanceKind | string;
+  /**
+   * The stable token behind `reason`, so a consumer classifies on a field instead of a prefix.
+   * The real API sends it on this list contract; it is absent from the committed fixture.
+   */
+  reason_code?: string | null;
+  /**
+   * Always `null` on THIS contract even when a decision exists: the list endpoint does not
+   * resolve it. `GET /incidents/{ref}/actions/{id}` is the only place the real scope appears, so
+   * nothing may conclude "no person authorised this" from the list alone.
+   */
+  decision_scope?: string | null;
+  plan_approval_id?: number | null;
 }
 
 /**

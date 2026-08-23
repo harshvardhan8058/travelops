@@ -61,6 +61,16 @@ const ROUTES = [
   { path: '/replay/INC-2026-0820-VOBL-01', name: 'Replay', expect: ['frames'] },
   // Per-entity impact: the PNR proves a passenger-level row reached the DOM, not just a count.
   { path: '/impact/INC-2026-0820-VOBL-01', name: 'Impact Explorer', expect: ['Connections'] },
+  {
+    path: '/agent/INC-2026-0820-VOBL-01',
+    name: 'Agent Operations',
+    // The generator token proves the plan contract reached the DOM, and asserting its casing
+    // proves the console did not dress a contract value up: 'fallback-playbook' and
+    // 'groq:llama-3.3-70b' are the difference between a deterministic plan and a model-authored
+    // one, so an uppercased version of either misreports what the API returned.
+    expect: ['fallback-playbook', 'needs a person'],
+    expectExactCase: ['fallback-playbook'],
+  },
   { path: '/what-if/current', name: 'What-If', expect: ['what-if'] },
   { path: '/policy/INC-2026-0820-VOBL-01', name: 'Policy', expect: [] },
   { path: '/sources', name: 'Provenance ledger', expect: [] },

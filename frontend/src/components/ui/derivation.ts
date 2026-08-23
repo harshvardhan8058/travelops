@@ -37,6 +37,7 @@ import type {
   PassengerImpact,
   Provenance,
   RiskEvidence,
+  RiskFactor,
   WeatherObservation,
   WhatIfDelta,
 } from '@/api/types';
@@ -975,5 +976,303 @@ export function planTotalDerivation(args: {
           'GET /incident-groups/{ref}/assurance returns per-plan counts and no group total, so this figure is added up here from the plans it returned rather than read from one field.',
       },
     ],
+  };
+}
+
+// ---------------------------------------------------------------- agent operations
+
+/**
+ * One step in the agent ledger: what it intends, what the gate said, what ran.
+ *
+ * The point of this popover is that the three facts come from three different endpoints and are
+ * correlated on `plan_task_id`. An operator looking at a step that the gate authorised but which
+ * never executed needs to see that the join is real and which record is missing, not be told a
+ * status word.
+ */
+export function agentStepDerivation(args: {
+  actionType: string;
+  taskId: number;
+  taskOrder: number;
+  incidentReference: string;
+  taskState: string;
+  decision: string | null;
+  riskTier: string | null;
+  evaluationId: number | null;
+  actionId: number | null;
+  actionStatus: string | null;
+  configVersion: string | null;
+  configHash: string | null;
+  evaluatedAt?: string | null;
+  executedAt?: string | null;
+}): Derivation {
+  const inputs: DerivationInput[] = [
+    {
+      label: 'planned task',
+      value: `#${args.taskOrder} ${args.actionType}`,
+      detail: `plan.tasks[] on GET /incidents/${args.incidentReference}, plan_task id ${args.taskId}, state ${args.taskState}`,
+    },
+  ];
+
+  if (args.evaluationId !== null) {
+    inputs.push({
+      label: 'gate decision',
+      value: args.decision ?? 'not recorded',
+      detail:
+        `evaluations[] on GET /incidents/${args.incidentReference}/assurance, evaluation ${args.evaluationId}` +
+        (args.riskTier ? `, risk tier ${args.riskTier}` : ''),
+    });
+  }
+
+  if (args.actionId !== null) {
+    inputs.push({
+      label: 'execution record',
+      value: args.actionStatus ?? 'not recorded',
+      detail: `actions[] on GET /incidents/${args.incidentReference}, action ${args.actionId}`,
+    });
+  }
+
+  const absences: DerivationAbsence[] = [];
+  if (args.evaluationId === null) {
+    absences.push({
+      label: 'gate decision',
+      detail:
+        'No evaluation names this plan task yet, so nothing has authorised it. An unevaluated task is not an approved one.',
+    });
+  }
+  if (args.actionId === null) {
+    absences.push({
+      label: 'execution record',
+      detail:
+        'No action names this plan task, so no tool has been invoked for it and there is no outcome to report.',
+    });
+  }
+
+  return {
+    title: `${args.actionType} · step ${args.taskOrder}`,
+    subtitle: 'joined across three endpoints on plan_task_id',
+    inputs,
+    rule: {
+      kind: 'config',
+      id: 'plan task joined to its assurance evaluation and its action',
+      version: args.configVersion ?? undefined,
+      refs: args.configHash ? [`config hash ${args.configHash}`] : undefined,
+      note: 'Where more than one evaluation or action names the same task, the latest by the timestamp the server recorded wins, with the row id as the tie-break. Nothing is chosen by how complete a record looks.',
+    },
+    when: [
+      { label: 'evaluated', at: args.evaluatedAt ?? undefined },
+      { label: 'executed', at: args.executedAt ?? undefined },
+    ],
+    absences: absences.length > 0 ? absences : undefined,
+  };
+}
+
+/**
+ * How many steps fall in one arm of the gate's partition.
+ *
+ * An array length over a partition the server decided, which is the only aggregate this console
+ * computes. It names the config identity because "three may run unattended" means nothing without
+ * the semantics that decided it.
+ */
+export function autonomyDerivation(args: {
+  label: string;
+  decision: string;
+  count: number;
+  totalSteps: number;
+  configVersion: string;
+  configHash: string;
+}): Derivation {
+  return {
+    title: `${args.label}: ${args.count}`,
+    subtitle: `steps whose recorded decision is ${args.decision}`,
+    inputs: [
+      {
+        label: 'source',
+        value: `${args.count} of ${args.totalSteps}`,
+        detail:
+          'length of the evaluations from GET /incidents/{ref}/assurance filtered on decision, matched to plan tasks by plan_task_id',
+      },
+    ],
+    rule: {
+      kind: 'config',
+      id: 'assurance decision, as recorded per task',
+      version: args.configVersion,
+      refs: [`config hash ${args.configHash}`],
+      note: 'The gate decides this server-side and the console only counts the result. No decision is re-derived here, and a task with no evaluation is never counted as permitted.',
+    },
+    absences: [
+      {
+        label: 'aggregate assurance score',
+        detail:
+          'No endpoint returns one, at task, plan or group level. The gate is a fail-closed ordered sequence of named checks, so an average of them would be a fiction.',
+      },
+    ],
+  };
+}
+
+/**
+ * Frames attributed to one kind of actor.
+ *
+ * This is the figure that keeps an autonomous console honest: it shows, from the replay contract
+ * itself, how much of the work a person did versus the orchestrator and the services.
+ */
+export function actorActivityDerivation(args: {
+  actorKind: string;
+  frames: number;
+  frameCount: number;
+  actors: string[];
+  scope: string;
+}): Derivation {
+  return {
+    title: `${args.actorKind}: ${args.frames} frame${args.frames === 1 ? '' : 's'}`,
+    subtitle: `of ${args.frameCount} recorded for ${args.scope}`,
+    inputs: [
+      {
+        label: 'source',
+        value: String(args.frames),
+        detail: 'length of frames[] on GET /incidents/{ref}/replay filtered on actor_kind',
+      },
+      {
+        label: 'actors',
+        value: args.actors.length > 0 ? args.actors.join(', ') : 'not recorded',
+        detail: 'distinct frames[].actor values behind this kind',
+      },
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'actor_kind, as published by the replay contract',
+      note: 'The backend maps every actor to one of orchestrator, human, provider, service or agent. The console groups on that field and never guesses a kind from the actor name.',
+    },
+  };
+}
+
+/**
+ * A recorded tool output field.
+ *
+ * The payload is explicitly service-shaped and version-gated, so this states the schema version it
+ * was read under and does not claim the field means anything beyond what the service wrote.
+ */
+export function toolOutputDerivation(args: {
+  key: string;
+  display: string | null;
+  kind: string;
+  actionId: number;
+  incidentReference: string;
+  schemaVersion: number;
+}): Derivation {
+  return {
+    title: `payload.${args.key}`,
+    subtitle: `recorded ${args.kind} on action ${args.actionId}`,
+    inputs: [
+      {
+        label: `payload.${args.key}`,
+        value: args.display ?? 'not recorded',
+        detail: `verbatim from GET /incidents/${args.incidentReference}/actions/${args.actionId}, payload schema version ${args.schemaVersion}`,
+      },
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'service payload, reported as recorded',
+      version: `payload schema v${args.schemaVersion}`,
+      note: 'The payload is the service\u2019s own record and its shape belongs to the service. A collection reports how many entries it holds; nothing here interprets a field or combines two of them.',
+    },
+    absences:
+      args.display === null
+        ? [
+            {
+              label: `payload.${args.key}`,
+              detail:
+                'The service recorded this key with no value. That is an absence, not a zero, and no figure is substituted for it.',
+            },
+          ]
+        : undefined,
+  };
+}
+
+/**
+ * One rule's contribution to a risk index.
+ *
+ * The index is only defensible if each factor can be opened and read: what was observed, what the
+ * threshold was, and how many points it added. Without that the number is an assertion.
+ */
+export function riskFactorDerivation(factor: RiskFactor, ruleVersion: string): Derivation {
+  return {
+    title: `${factor.name.replace(/_/g, ' ')} contribution`,
+    subtitle: `under ${ruleVersion}`,
+    inputs: [
+      {
+        label: 'observed',
+        value: factor.value === '' ? 'not recorded' : factor.value,
+        detail: factor.detail ?? undefined,
+      },
+      { label: 'threshold', value: factor.threshold ?? 'not recorded' },
+      {
+        label: 'points',
+        value:
+          factor.points === null || factor.points === undefined
+            ? 'not recorded'
+            : String(factor.points),
+        detail: 'evidence.risk.factors[].points on GET /incidents/{ref}',
+      },
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'delay risk factor',
+      version: ruleVersion,
+      note: 'Thresholds are configuration held in business_constraint, not a fitted model. The index is the total the service recorded; this console does not re-add the points.',
+    },
+    caveat: RISK_CAVEAT,
+  };
+}
+
+/**
+ * The one field where a model could report its own confidence — and why it is empty.
+ *
+ * Kept on screen rather than hidden because a missing row reads as "no self-assessment was
+ * needed", when the truth is that no model produced this plan at all.
+ */
+export function modelSelfReportDerivation(
+  plan: {
+    generator?: string | null;
+    prompt_version?: string | null;
+    model_self_report?: number | null;
+  } | null,
+): Derivation {
+  const value = plan?.model_self_report;
+  const recorded = value !== null && value !== undefined;
+
+  return {
+    title: 'Model self-report',
+    subtitle: 'diagnostic metadata on the plan contract',
+    inputs: [
+      {
+        label: 'plan.model_self_report',
+        value: recorded ? String(value) : 'not recorded',
+        detail: 'GET /incidents/{ref} → plan.model_self_report, an integer 0..100 when present',
+      },
+      {
+        label: 'plan.generator',
+        value: plan?.generator ?? 'not recorded',
+        detail: 'which producer wrote this plan',
+      },
+      {
+        label: 'plan.prompt_version',
+        value: plan?.prompt_version ?? 'not recorded',
+        detail: 'set only when a prompted model produced the plan',
+      },
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'diagnostic only, never a control input',
+      note: 'Even when a model populates this, the gate does not read it. A self-assessed number is not evidence, and no decision in this system is permitted to depend on one.',
+    },
+    absences: recorded
+      ? undefined
+      : [
+          {
+            label: 'model self-report',
+            detail:
+              'Absent because a deterministic playbook produced this plan rather than a model. Nothing is substituted for it.',
+          },
+        ],
   };
 }
