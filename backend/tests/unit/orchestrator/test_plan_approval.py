@@ -13,6 +13,8 @@ Owner: Stream A. Coverage rules: Stream B.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.assurance.approval import (
@@ -207,3 +209,46 @@ class TestPolicySwitches:
         )
         assert check.permitted is False
         assert check.refusal is ApprovalRefusal.TIER_NOT_COVERED
+
+
+class TestOnePlanHashOfRecord:
+    """An approval must be bound to the hash the plan row itself stores.
+
+    Two hash functions exist — `db.plan_identity.compute_plan_hash` behind `plan.plan_hash`, and
+    `PlanUnderReview.hash()` behind `PlanAssuranceResult.plan_hash`. They are different algorithms
+    over different fields. Persisting the second into `plan_approval.plan_hash` made "a re-plan
+    voids the approval" unenforceable: the two stored values could never be equal, so the comparison
+    meant to catch a changed task set had nothing to compare.
+    """
+
+    def test_the_stored_plan_hash_wins(self):
+        from app.orchestrator.plan_approval import _hash_of_record
+
+        plan = SimpleNamespace(plan_hash="c" * 32)
+        result = SimpleNamespace(plan_hash="d" * 16)
+        assert _hash_of_record(plan, result) == "c" * 32
+
+    def test_a_plan_predating_the_column_falls_back_rather_than_crashing(self):
+        """Conservative direction: an approval bound to the fallback cannot outlive a re-plan."""
+        from app.orchestrator.plan_approval import _hash_of_record
+
+        plan = SimpleNamespace(plan_hash=None)
+        result = SimpleNamespace(plan_hash="d" * 16)
+        assert _hash_of_record(plan, result) == "d" * 16
+
+    def test_the_two_hash_functions_really_do_differ(self):
+        """Guards the premise. If these ever converge, the fix above is still correct but the
+        reasoning behind it has changed, and someone should know."""
+        from app.assurance.plan_contract import PlanUnderReview
+        from app.db.plan_identity import compute_plan_hash
+
+        task = _outcome(tier=RiskTier.low)
+        contract = PlanUnderReview(group_reference="GRP-X", tasks=[task]).hash()
+        identity = compute_plan_hash(
+            [{"action_type": task.action_type, "target_ref": None, "risk_tier": "low"}],
+            generator="fallback_playbook",
+            prompt_version="none",
+        )
+        assert contract != identity
+        assert len(identity) == 32
+        assert len(contract) == 16
