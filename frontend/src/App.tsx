@@ -24,13 +24,15 @@ import { DecisionTimeline } from '@/features/timeline/DecisionTimeline';
 import { GroupApprovalQueue } from '@/features/assurance/GroupApprovalQueue';
 import { PlanComparison } from '@/features/plans/PlanComparison';
 import { StreamPlaceholder } from '@/features/placeholder/StreamPlaceholder';
+import { ImpactExplorer } from '@/features/impact/ImpactExplorer';
+import { WhatIfScreen } from '@/features/cascade/WhatIfScreen';
 
 /** Used only when the current route names no incident, e.g. the Command Center. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
 function useRouteIncidentId(fallback: string): string {
   const { pathname } = useLocation();
-  const match = /^\/(?:incidents|policy|replay|reports|plans)\/([^/]+)/.exec(pathname);
+  const match = /^\/(?:incidents|policy|replay|reports|plans|impact)\/([^/]+)/.exec(pathname);
   const captured = match?.[1];
   return captured ? decodeURIComponent(captured) : fallback;
 }
@@ -73,6 +75,13 @@ export function App() {
         <Route path="/incidents/:incidentId" element={<RecoveryWorkspace />} />
         <Route path="/policy/:incidentId" element={<PolicyScreen />} />
         <Route path="/replay/:incidentId" element={<ReplayScreen />} />
+        <Route path="/impact/:incidentId" element={<ImpactExplorer />} />
+        {/*
+         * What-If has a route of its own as well as its panel inside the Cascade Explorer. It is a
+         * question an operator asks deliberately, and a surface it can be sent to is the
+         * difference between that and something found by scrolling.
+         */}
+        <Route path="/what-if/:groupId" element={<WhatIfScreen />} />
         <Route path="/sources" element={<SourcesLedger />} />
         {/*
          * `/assurance` and `/plans/:id` are real as of Phase 2: the group-scoped assurance endpoint

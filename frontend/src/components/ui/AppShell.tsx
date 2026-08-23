@@ -11,6 +11,7 @@
 import {
   Database,
   FileText,
+  FlaskConical,
   GitFork,
   History,
   LayoutDashboard,
@@ -18,6 +19,7 @@ import {
   Scale,
   GitCompare,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
@@ -30,7 +32,9 @@ const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Ops Board' },
   { to: '/cascade/current', icon: GitFork, label: 'Cascade' },
   { to: '/incidents/INC-2026-0820-VOBL-01', icon: ListChecks, label: 'Recovery workspace' },
+  { to: '/impact/INC-2026-0820-VOBL-01', icon: Users, label: 'Impact' },
   { to: '/assurance', icon: ShieldCheck, label: 'Approval queue' },
+  { to: '/what-if/current', icon: FlaskConical, label: 'What-if' },
   { to: '/plans/INC-2026-0820-VOBL-01', icon: GitCompare, label: 'Plan comparison' },
   { to: '/policy/INC-2026-0820-VOBL-01', icon: Scale, label: 'Policy & citations' },
   { to: '/replay/INC-2026-0820-VOBL-01', icon: History, label: 'Replay' },
