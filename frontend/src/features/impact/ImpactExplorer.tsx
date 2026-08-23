@@ -45,6 +45,7 @@ import { Metric, MetricTile } from '@/components/ui/Metric';
 import { FilterChips } from '@/components/ui/Metric';
 import { impactCountDerivation, impactFieldDerivation } from '@/components/ui/derivation';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
+import { PassengerPriorityPanel } from './PassengerPriorityPanel';
 import {
   connectionImpact,
   crewImpact,
@@ -54,11 +55,12 @@ import {
   type ConnectionRow,
 } from './payloads';
 
-type Tab = 'connections' | 'passengers' | 'crew' | 'hotels';
+type Tab = 'connections' | 'passengers' | 'priorities' | 'crew' | 'hotels';
 
 const TAB_LABEL: Record<Tab, string> = {
   connections: 'Connections',
   passengers: 'Passengers',
+  priorities: 'Recorded priorities',
   crew: 'Crew rotations',
   hotels: 'Hotels',
 };
@@ -137,8 +139,16 @@ export function ImpactExplorer() {
     );
   }
 
+  /**
+   * `priorities` is offered whenever the incident belongs to a group, because the ranking is written
+   * at group scope by the orchestrator rather than by any one action — so unlike the tabs above, its
+   * availability does not depend on which actions have run. The panel states for itself when nothing
+   * has been recorded yet.
+   */
+  const groupReference = incidentQuery.data.group_reference ?? null;
   const available: Tab[] = [
     ...(connections ? (['connections', 'passengers'] as Tab[]) : []),
+    ...(groupReference ? (['priorities'] as Tab[]) : []),
     ...(crew ? (['crew'] as Tab[]) : []),
     ...(hotels ? (['hotels'] as Tab[]) : []),
   ];
@@ -295,9 +305,14 @@ export function ImpactExplorer() {
                     ? connections?.atRisk.length
                     : key === 'passengers'
                       ? connections?.atRisk.length
-                      : key === 'crew'
-                        ? crew?.impacts.length
-                        : hotels?.properties.length,
+                      : key === 'priorities'
+                        ? // The count comes from the panel's own query, not from here. Left
+                          // undefined rather than guessed: a chip count this screen invented
+                          // could disagree with the table beneath it.
+                          undefined
+                        : key === 'crew'
+                          ? crew?.impacts.length
+                          : hotels?.properties.length,
               }))}
             />
           </div>
@@ -306,6 +321,9 @@ export function ImpactExplorer() {
 
       {active === 'connections' && connections && <ConnectionTable impact={connections} />}
       {active === 'passengers' && connections && <PassengerTable impact={connections} />}
+      {active === 'priorities' && groupReference && (
+        <PassengerPriorityPanel groupRef={groupReference} />
+      )}
       {active === 'crew' && crew && <CrewTable impact={crew} />}
       {active === 'hotels' && hotels && <HotelTable impact={hotels} />}
     </div>

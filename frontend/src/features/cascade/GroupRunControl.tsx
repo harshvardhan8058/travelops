@@ -42,7 +42,8 @@ export function GroupRunControl({
       ['incident-group'],
       ['incident-groups'],
       ['group-assurance'],
-      ['group-replay'],
+      ['replay'],
+      ['group-impacts'],
       ['flights'],
     ]) {
       void queryClient.invalidateQueries({ queryKey: key });

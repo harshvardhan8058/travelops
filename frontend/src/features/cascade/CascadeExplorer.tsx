@@ -27,7 +27,7 @@ import { Metric, MetricTile } from '@/components/ui/Metric';
 import { countDerivation } from '@/components/ui/derivation';
 import { GraphEdge, GraphLegend, GraphNode, GraphSurface } from '@/components/ui/Graph';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
-import { buildCascadeLayout, layoutServerGraph, type LayoutFlight } from './layout';
+import { layoutServerGraph } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
 import { GroupRunControl } from './GroupRunControl';
 import { WhatIfPanel } from './WhatIfPanel';
@@ -57,6 +57,28 @@ function CascadeSkeleton() {
   );
 }
 
+/**
+ * What the graph pane shows when the backend has projected nothing.
+ *
+ * Not a spinner and not a placeholder graph. The projection is built from recorded actions and
+ * predictions, so "no graph" means "nothing has been assessed yet" — a true operational fact, and
+ * one an operator can act on by running the group. Drawing a derived picture here instead would
+ * put edges on a wall display that no row supports, which is the failure this screen exists to
+ * avoid. The rollup tiles above and the pairing table below still carry every record there is.
+ */
+function GraphNotProjected() {
+  return (
+    <div className="flex h-[440px] flex-col items-center justify-center gap-2 px-6 text-center">
+      <p className="text-body text-fg">No cascade has been projected for this group yet.</p>
+      <p className="max-w-[52ch] text-caption text-fg-muted">
+        The graph is projected server-side from recorded actions and predictions, and this client
+        derives none of it. Until the group is advanced there are no findings to draw. Every figure
+        above and the pairing table below remain accurate.
+      </p>
+    </div>
+  );
+}
+
 export function CascadeExplorer() {
   const { groupId = 'current' } = useParams();
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -72,28 +94,17 @@ export function CascadeExplorer() {
 
   const group = groupQuery.data;
 
-  const layout = useMemo(() => {
-    if (!group) return null;
-    // The server's projection wins whenever it is present. It carries booking and hotel nodes
-    // that cannot be reconstructed from `flights` and `crew_pairings`, and an evidence id on
-    // every edge — so deriving a graph here when the backend has already projected one would
-    // mean drawing edges nothing recorded.
-    if (group.graph) return layoutServerGraph(group.graph, 920);
-
-    // Fallback for the committed fixture, which predates the projection.
-    const flights = (group.flights as unknown as LayoutFlight[]) ?? [];
-    return buildCascadeLayout(
-      {
-        rootCause: group.root_cause,
-        airportIcao: group.airport_icao,
-        flights,
-        pairings: group.crew_pairings,
-      },
-      920,
-    );
-  }, [group]);
-  /** True when the picture is the backend's, which is what makes every edge citable. */
-  const graphIsProjected = Boolean(group?.graph);
+  /**
+   * The server's projection is the only graph source. There is no client-side fallback, and that
+   * is a deliberate removal rather than an omission: a graph derived here from `flights` and
+   * `crew_pairings` could name no evidence for any edge and could not represent bookings or hotels
+   * at all, so it drew a smaller cascade that looked complete. When the backend has projected
+   * nothing, this screen says so — see `<GraphNotProjected />` below.
+   */
+  const layout = useMemo(
+    () => (group?.graph ? layoutServerGraph(group.graph, 920) : null),
+    [group],
+  );
 
   const nodes = layout?.nodes ?? [];
   const flightNodeCount = nodes.filter((node) => node.kind === 'flight').length;
@@ -104,7 +115,7 @@ export function CascadeExplorer() {
 
   if (groupQuery.isLoading) return <CascadeSkeleton />;
 
-  if (groupQuery.error || !group || !layout) {
+  if (groupQuery.error || !group) {
     const error = groupQuery.error instanceof ApiError ? groupQuery.error : null;
     return (
       <ErrorState
@@ -191,82 +202,91 @@ export function CascadeExplorer() {
           <Panel
             title="Cascade"
             actions={
-              <span className="text-caption text-fg-muted">
-                {layout.nodes.length} nodes · {layout.edges.length} edges
-              </span>
+              layout ? (
+                <span className="text-caption text-fg-muted">
+                  {layout.nodes.length} nodes · {layout.edges.length} edges
+                </span>
+              ) : null
             }
           >
-            {/* The graph is an enhancement; the tables below carry the same records. */}
-            <div
-              ref={keyboard.containerRef as React.RefObject<HTMLDivElement>}
-              onKeyDown={keyboard.onKeyDown}
-              className="px-2 py-2"
-            >
-              <GraphSurface
-                width={layout.width}
-                height={layout.height}
-                ariaLabel={`Cascade for ${group.reference}: ${layout.nodes.length} nodes across trigger, flights and crew pairings`}
-              >
-                {layout.edges.map((edge) => (
-                  <GraphEdge
-                    key={edge.id}
-                    edge={edge}
-                    emphasis={emphasisFor(edge.id, edge.mechanism)}
-                  />
-                ))}
-                {layout.nodes.map((node, index) => (
-                  <GraphNode
-                    key={node.id}
-                    node={node}
-                    selected={node.id === selectedNode}
-                    dimmed={Boolean(selectedNode) && node.id !== selectedNode}
-                    /* Captions for the trigger and the flights — the spine of the story. The
-                     * consequence layer is captioned on selection only: 30-odd overlapping labels
-                     * is noise that looks like data. */
-                    showLabel={node.kind === 'event' || node.kind === 'flight'}
-                    /* The route and delay only fit when the flight row is short. Eight of them
-                     * ran into one another; both facts are in the hop expansion and the table. */
-                    showSublabel={
-                      node.kind === 'event' || flightNodeCount <= 5 || selectedNode === node.id
-                    }
-                    onSelect={() => {
-                      setSelectedNode(node.id === selectedNode ? null : node.id);
-                      keyboard.setIndex(index);
-                    }}
-                    itemProps={keyboard.itemProps(index)}
-                  />
-                ))}
-              </GraphSurface>
-            </div>
-            <div className="border-t border-border-subtle">
-              <GraphLegend
-                items={Object.entries(group.mechanism_legend ?? {}).map(([label, description]) => ({
-                  label: label.replace(/_/g, ' '),
-                  description,
-                }))}
-              />
-            </div>
-            {graphIsProjected && group.graph && (
-              /*
-               * Where the picture came from, stated on the picture. Completeness is a COUNT of
-               * assessed flights, never a confidence score — the server has no basis for a
-               * probability and neither has this component.
-               */
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
-                <span>
-                  projected by <MonoValue muted>{group.graph.rule_version}</MonoValue> from{' '}
-                  <MonoValue muted>{group.graph.source_action_ids.length}</MonoValue> actions and{' '}
-                  <MonoValue muted>{group.graph.source_prediction_ids.length}</MonoValue>{' '}
-                  predictions
-                </span>
-                <span
-                  className={
-                    group.graph.completeness.is_complete ? 'text-fg-muted' : 'text-state-warn'
-                  }
+            {!layout && <GraphNotProjected />}
+            {layout && (
+              <>
+                {/* The graph is an enhancement; the tables below carry the same records. */}
+                <div
+                  ref={keyboard.containerRef as React.RefObject<HTMLDivElement>}
+                  onKeyDown={keyboard.onKeyDown}
+                  className="px-2 py-2"
                 >
-                  {group.graph.completeness.note}
-                </span>
-              </div>
+                  <GraphSurface
+                    width={layout.width}
+                    height={layout.height}
+                    ariaLabel={`Cascade for ${group.reference}: ${layout.nodes.length} nodes across trigger, flights and crew pairings`}
+                  >
+                    {layout.edges.map((edge) => (
+                      <GraphEdge
+                        key={edge.id}
+                        edge={edge}
+                        emphasis={emphasisFor(edge.id, edge.mechanism)}
+                      />
+                    ))}
+                    {layout.nodes.map((node, index) => (
+                      <GraphNode
+                        key={node.id}
+                        node={node}
+                        selected={node.id === selectedNode}
+                        dimmed={Boolean(selectedNode) && node.id !== selectedNode}
+                        /* Captions for the trigger and the flights — the spine of the story. The
+                         * consequence layer is captioned on selection only: 30-odd overlapping labels
+                         * is noise that looks like data. */
+                        showLabel={node.kind === 'event' || node.kind === 'flight'}
+                        /* The route and delay only fit when the flight row is short. Eight of them
+                         * ran into one another; both facts are in the hop expansion and the table. */
+                        showSublabel={
+                          node.kind === 'event' || flightNodeCount <= 5 || selectedNode === node.id
+                        }
+                        onSelect={() => {
+                          setSelectedNode(node.id === selectedNode ? null : node.id);
+                          keyboard.setIndex(index);
+                        }}
+                        itemProps={keyboard.itemProps(index)}
+                      />
+                    ))}
+                  </GraphSurface>
+                </div>
+                <div className="border-t border-border-subtle">
+                  <GraphLegend
+                    items={Object.entries(group.mechanism_legend ?? {}).map(
+                      ([label, description]) => ({
+                        label: label.replace(/_/g, ' '),
+                        description,
+                      }),
+                    )}
+                  />
+                </div>
+                {group.graph && (
+                  /*
+                   * Where the picture came from, stated on the picture. Completeness is a COUNT of
+                   * assessed flights, never a confidence score — the server has no basis for a
+                   * probability and neither has this component.
+                   */
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
+                    <span>
+                      projected by <MonoValue muted>{group.graph.rule_version}</MonoValue> from{' '}
+                      <MonoValue muted>{group.graph.source_action_ids.length}</MonoValue> actions
+                      and <MonoValue muted>{group.graph.source_prediction_ids.length}</MonoValue>{' '}
+                      predictions
+                    </span>
+                    <span
+                      className={
+                        group.graph.completeness.is_complete ? 'text-fg-muted' : 'text-state-warn'
+                      }
+                    >
+                      {group.graph.completeness.note}
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </Panel>
 

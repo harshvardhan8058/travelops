@@ -32,6 +32,9 @@ const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
 function useRouteIncidentId(fallback: string): string {
   const { pathname } = useLocation();
+  // `impact` joins the list because that screen is incident-scoped too. There is no `/replay/group`
+  // route: Replay carries its own incident/group toggle, and a second entry path to the same screen
+  // would be the duplicate seam this integration exists to avoid.
   const match = /^\/(?:incidents|policy|replay|reports|plans|impact)\/([^/]+)/.exec(pathname);
   const captured = match?.[1];
   return captured ? decodeURIComponent(captured) : fallback;

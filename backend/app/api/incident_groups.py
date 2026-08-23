@@ -38,14 +38,19 @@ from app.orchestrator.plan_assurance import PlanAssuranceService, load_plan_conf
 from app.schemas.cascade import (
     BlastRadiusOut,
     CascadeGraphOut,
+    GroupImpactResponse,
     GroupMemberOut,
     GroupRollups,
     GroupRunResponse,
     GroupSummary,
+    ImpactCohortOut,
+    ImpactFactorOut,
     IncidentGroupDetailResponse,
     IncidentGroupListResponse,
+    PassengerImpactOut,
     ProvenanceBlock,
     RollupStatus,
+    UnassessedFactorOut,
     WhatIfDeltaOut,
     WhatIfLeverRejectionOut,
     WhatIfResponse,
@@ -65,6 +70,7 @@ from app.services import blast_radius as blast_radius_service
 from app.services import cascade_graph as graph_service
 from app.services import what_if as what_if_service
 from app.services.hotel import group_hotel_totals
+from app.services.passenger_impact import UNASSESSED_FACTORS, load_group_impacts
 
 router = APIRouter(tags=["cascade"])
 log = get_logger(__name__)
@@ -366,6 +372,123 @@ async def get_cascade_graph(
     rollup = await cascade_rollup(session, group_id=group.id)
     graph = await graph_service.project_graph(session, group_id=group.id)
     return CascadeGraphOut(**graph_service.graph_payload(graph, rollup))
+
+
+@router.get(
+    "/incident-groups/{group_ref}/impacts",
+    response_model=GroupImpactResponse,
+    summary="Per-passenger recorded priorities for the group",
+)
+async def get_group_impacts(
+    group_ref: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> GroupImpactResponse:
+    """Read `passenger_impact`. Reads rows; derives nothing and authorises nothing.
+
+    The banding and the counts are built in `services/passenger_impact`, not here: aggregating in
+    the transport layer is what `test_phase2_guards` forbids, because a figure computed next to a
+    response model is a figure nobody can trace back to a row.
+
+    `unassessed_factors` is the part that matters. Two of the ruleset's factors — whether an onward
+    option remains today, and whether a passenger is stranded mid-itinerary — are Rebooking's
+    findings and nothing has established them. They are false in the rows because that is all the
+    record supports, and they are named here so the console can render "not established" rather than
+    "no". The difference is the difference between "nobody needs rebooking" and "nobody has looked".
+    """
+    group = await _resolve(session, group_ref)
+    recorded = await load_group_impacts(session, incident_group_id=group.id, limit=limit)
+
+    # When the ranking has never run there is no assessment to describe, and saying so beats
+    # returning zeros that read as "every passenger is fine".
+    if not recorded.passengers_assessed:
+        return GroupImpactResponse(
+            group_reference=group.reference,
+            rule_version="",
+            ruleset_hash="",
+            computed_at=None,
+            passengers_assessed=0,
+            unassessed_factors=_unassessed_factors(),
+            note=(
+                "No passenger priorities are recorded for this group yet. They are derived when "
+                "the group is advanced, from connection findings already persisted."
+            ),
+        )
+
+    return GroupImpactResponse(
+        group_reference=group.reference,
+        rule_version=recorded.rule_version,
+        ruleset_hash=recorded.ruleset_hash,
+        computed_at=await _impacts_recorded_at(session, group.reference),
+        passengers_assessed=recorded.passengers_assessed,
+        cohorts=[
+            ImpactCohortOut(
+                band=cohort.band.value,
+                passenger_count=cohort.passenger_count,
+                lowest_index=cohort.lowest_index,
+                highest_index=cohort.highest_index,
+                factor_counts=cohort.factor_counts,
+                booking_ids=cohort.booking_ids,
+            )
+            for cohort in recorded.cohorts
+        ],
+        passengers=[
+            PassengerImpactOut(
+                passenger_id=record.passenger_id,
+                passenger_reference=record.passenger_reference,
+                booking_id=record.booking_id,
+                pnr=record.pnr,
+                priority_index=record.priority_index,
+                priority_band=record.priority_band,
+                factors=[
+                    ImpactFactorOut(
+                        factor=str(entry.get("factor", "")),
+                        weight=int(entry.get("weight", 0)),
+                        source=str(entry.get("source", "")),
+                    )
+                    for entry in record.factors
+                ],
+                rule_version=record.rule_version,
+                ruleset_hash=record.ruleset_hash,
+            )
+            for record in recorded.passengers
+        ],
+        returned=len(recorded.passengers),
+        unassessed_factors=_unassessed_factors(),
+        note=(
+            "A constraint ranking read from persisted rows: who has the fewest remaining options, "
+            "not who matters more. It reserves nothing and authorises nothing. No seat "
+            "availability is asserted anywhere, because the schema carries none."
+        ),
+    )
+
+
+def _unassessed_factors() -> list[UnassessedFactorOut]:
+    """Name the factors nothing has established, so a client never renders them as false."""
+    return [
+        UnassessedFactorOut(factor=factor, reason=reason, established_by=established_by)
+        for factor, reason, established_by in UNASSESSED_FACTORS
+    ]
+
+
+async def _impacts_recorded_at(session: AsyncSession, group_reference: str) -> datetime | None:
+    """When the ranking was last recorded, taken from the group's own journal entry.
+
+    `passenger_impact` carries no timestamp column, and adding one would mean a migration for a
+    display convenience. The journal already records the moment, so it is read from there rather
+    than invented — a `computed_at` of `now()` would be a lie about when the figure was true.
+    """
+    stmt = (
+        select(DecisionLog.occurred_at)
+        .where(
+            DecisionLog.incident_id.is_(None),
+            DecisionLog.correlation_id == group_reference,
+            DecisionLog.event_type == "PASSENGER_IMPACT_RECORDED",
+        )
+        .order_by(DecisionLog.occurred_at.desc(), DecisionLog.id.desc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalars().first()
 
 
 # ---------------------------------------------------------------------------------- run

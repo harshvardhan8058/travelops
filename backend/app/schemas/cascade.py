@@ -311,3 +311,98 @@ class WhatIfResponse(BaseModel):
     levers_available: list[str] = Field(default_factory=list)
     levers_rejected: list[WhatIfLeverRejectionOut] = Field(default_factory=list)
     deltas: list[WhatIfDeltaOut] = Field(default_factory=list)
+
+
+# ------------------------------------------------------------------ per-entity impact
+
+
+class ImpactFactorOut(BaseModel):
+    """One named reason a passenger scored where they did.
+
+    Every point in `priority_index` is attributable to one of these. A score without its factors is
+    a number nobody in an operations room can argue with, which is worse than no score.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    factor: str
+    weight: int
+    #: The column or recorded finding the factor was read from.
+    source: str
+
+
+class PassengerImpactOut(BaseModel):
+    """One passenger's recorded priority. A constraint ranking, not a probability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    passenger_id: int
+    passenger_reference: str
+    booking_id: int
+    pnr: str
+    priority_index: int
+    priority_band: str
+    factors: list[ImpactFactorOut] = Field(default_factory=list)
+    rule_version: str
+    ruleset_hash: str
+
+
+class ImpactCohortOut(BaseModel):
+    """A band of passengers needing the same kind of handling."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    band: str
+    passenger_count: int
+    lowest_index: int
+    highest_index: int
+    #: How many passengers in this band carry each factor. The operational shopping list.
+    factor_counts: dict[str, int] = Field(default_factory=dict)
+    booking_ids: list[int] = Field(default_factory=list)
+
+
+class UnassessedFactorOut(BaseModel):
+    """A factor the ruleset declares that no service has established yet.
+
+    This is the distinction the whole surface turns on. A factor that is **absent because its
+    input has not been produced** is not the same as a factor that is **false**, and a UI that
+    renders both as "no" tells an operator that nobody needs rebooking when nobody has looked.
+
+    `no_onward_option_today` and `stranded_mid_itinerary` are Rebooking's findings. Until Rebooking
+    runs they are unestablished, and they are named here rather than silently defaulted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    factor: str
+    reason: str
+    #: The service that would establish it.
+    established_by: str
+
+
+class GroupImpactResponse(BaseModel):
+    """Per-entity impact for a disruption, read from `passenger_impact`.
+
+    Derived at group scope alongside the cascade snapshot, because a ranking over persisted rows has
+    no external effect — the same reason delay risk is not gated. It authorises nothing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    group_reference: str
+    rule_version: str
+    ruleset_hash: str
+    computed_at: datetime | None = None
+
+    passengers_assessed: int
+    cohorts: list[ImpactCohortOut] = Field(default_factory=list)
+    #: Highest priority first. Capped, with `passengers_assessed` carrying the true total.
+    passengers: list[PassengerImpactOut] = Field(default_factory=list)
+    returned: int = 0
+
+    #: Factors the ruleset declares that nothing has established yet. Never rendered as `false`.
+    unassessed_factors: list[UnassessedFactorOut] = Field(default_factory=list)
+
+    #: Type-level statement of what this is, mirroring the cohort contract.
+    basis: Literal["persisted_records"] = "persisted_records"
+    note: str

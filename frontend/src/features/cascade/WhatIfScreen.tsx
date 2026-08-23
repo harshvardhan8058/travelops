@@ -63,14 +63,9 @@ export function WhatIfScreen() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      <Panel
-        title="What-if"
-        actions={
-          <MonoValue muted className="text-caption">
-            {groupRef}
-          </MonoValue>
-        }
-      >
+      {/* Untitled deliberately: `WhatIfPanel` below carries the heading, and two panels both
+       * titled "What-if" reads as a rendering fault rather than as a lead-in. */}
+      <Panel>
         <div className="flex items-start gap-2.5 px-3 py-2.5">
           <FlaskConical
             size={15}
@@ -78,12 +73,17 @@ export function WhatIfScreen() {
             className="mt-0.5 shrink-0 text-fg-muted"
             aria-hidden
           />
-          <p className="max-w-[86ch] text-body text-fg-secondary">
-            Substitute a recorded input and ask what the same deterministic rules would have found.
-            This is a re-evaluation of evidence that already exists — not a forecast, not a
-            simulation, and not a model of the network. It writes nothing, and the server states
-            both facts in its own response rather than leaving them to this page to claim.
-          </p>
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="max-w-[86ch] text-body text-fg-secondary">
+              Substitute a recorded input and ask what the same deterministic rules would have
+              found. This is a re-evaluation of evidence that already exists — not a forecast, not a
+              simulation, and not a model of the network. It writes nothing, and the server states
+              both facts in its own response rather than leaving them to this page to claim.
+            </p>
+            <span className="text-caption uppercase text-fg-muted">
+              over the recorded evidence of <MonoValue muted>{groupRef}</MonoValue>
+            </span>
+          </div>
         </div>
       </Panel>
 

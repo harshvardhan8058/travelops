@@ -314,7 +314,19 @@ async def load_passenger_cohort_facts(
 
 
 async def _broken_booking_ids(session: AsyncSession, flight_ids: list[int]) -> set[int]:
-    """Booking ids the recorded Connection findings marked at risk."""
+    """Booking ids the recorded Connection findings marked at risk.
+
+    The **union** of `at_risk[].booking_id`, which is the same shape and the same set operation
+    `cascade_rollup` uses for `connections_at_risk`. That is deliberate and load-bearing: if this
+    read the payload differently, the number of passengers ranked with a broken connection could
+    diverge from the 22 on the headline, and nothing would say which was right.
+
+    Two earlier readings were wrong in a way no component test could catch, because this path only
+    executes once the ranking runs at group scope: the status filter used an `ActionStatus` member
+    that does not exist, and the payload keys (`at_risk_booking_ids`, `broken_booking_ids`) were
+    never emitted by `ConnectionService`. Both failed to *nothing* — every passenger simply scored
+    as having an intact connection, which is a plausible answer rather than an error.
+    """
     from app.models.workflow import Action, Incident, Plan
     from app.models.workflow import PlanTask as PlanTaskRow
 
@@ -326,7 +338,7 @@ async def _broken_booking_ids(session: AsyncSession, flight_ids: list[int]) -> s
             .join(Incident, Incident.id == Plan.incident_id)
             .where(
                 PlanTaskRow.action_type == ActionType.check_connections.value,
-                Action.status == ActionStatus.succeeded,
+                Action.status == ActionStatus.success.value,
                 Incident.flight_id.in_(flight_ids),
             )
         )
@@ -335,12 +347,14 @@ async def _broken_booking_ids(session: AsyncSession, flight_ids: list[int]) -> s
     at_risk: set[int] = set()
     for (payload,) in payloads:
         data = payload if isinstance(payload, dict) else {}
-        for key in ("at_risk_booking_ids", "broken_booking_ids"):
-            for value in data.get(key) or []:
-                try:
-                    at_risk.add(int(value))
-                except (TypeError, ValueError):
-                    continue
+        for item in data.get("at_risk") or []:
+            booking_id = item.get("booking_id") if isinstance(item, dict) else None
+            if booking_id is None:
+                continue
+            try:
+                at_risk.add(int(booking_id))
+            except (TypeError, ValueError):
+                continue
     return at_risk
 
 

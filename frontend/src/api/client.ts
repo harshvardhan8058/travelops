@@ -17,6 +17,7 @@ import type {
   DecisionResponse,
   FlightsResponse,
   GroupAssuranceResponse,
+  GroupImpactResponse,
   GroupRunResponse,
   IncidentDetail,
   IncidentGroupDetail,
@@ -175,6 +176,15 @@ export const api = {
     request<ServerBlastRadius>(`/incident-groups/${groupRef}/blast-radius`),
 
   cascadeGraph: (groupRef: string) => request<CascadeGraph>(`/incident-groups/${groupRef}/graph`),
+
+  /**
+   * Per-passenger recorded priorities. Read from `passenger_impact`; derives nothing here.
+   *
+   * `limit` caps the passenger list only. `passengers_assessed` always carries the true total, so a
+   * truncated list can never be mistaken for the whole population.
+   */
+  groupImpacts: (groupRef: string, limit = 100) =>
+    request<GroupImpactResponse>(`/incident-groups/${groupRef}/impacts?limit=${limit}`),
 
   /** Opens one incident per declared member flight. Idempotent: a repeat opens nothing new. */
   openGroup: (groupRef: string, idempotencyKey?: string) =>

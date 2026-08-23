@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CrewPairingImpact, IncidentGroupDetail } from '@/api/types';
 import { buildRadius } from './radius';
-import { buildCascadeLayout } from './layout';
+import { layoutServerGraph, type ServerGraphInput } from './layout';
 
 const provenance = { kind: 'fixture' as const, provider: 'fixture', source_ref: 'fixture:test' };
 
@@ -92,50 +92,138 @@ describe('buildRadius', () => {
   });
 });
 
-describe('buildCascadeLayout', () => {
-  const input = {
-    rootCause: 'weather',
-    airportIcao: 'VOBL',
-    flights: [
-      { id: 1, flight_number: '6E 2134', route: 'BLR -> DEL', passengers: 174, state: 'executing' },
-      { id: 2, flight_number: '6E 811', route: 'BLR -> BOM', passengers: 158, state: 'assuring' },
+describe('layoutServerGraph', () => {
+  /**
+   * The server projection is the only graph source. These tests replaced a suite that exercised a
+   * client-side derivation from `flights` and `crew_pairings`; that function is deleted, because
+   * it could name no evidence for any edge and could not represent bookings or hotels at all.
+   */
+  const graph: ServerGraphInput = {
+    nodes: [
+      {
+        ref: 'event:VOBL',
+        kind: 'event',
+        label: 'weather',
+        depth: 0,
+        at_risk: true,
+        has_evidence: true,
+      },
+      {
+        ref: 'flight:1',
+        kind: 'flight',
+        label: '6E 2134',
+        depth: 1,
+        at_risk: true,
+        has_evidence: true,
+      },
+      {
+        ref: 'flight:2',
+        kind: 'flight',
+        label: '6E 811',
+        depth: 1,
+        at_risk: true,
+        has_evidence: false,
+      },
+      {
+        ref: 'booking:9',
+        kind: 'booking',
+        label: 'PNR9',
+        depth: 2,
+        at_risk: true,
+        has_evidence: true,
+      },
+      {
+        ref: 'hotel:3',
+        kind: 'hotel',
+        label: 'Hotel 3',
+        depth: 2,
+        at_risk: false,
+        has_evidence: true,
+      },
+      {
+        ref: 'pairing:PAIR-A1',
+        kind: 'pairing',
+        label: 'PAIR-A1',
+        depth: 2,
+        at_risk: true,
+        has_evidence: true,
+      },
     ],
-    pairings: [pairing(), pairing({ pairing_reference: 'PAIR-B1', source_flight: '6E 811' })],
+    edges: [
+      {
+        source_ref: 'event:VOBL',
+        target_ref: 'flight:1',
+        edge_kind: 'root_cause',
+        mechanism: 'weather',
+        depth: 1,
+        derived_from_prediction_id: 12,
+      },
+      {
+        source_ref: 'flight:1',
+        target_ref: 'booking:9',
+        edge_kind: 'connection',
+        mechanism: 'missed_connection',
+        depth: 2,
+        derived_from_action_id: 57,
+      },
+      {
+        source_ref: 'flight:1',
+        target_ref: 'pairing:PAIR-A1',
+        edge_kind: 'crew',
+        mechanism: 'operating',
+        depth: 2,
+        derived_from_action_id: 58,
+      },
+    ],
   };
 
   it('is deterministic: the same payload draws identical positions', () => {
-    expect(buildCascadeLayout(input)).toEqual(buildCascadeLayout(input));
+    expect(layoutServerGraph(graph)).toEqual(layoutServerGraph(graph));
   });
 
-  it('creates one node per record plus the trigger, and no others', () => {
-    const layout = buildCascadeLayout(input);
-    expect(layout.nodes.filter((node) => node.kind === 'event')).toHaveLength(1);
-    expect(layout.nodes.filter((node) => node.kind === 'flight')).toHaveLength(2);
-    expect(layout.nodes.filter((node) => node.kind === 'pairing')).toHaveLength(2);
+  it('positions every node the server sent and drops none', () => {
+    const layout = layoutServerGraph(graph);
+    expect(layout.nodes.map((node) => node.id).sort()).toEqual(
+      graph.nodes.map((node) => node.ref).sort(),
+    );
   });
 
-  it('labels every pairing edge with the mechanism from the record', () => {
-    const layout = buildCascadeLayout(input);
-    const pairingEdges = layout.edges.filter((edge) => edge.to.startsWith('pairing:'));
-    expect(pairingEdges).toHaveLength(2);
-    for (const edge of pairingEdges) {
-      expect(['operating', 'onward_duty', 'second_pairing', 'positioning']).toContain(
-        edge.mechanism,
-      );
-    }
+  it('keeps booking and hotel nodes the client could never have derived', () => {
+    const kinds = new Set(layoutServerGraph(graph).nodes.map((node) => node.kind));
+    expect([...kinds].sort()).toEqual(['booking', 'event', 'flight', 'hotel', 'pairing']);
   });
 
-  it('reports an unmatched pairing rather than drawing an edge to nowhere', () => {
-    const layout = buildCascadeLayout({
-      ...input,
-      pairings: [pairing({ source_flight: 'XX 999' })],
+  it('rows nodes by depth, so the picture reads the way the cascade propagates', () => {
+    const layout = layoutServerGraph(graph);
+    const yOf = (ref: string) => layout.nodes.find((node) => node.id === ref)?.y ?? -1;
+    expect(yOf('event:VOBL')).toBeLessThan(yOf('flight:1'));
+    expect(yOf('flight:1')).toBeLessThan(yOf('booking:9'));
+    expect(yOf('flight:1')).toBe(yOf('flight:2'));
+  });
+
+  it('names the recorded row behind every edge', () => {
+    const layout = layoutServerGraph(graph);
+    expect(layout.edges.map((edge) => edge.evidenceRef)).toEqual([
+      'prediction:12',
+      'action:57',
+      'action:58',
+    ]);
+  });
+
+  it('marks a declared node nothing has assessed rather than hiding it', () => {
+    const layout = layoutServerGraph(graph);
+    expect(layout.nodes.find((node) => node.id === 'flight:2')?.state).toBe('unassessed');
+    expect(layout.nodes.find((node) => node.id === 'flight:1')?.state).toBe('at_risk');
+  });
+
+  it('drops an edge whose endpoint is missing rather than drawing a line to nowhere', () => {
+    const layout = layoutServerGraph({
+      nodes: graph.nodes,
+      edges: [
+        ...graph.edges,
+        { source_ref: 'flight:1', target_ref: 'booking:404', edge_kind: 'connection', depth: 2 },
+      ],
     });
-    expect(layout.unmatchedPairings).toHaveLength(1);
-    expect(layout.edges.filter((edge) => edge.to.startsWith('pairing:'))).toHaveLength(0);
-  });
-
-  it('never emits a connection or hotel node', () => {
-    const kinds = new Set(buildCascadeLayout(input).nodes.map((node) => node.kind));
-    expect([...kinds].sort()).toEqual(['event', 'flight', 'pairing']);
+    expect(layout.edges).toHaveLength(graph.edges.length);
   });
 });

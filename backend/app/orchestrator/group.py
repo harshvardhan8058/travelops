@@ -41,6 +41,7 @@ from app.orchestrator.group_state import (
     unresolved_members,
 )
 from app.services.cascade_graph import project_and_record
+from app.services.passenger_impact import UNASSESSED_FACTORS
 
 log = structlog.get_logger(__name__)
 
@@ -365,6 +366,92 @@ class GroupOrchestrator:
                 "connections_at_risk": rollup.connections_at_risk,
                 "crew_pairings_affected": rollup.crew_pairings_affected,
                 "is_complete": rollup.is_complete,
+            },
+        )
+
+        await self._record_impacts(group, ctx)
+
+    async def _record_impacts(self, group: IncidentGroup, ctx: GroupContext) -> None:
+        """Rank the group's passengers into `passenger_impact` from rows already recorded.
+
+        This runs at group scope alongside the snapshot rather than as a per-flight plan step, and
+        that placement is the point. A ranking over persisted rows has **no external effect**: it
+        books nothing, reserves nothing and authorises nothing, which is the same reason delay risk
+        is assessed without a gate. Making it a plan step would have meant either inventing an
+        action the playbook does not declare, or overloading `rebook_passengers` — a name that
+        promises a booking — with an assessment. Neither is honest.
+
+        The inputs are the recorded findings: `connection_broken` comes from the persisted
+        `check_connections` action, so the ranking and the connection count cannot disagree. Two of
+        the ruleset's factors have no service establishing them yet; they stay false here and are
+        named in `UNASSESSED_FACTORS`, so a surface can say "not established" instead of "no".
+
+        Failure is contained exactly as the snapshot's is. The durable state and the audit trail
+        have already committed, and losing a ranking loses a convenience.
+        """
+        from app.db.scenario_queries import load_business_constraints
+        from app.orchestrator.service_registry import load_passenger_cohort_facts
+        from app.services.passenger_impact import (
+            assess_passenger_impact,
+            load_ruleset,
+            persist_passenger_impacts,
+        )
+
+        try:
+            flights = await self.member_flights(group.id)
+            flight_ids = {flight.flight_id for flight in flights}
+            facts = await load_passenger_cohort_facts(self._session, flight_ids)
+            if not facts:
+                # Not an error and not a zero. No booking rows are in scope, so there is nobody to
+                # rank; recording an empty assessment would present that as "everyone is fine".
+                log.info(
+                    "group_impacts_skipped",
+                    group_reference=group.reference,
+                    reason="no booking records are in scope",
+                )
+                return
+
+            ruleset = load_ruleset(await load_business_constraints(self._session))
+            assessment = assess_passenger_impact(cohort_facts=facts, ruleset=ruleset)
+            written = await persist_passenger_impacts(
+                self._session, incident_group_id=group.id, assessment=assessment
+            )
+        except Exception as exc:
+            log.error(
+                "group_impacts_failed",
+                outcome="error",
+                group_reference=group.reference,
+                detail=type(exc).__name__,
+                reason=str(exc),
+            )
+            await self._journal(
+                ctx,
+                event_type="PASSENGER_IMPACT_FAILED",
+                summary=(
+                    "Per-passenger priorities could not be recorded. Recovery continued; the "
+                    "decision log remains authoritative."
+                ),
+                detail={"error": type(exc).__name__, "reason": str(exc)},
+            )
+            return
+
+        await self._journal(
+            ctx,
+            event_type="PASSENGER_IMPACT_RECORDED",
+            summary=(
+                f"{written} passengers ranked into {len(assessment.cohorts)} cohorts under "
+                f"ruleset {assessment.ruleset_version} ({assessment.ruleset_hash})"
+            ),
+            detail={
+                "passengers_assessed": assessment.passengers_assessed,
+                "rows_written": written,
+                "count_by_band": assessment.count_by_band,
+                "rule_version": assessment.rule_version,
+                "ruleset_version": assessment.ruleset_version,
+                "ruleset_hash": assessment.ruleset_hash,
+                "unassessed_factors": [factor for factor, _, _ in UNASSESSED_FACTORS],
+                "basis": "persisted_records",
+                "authorises_no_action": True,
             },
         )
 

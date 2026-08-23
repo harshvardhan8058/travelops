@@ -377,3 +377,198 @@ class PassengerImpactService:
             evidence_refs=sorted(set(evidence)),
             provenance_kind=ProvenanceKind.synthetic.value,
         )
+
+
+# --------------------------------------------------------------------- persistence
+
+
+async def persist_passenger_impacts(
+    session: Any,
+    *,
+    incident_group_id: int,
+    assessment: PassengerImpactAssessment,
+    action_id: int | None = None,
+) -> int:
+    """Replace this group's `passenger_impact` rows with the current assessment.
+
+    Returns the number of rows written.
+
+    **Replace, not append.** A priority is a statement about the passenger's situation *now*, and
+    the situation changes as services report: a passenger whose connection has just been found
+    broken moves band. Appending would leave two rows disagreeing about one passenger with nothing
+    to say which is current, and the surface that decides who gets a room cannot be ambiguous. The
+    audit trail lives in `decision_log` and in the `cascade_snapshot` history, which is where a
+    record of "what did we believe at 21:40" belongs.
+
+    The ruleset hash is stored on every row, so an ordering can always be tied back to the policy
+    that produced it.
+    """
+    from sqlalchemy import delete
+
+    from app.models.cascade import PassengerImpact
+
+    await session.execute(
+        delete(PassengerImpact).where(PassengerImpact.incident_group_id == incident_group_id)
+    )
+    for priority in assessment.priorities:
+        session.add(
+            PassengerImpact(
+                action_id=action_id,
+                incident_group_id=incident_group_id,
+                passenger_id=priority.passenger_id,
+                booking_id=priority.booking_id,
+                priority_index=priority.priority_index,
+                priority_band=priority.priority_band.value,
+                factors=[dict(item) for item in priority.factors],
+                rule_version=assessment.rule_version,
+                ruleset_hash=assessment.ruleset_hash,
+            )
+        )
+    await session.flush()
+    return len(assessment.priorities)
+
+
+#: Factors the ruleset declares whose inputs no service establishes yet.
+#:
+#: Named rather than silently left false. `load_passenger_cohort_facts` sets both to `False` because
+#: Rebooking has not run, and "false" and "not established" are different claims: rendering the
+#: former tells an operator nobody needs rebooking when in truth nobody has looked. The API surfaces
+#: this list so the console can say which it is.
+UNASSESSED_FACTORS: tuple[tuple[str, str, str], ...] = (
+    (
+        "overnight_exposure",
+        "no service has established whether an onward departure remains today",
+        "rebook_passengers",
+    ),
+    (
+        "journey_incomplete",
+        "no service has established which passengers are stranded mid-itinerary",
+        "rebook_passengers",
+    ),
+)
+
+
+# ------------------------------------------------------------------------- reading back
+
+
+class RecordedPassengerImpact(BaseModel):
+    """One persisted `passenger_impact` row, joined to the names an operator can act on.
+
+    An id is not a person. The console needs the reference and the PNR, so the join happens once
+    here rather than being left to the transport layer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    passenger_id: int
+    passenger_reference: str
+    booking_id: int
+    pnr: str
+    priority_index: int
+    priority_band: str
+    factors: list[dict[str, Any]] = Field(default_factory=list)
+    rule_version: str
+    ruleset_hash: str
+
+
+class RecordedGroupImpact(BaseModel):
+    """Everything the impact surface needs, aggregated where aggregation belongs.
+
+    Not in `app/api/`: `test_phase2_guards` forbids the transport layer from summing anything, and
+    the reason is that a rollup computed next to a response model is a rollup nobody can trace.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    passengers_assessed: int = 0
+    cohorts: list[PassengerCohort] = Field(default_factory=list)
+    #: Highest priority first, truncated to the caller's cap.
+    passengers: list[RecordedPassengerImpact] = Field(default_factory=list)
+    rule_version: str = ""
+    ruleset_hash: str = ""
+
+
+async def load_group_impacts(
+    session: Any,
+    *,
+    incident_group_id: int,
+    limit: int = 100,
+) -> RecordedGroupImpact:
+    """Read this group's recorded priorities and band them.
+
+    The cohorts are rebuilt from the persisted rows rather than read from the assessment that wrote
+    them, so what the surface shows is what the database holds. If a row were ever written by
+    something else, the count would move — which is the behaviour worth having.
+
+    Ordering matches `assess_passenger_impact`: index descending, then passenger id. This ordering
+    decides who is offered one of a short supply of rooms, so it must not depend on how a query
+    happened to come back.
+    """
+    from sqlalchemy import select
+
+    from app.models.cascade import PassengerImpact
+    from app.models.reference import Booking, Passenger
+
+    rows = (
+        await session.execute(
+            select(PassengerImpact, Passenger.reference, Booking.pnr)
+            .join(Passenger, Passenger.id == PassengerImpact.passenger_id)
+            .join(Booking, Booking.id == PassengerImpact.booking_id)
+            .where(PassengerImpact.incident_group_id == incident_group_id)
+            .order_by(PassengerImpact.priority_index.desc(), PassengerImpact.passenger_id)
+        )
+    ).all()
+
+    if not rows:
+        return RecordedGroupImpact()
+
+    records = [
+        RecordedPassengerImpact(
+            passenger_id=row.passenger_id,
+            passenger_reference=reference,
+            booking_id=row.booking_id,
+            pnr=pnr,
+            priority_index=row.priority_index,
+            priority_band=row.priority_band,
+            factors=[dict(item) for item in (row.factors or [])],
+            rule_version=row.rule_version,
+            ruleset_hash=row.ruleset_hash,
+        )
+        for row, reference, pnr in rows
+    ]
+
+    cohorts: list[PassengerCohort] = []
+    for band in (
+        PriorityBand.critical,
+        PriorityBand.high,
+        PriorityBand.elevated,
+        PriorityBand.routine,
+    ):
+        members = [item for item in records if item.priority_band == band.value]
+        if not members:
+            continue
+        factor_counts: dict[str, int] = {}
+        for member in members:
+            for entry in member.factors:
+                name = str(entry.get("factor"))
+                factor_counts[name] = factor_counts.get(name, 0) + 1
+        cohorts.append(
+            PassengerCohort(
+                band=band,
+                passenger_count=len(members),
+                booking_ids=sorted(member.booking_id for member in members),
+                factor_counts=dict(sorted(factor_counts.items())),
+                lowest_index=min(member.priority_index for member in members),
+                highest_index=max(member.priority_index for member in members),
+            )
+        )
+
+    return RecordedGroupImpact(
+        passengers_assessed=len(records),
+        cohorts=cohorts,
+        # Capped for transport only. `passengers_assessed` always carries the true total, so a
+        # truncated list can never be mistaken for the whole population.
+        passengers=records[: max(0, limit)],
+        rule_version=records[0].rule_version,
+        ruleset_hash=records[0].ruleset_hash,
+    )

@@ -31,7 +31,12 @@ import pytest
 from sqlalchemy import func, select
 
 from app.db.seed import INCIDENT_GROUP_REFERENCE
-from app.models.cascade import CascadeSnapshot, DisruptionEdge, HotelInventoryHold
+from app.models.cascade import (
+    CascadeSnapshot,
+    DisruptionEdge,
+    HotelInventoryHold,
+    PassengerImpact,
+)
 from app.models.workflow import Action
 from tests.contract.postgres_support import requires_postgres
 
@@ -326,6 +331,147 @@ async def test_display_strings_stay_ascii(client):
     body = client.get(f"{PREFIX}/incident-groups/{GROUP}").text
     assert "\u2192" not in body
     assert "\u20b9" not in body
+
+
+# --------------------------------------------------------------- per-passenger impact
+
+
+async def test_impacts_are_empty_and_say_so_before_a_run(client):
+    """Nothing recorded yet is reported as nothing recorded, not as zeros.
+
+    Zero passengers with zero cohorts reads, on a wall display, as "every passenger is fine". The
+    unassessed factors are still named here, because they are a property of the ruleset rather than
+    of any run.
+    """
+    body = client.get(f"{PREFIX}/incident-groups/{GROUP}/impacts").json()
+
+    assert body["passengers_assessed"] == 0
+    assert body["cohorts"] == []
+    assert body["computed_at"] is None
+    assert "No passenger priorities are recorded" in body["note"]
+    assert [item["factor"] for item in body["unassessed_factors"]]
+
+
+async def test_the_run_records_a_priority_for_every_affected_passenger(client):
+    """604 passengers ranked, each with the factors that produced the index.
+
+    The count comes from the same rows the rollup counts, so a priority list that disagreed with
+    the headline would fail here rather than be discovered on a projector.
+    """
+    _drive(client)
+    rollup = _detail(client)["rollups"]
+    body = client.get(f"{PREFIX}/incident-groups/{GROUP}/impacts?limit=1000").json()
+
+    assert body["passengers_assessed"] == rollup["passengers_affected"]
+    assert body["returned"] == body["passengers_assessed"]
+    assert body["basis"] == "persisted_records"
+    assert body["computed_at"] is not None
+    assert body["ruleset_hash"]
+
+    banded = sum(cohort["passenger_count"] for cohort in body["cohorts"])
+    assert banded == body["passengers_assessed"], "every passenger sits in exactly one band"
+
+    for passenger in body["passengers"]:
+        assert passenger["pnr"], "an id is not a person; the PNR must be present"
+        attributed = sum(factor["weight"] for factor in passenger["factors"])
+        assert min(100, attributed) == passenger["priority_index"], (
+            "every point of the index must be attributable to a named factor"
+        )
+
+
+async def test_the_ranking_reflects_the_recorded_connection_findings(client):
+    """`broken_connection` is read from the persisted Connection action, not recomputed.
+
+    One service owns one fact. If the ranking recomputed it, the priority list and the 22-connection
+    headline could disagree and nothing would say which was right.
+    """
+    _drive(client)
+    body = client.get(f"{PREFIX}/incident-groups/{GROUP}/impacts?limit=1000").json()
+    connections = _detail(client)["rollups"]["connections_at_risk"]
+
+    carrying = [
+        passenger
+        for passenger in body["passengers"]
+        if any(factor["factor"] == "broken_connection" for factor in passenger["factors"])
+    ]
+    assert len(carrying) == connections, (
+        "the passengers carrying a broken connection are exactly the at-risk connections"
+    )
+    for passenger in carrying:
+        source = next(
+            factor["source"]
+            for factor in passenger["factors"]
+            if factor["factor"] == "broken_connection"
+        )
+        assert source == "connection_broken"
+
+
+async def test_unestablished_factors_are_named_rather_than_reported_false(client):
+    """The distinction the surface turns on.
+
+    `overnight_exposure` and `journey_incomplete` are Rebooking's findings and nothing establishes
+    them, so they are false in every row. Left unqualified that renders as "nobody needs
+    rebooking", when the truth is that nobody has looked. Both must be named, and neither may
+    appear as a scored factor on any passenger.
+    """
+    _drive(client)
+    body = client.get(f"{PREFIX}/incident-groups/{GROUP}/impacts?limit=1000").json()
+
+    named = {item["factor"] for item in body["unassessed_factors"]}
+    assert named == {"overnight_exposure", "journey_incomplete"}
+    for item in body["unassessed_factors"]:
+        assert item["established_by"]
+        assert item["reason"]
+
+    scored = {
+        factor["factor"] for passenger in body["passengers"] for factor in passenger["factors"]
+    }
+    assert not (scored & named), "a factor nothing established must never be scored"
+
+
+async def test_impacts_are_replaced_rather_than_appended(client, sessionmaker_for):
+    """Re-running leaves one current row per passenger, never two that disagree.
+
+    The surface that would decide who gets one of a short supply of rooms cannot be ambiguous about
+    a passenger's band. History belongs in `decision_log` and `cascade_snapshot`.
+    """
+    _drive(client)
+    first = client.get(f"{PREFIX}/incident-groups/{GROUP}/impacts").json()
+    _run(client)
+    second = client.get(f"{PREFIX}/incident-groups/{GROUP}/impacts").json()
+
+    assert second["passengers_assessed"] == first["passengers_assessed"]
+
+    async with sessionmaker_for() as session:
+        rows = (
+            await session.execute(
+                select(func.count()).select_from(PassengerImpact),
+            )
+        ).scalar_one()
+        distinct = (
+            await session.execute(
+                select(func.count(func.distinct(PassengerImpact.passenger_id))).select_from(
+                    PassengerImpact
+                ),
+            )
+        ).scalar_one()
+    assert rows == distinct == second["passengers_assessed"]
+
+
+async def test_the_impact_run_is_journalled_and_authorises_nothing(client):
+    """A ranking that decides an ordering must be visible in the audit trail as a ranking."""
+    _drive(client)
+    frames = client.get(f"{PREFIX}/incident-groups/{GROUP}/replay").json()["frames"]
+    recorded = [frame for frame in frames if frame["event_type"] == "PASSENGER_IMPACT_RECORDED"]
+
+    assert recorded, "the ranking must appear in the group journal"
+    assert "PASSENGER_IMPACT_FAILED" not in {frame["event_type"] for frame in frames}
+    detail = recorded[-1]["detail"]
+    assert detail["basis"] == "persisted_records"
+    assert detail["authorises_no_action"] is True
+    assert detail["rows_written"] == detail["passengers_assessed"]
+    assert sorted(detail["unassessed_factors"]) == ["journey_incomplete", "overnight_exposure"]
+    assert recorded[-1]["human_decision_id"] is None, "a ranking is not a decision"
 
 
 # ------------------------------------------------------------------ plan assurance
