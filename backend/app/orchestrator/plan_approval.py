@@ -78,6 +78,27 @@ _UNAPPROVABLE = frozenset(
 )
 
 
+def _hash_of_record(plan: Plan, plan_result: PlanAssuranceResult) -> str:
+    """The one plan hash an approval is bound to: the plan row's own.
+
+    There are two hash functions in the codebase, and they are different algorithms over different
+    fields — `db.plan_identity.compute_plan_hash`, which is what `plan.plan_hash` stores, and
+    `PlanUnderReview.hash()`, which `PlanAssuranceResult.plan_hash` carries. Writing the second into
+    `plan_approval.plan_hash` made "a re-plan voids the approval" unenforceable against the
+    persisted plan: the stored approval hash and the stored plan hash could never be equal, so the
+    comparison that is supposed to catch a changed task set had nothing to compare.
+
+    `plan_identity.py` already names the resolution — Stream B compares "the stored hash" — so the
+    stored one wins. Stream B's `plan_approval_covers` remains authoritative for the *rule*; this
+    only guarantees both sides of it are fed the same value.
+
+    The fallback exists for a plan written before migration 0005 backfilled the column. It is not a
+    second hash of record: an approval bound to it simply cannot outlive a re-plan, which is the
+    conservative direction.
+    """
+    return plan.plan_hash or plan_result.plan_hash
+
+
 @dataclass
 class CoveredEvaluation:
     evaluation_id: int
@@ -186,7 +207,7 @@ class PlanApprovalService:
     ) -> ApprovalOutcome:
         loaded = load_plan_configuration(self._settings)
         policy: PlanApprovalPolicy = loaded.plan.approval if loaded else PlanApprovalPolicy()
-        plan_hash = plan_result.plan_hash
+        plan_hash = _hash_of_record(plan, plan_result)
 
         outcome = ApprovalOutcome(plan_approval_id=None, plan_hash=plan_hash)
 
@@ -377,7 +398,7 @@ class PlanApprovalService:
                 await self._session.execute(
                     select(PlanApproval).where(
                         PlanApproval.plan_id == plan.id,
-                        PlanApproval.plan_hash == plan_result.plan_hash,
+                        PlanApproval.plan_hash == _hash_of_record(plan, plan_result),
                     )
                 )
             )
