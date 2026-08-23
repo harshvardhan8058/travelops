@@ -231,15 +231,28 @@ export function GroupApprovalQueue() {
     );
   }
   if (assurance.isError) {
+    const error = assurance.error;
+    const resolution =
+      error instanceof ApiError &&
+      error.status === 404 &&
+      error.code === 'ENTITY_NOT_FOUND' &&
+      typeof error.details.resolution === 'string'
+        ? error.details.resolution
+        : null;
+
+    if (resolution) {
+      return <EmptyState title="Plan assurance is not available yet" description={resolution} />;
+    }
+
     return (
       <ErrorState
-        code={assurance.error instanceof ApiError ? assurance.error.code : 'UNAVAILABLE'}
+        code={error instanceof ApiError ? error.code : 'UNAVAILABLE'}
         message={
-          assurance.error instanceof ApiError
-            ? assurance.error.message
+          error instanceof ApiError
+            ? error.message
             : 'The group assurance endpoint did not respond.'
         }
-        correlationId={assurance.error instanceof ApiError ? assurance.error.correlationId : null}
+        correlationId={error instanceof ApiError ? error.correlationId : null}
       />
     );
   }
