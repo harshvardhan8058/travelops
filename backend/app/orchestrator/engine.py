@@ -556,8 +556,12 @@ class Orchestrator:
         Budget-minimal for Stream A: all reasoning logic lives in Stream C's agent/client layer.
         This method calls it, persists the result, journals it, and moves on.
         """
+        # Imported inside the function, like the planner below: the frozen guard
+        # `test_no_llm_in_services` forbids reasoning-layer imports at orchestrator module scope,
+        # so that a deterministic run cannot even load the agent path.
         from app.agents.planner import GENERATOR as PLANNER_GENERATOR
         from app.agents.planner import PROMPT_VERSION, PlannerAgent
+        from app.agents.reflection import reflect
         from app.config import LLMMode
         from app.llm.client import LLMUnavailable
         from app.memory.retrieval import find_precedents
@@ -603,6 +607,48 @@ class Orchestrator:
                 precedents=[p.to_dict() for p in precedents],
             )
 
+            # Reflect before persisting. The agent proposes; this narrows to what can actually be
+            # executed and records every drop with its reason.
+            #
+            # It is not a second gate and authorises nothing — it can only remove. The Decision
+            # Assurance Gate still evaluates every surviving task, and a person still approves
+            # anything high risk. What it prevents is a candidate that cannot be run being offered
+            # as one: an action with no registered service, a duplicate, a dependency on a task
+            # that was dropped, or a target reference the orchestrator never supplied.
+            reflection = reflect(
+                list(planner_response.tasks),
+                available_actions={
+                    action for action in ActionType if dispatch.is_implemented(action)
+                },
+                allowed_target_refs=self._target_refs(ctx),
+            )
+            if reflection.rejected:
+                # Nothing survived. Offering an empty candidate would be worse than offering none,
+                # so it is recorded and skipped; the playbook plan is untouched.
+                log.info(
+                    "planner_candidate_rejected_by_reflection",
+                    incident_reference=ctx.incident_reference,
+                    dropped=reflection.dropped_actions,
+                    reason=reflection.rejection_reason,
+                )
+                await self._journal(
+                    ctx,
+                    stage=STAGE_PLAN,
+                    actor=ACTOR_ORCHESTRATOR,
+                    event_type="PLANNER_CANDIDATE_REJECTED",
+                    summary=(
+                        "The planner's proposal contained nothing executable, so no candidate was "
+                        "recorded. The deterministic playbook plan is unaffected."
+                    ),
+                    detail={
+                        "generator": PLANNER_GENERATOR,
+                        "prompt_version": PROMPT_VERSION,
+                        "llm_mode": self.modes.llm.value,
+                        **reflection.as_detail(),
+                    },
+                )
+                return
+
             # Persist as a second Plan row
             planner_plan = Plan(
                 incident_id=ctx.incident_id,
@@ -621,7 +667,7 @@ class Orchestrator:
 
             # Persist tasks
             planner_rows: dict[str, PlanTaskRow] = {}
-            for order, task in enumerate(planner_response.tasks, start=1):
+            for order, task in enumerate(reflection.tasks, start=1):
                 row = PlanTaskRow(
                     plan_id=planner_plan.id,
                     action_type=task.action.value,
@@ -636,7 +682,7 @@ class Orchestrator:
             await self._session.flush()
 
             # Resolve dependencies
-            for task in planner_response.tasks:
+            for task in reflection.tasks:
                 row = planner_rows[task.action.value]
                 row.depends_on = [
                     str(planner_rows[name].id) for name in task.depends_on if name in planner_rows
@@ -648,15 +694,18 @@ class Orchestrator:
                 stage=STAGE_PLAN,
                 actor=ACTOR_ORCHESTRATOR,
                 event_type="PLAN_PROPOSED",
-                summary=(f"{len(planner_response.tasks)} tasks proposed by the planner agent"),
+                summary=(f"{len(reflection.tasks)} tasks proposed by the planner agent"),
                 detail={
                     "plan_id": planner_plan.id,
                     "generator": PLANNER_GENERATOR,
                     "prompt_version": PROMPT_VERSION,
                     "model_self_report": audit.model_self_report,
                     "llm_mode": self.modes.llm.value,
-                    "actions": [t.action.value for t in planner_response.tasks],
+                    "actions": [t.action.value for t in reflection.tasks],
                     "precedents_used": len(precedents),
+                    # What the model proposed, what was removed, and why. In the record a
+                    # reviewer reads, not only in a log line.
+                    "reflection": reflection.as_detail(),
                     "latency_ms": audit.latency_ms,
                     "input_tokens": audit.input_tokens,
                     "output_tokens": audit.output_tokens,
@@ -666,7 +715,8 @@ class Orchestrator:
                 "planner_candidate_created",
                 incident_reference=ctx.incident_reference,
                 plan_id=planner_plan.id,
-                tasks=len(planner_response.tasks),
+                tasks=len(reflection.tasks),
+                dropped=reflection.dropped_actions,
                 precedents=len(precedents),
             )
 

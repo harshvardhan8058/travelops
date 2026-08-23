@@ -68,6 +68,7 @@ async def _plan_out(session: AsyncSession, plan, incident_reference: str) -> Can
         incident_reference=incident_reference,
         variant_key=plan.variant_key,
         generator=plan.generator,
+        prompt_version=plan.prompt_version,
         generated_at=plan.generated_at,
         rationale=plan.rationale,
         selection_state=plan.selection_state,
@@ -81,7 +82,7 @@ async def _plan_out(session: AsyncSession, plan, incident_reference: str) -> Can
                 task_order=row.task_order,
                 state=str(row.state),
                 target_refs=list(row.target_refs or []),
-                depends_on=[int(dep) for dep in (row.depends_on or [])],
+                depends_on=[str(dep) for dep in (row.depends_on or [])],
             )
             for row in tasks
         ],
