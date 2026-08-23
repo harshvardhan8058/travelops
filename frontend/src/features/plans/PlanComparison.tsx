@@ -60,6 +60,18 @@ function display(value: unknown): string | number | null {
   return null;
 }
 
+function preplanningResolution(error: unknown): string | null {
+  if (
+    !(error instanceof ApiError) ||
+    error.status !== 404 ||
+    error.code !== 'ENTITY_NOT_FOUND' ||
+    typeof error.details.resolution !== 'string'
+  ) {
+    return null;
+  }
+  return error.details.resolution;
+}
+
 export function PlanComparison() {
   const { incidentId = '' } = useParams<{ incidentId: string }>();
   const queryClient = useQueryClient();
@@ -113,16 +125,28 @@ export function PlanComparison() {
   }, [comparison.data]);
 
   if (comparison.isLoading || plans.isLoading) return <LoadingState label="Comparing plans" />;
-  if (comparison.isError) {
+  const comparisonResolution = preplanningResolution(comparison.error);
+  const plansResolution = preplanningResolution(plans.error);
+  const genericError = [comparison.error, plans.error].find(
+    (error) => error && !preplanningResolution(error),
+  );
+  const queryError = genericError ?? comparison.error ?? plans.error;
+  if (queryError) {
+    const resolution = genericError ? null : (comparisonResolution ?? plansResolution);
+
+    if (resolution) {
+      return <EmptyState title="No candidates to compare yet" description={resolution} />;
+    }
+
     return (
       <ErrorState
-        code={comparison.error instanceof ApiError ? comparison.error.code : 'UNAVAILABLE'}
+        code={queryError instanceof ApiError ? queryError.code : 'UNAVAILABLE'}
         message={
-          comparison.error instanceof ApiError
-            ? comparison.error.message
-            : 'The comparison endpoint did not respond.'
+          queryError instanceof ApiError
+            ? queryError.message
+            : 'The plan endpoints did not respond.'
         }
-        correlationId={comparison.error instanceof ApiError ? comparison.error.correlationId : null}
+        correlationId={queryError instanceof ApiError ? queryError.correlationId : null}
       />
     );
   }

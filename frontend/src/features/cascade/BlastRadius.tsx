@@ -76,33 +76,37 @@ export function BlastRadius({
                 expanded ? 'border-l-accent bg-raised' : 'border-l-transparent',
               )}
             >
-              <button
-                type="button"
-                onClick={() => onSelectHop(expanded ? null : hop.index)}
-                aria-expanded={expanded}
-                aria-current={expanded || undefined}
-                className="flex w-full items-center gap-2 px-2 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              >
-                {expanded ? (
-                  <ChevronDown size={14} strokeWidth={1.5} aria-hidden />
-                ) : (
-                  <ChevronRight size={14} strokeWidth={1.5} aria-hidden />
-                )}
-                <MonoValue muted className="w-8 shrink-0">
-                  hop {hop.index}
-                </MonoValue>
-                <span className="min-w-0 flex-1 text-body text-fg">
-                  {hop.from} {'->'} {hop.to}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelectHop(expanded ? null : hop.index)}
+                  aria-expanded={expanded}
+                  aria-current={expanded || undefined}
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  {expanded ? (
+                    <ChevronDown size={14} strokeWidth={1.5} aria-hidden />
+                  ) : (
+                    <ChevronRight size={14} strokeWidth={1.5} aria-hidden />
+                  )}
+                  <MonoValue muted className="w-8 shrink-0">
+                    hop {hop.index}
+                  </MonoValue>
+                  <span className="min-w-0 flex-1 text-body text-fg">
+                    {hop.from} {'->'} {hop.to}
+                  </span>
+                </button>
+                <span className="shrink-0 pr-2">
+                  <Metric
+                    value={hop.count}
+                    derivation={arrayLengthDerivation(hop.to, hop.count, {
+                      endpoint: 'GET /incident-groups/{id}',
+                      field: hop.countSource.replace('length of ', ''),
+                      provenance: group.provenance,
+                    })}
+                  />
                 </span>
-                <Metric
-                  value={hop.count}
-                  derivation={arrayLengthDerivation(hop.to, hop.count, {
-                    endpoint: 'GET /incident-groups/{id}',
-                    field: hop.countSource.replace('length of ', ''),
-                    provenance: group.provenance,
-                  })}
-                />
-              </button>
+              </div>
 
               {expanded && (
                 <div className="border-t border-border-subtle px-3 py-2">
