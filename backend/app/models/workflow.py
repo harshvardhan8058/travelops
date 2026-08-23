@@ -189,7 +189,9 @@ class Plan(Base):
     #: discriminator — nothing branches on it.
     variant_key: Mapped[str | None] = mapped_column(String(32))
     #: Deterministic identity of the task set. An approval binds to this, so a re-planned or
-    #: reordered plan stops being covered. See app/db/plan_identity.py.
+    #: reordered plan stops being covered. Computed by `PlanUnderReview.hash()` in
+    #: app/assurance/plan_contract.py — the same value the approval gate compares, so there is
+    #: exactly one plan identity in the system rather than two that can drift apart.
     plan_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     incident: Mapped[Incident] = relationship(back_populates="plans")

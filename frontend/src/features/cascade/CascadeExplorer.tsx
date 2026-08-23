@@ -29,6 +29,8 @@ import { GraphEdge, GraphLegend, GraphNode, GraphSurface } from '@/components/ui
 import { useKeyboardList } from '@/hooks/useKeyboardList';
 import { buildCascadeLayout, layoutServerGraph, type LayoutFlight } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
+import { GroupRunControl } from './GroupRunControl';
+import { WhatIfPanel } from './WhatIfPanel';
 
 const ROLLUP_TILES = [
   { field: 'flights_affected', label: 'Flights' },
@@ -94,6 +96,7 @@ export function CascadeExplorer() {
   const graphIsProjected = Boolean(group?.graph);
 
   const nodes = layout?.nodes ?? [];
+  const flightNodeCount = nodes.filter((node) => node.kind === 'flight').length;
   const keyboard = useKeyboardList({
     count: nodes.length,
     onOpen: (index) => setSelectedNode(nodes[index]?.id ?? null),
@@ -143,6 +146,7 @@ export function CascadeExplorer() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
+      <GroupRunControl groupRef={group.reference} rollupStatus={group.rollup_status} />
       <Panel>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
           <div className="flex items-baseline gap-2">
@@ -216,6 +220,15 @@ export function CascadeExplorer() {
                     node={node}
                     selected={node.id === selectedNode}
                     dimmed={Boolean(selectedNode) && node.id !== selectedNode}
+                    /* Captions for the trigger and the flights — the spine of the story. The
+                     * consequence layer is captioned on selection only: 30-odd overlapping labels
+                     * is noise that looks like data. */
+                    showLabel={node.kind === 'event' || node.kind === 'flight'}
+                    /* The route and delay only fit when the flight row is short. Eight of them
+                     * ran into one another; both facts are in the hop expansion and the table. */
+                    showSublabel={
+                      node.kind === 'event' || flightNodeCount <= 5 || selectedNode === node.id
+                    }
                     onSelect={() => {
                       setSelectedNode(node.id === selectedNode ? null : node.id);
                       keyboard.setIndex(index);
@@ -344,6 +357,7 @@ export function CascadeExplorer() {
             selectedMechanism={selectedMechanism}
             onSelectMechanism={setSelectedMechanism}
           />
+          <WhatIfPanel groupRef={group.reference} />
         </div>
       </div>
     </div>

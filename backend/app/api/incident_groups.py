@@ -64,6 +64,7 @@ from app.schemas.plans import (
 from app.services import blast_radius as blast_radius_service
 from app.services import cascade_graph as graph_service
 from app.services import what_if as what_if_service
+from app.services.hotel import group_hotel_totals
 
 router = APIRouter(tags=["cascade"])
 log = get_logger(__name__)
@@ -260,7 +261,7 @@ async def get_incident_group(
             {
                 "id": member.flight_id,
                 "flight_number": member.flight_number,
-                "route": f"{member.origin_icao} \u2192 {member.destination_icao}",
+                "route": f"{member.origin_icao} -> {member.destination_icao}",
                 "delay_minutes": member.delay_minutes_at_injection,
                 "passengers": await _passengers_for(session, member.flight_id),
                 "state": member.incident_state or "not_opened",
@@ -277,7 +278,16 @@ async def get_incident_group(
         graph = await graph_service.project_graph(session, group_id=group.id)
         graph_out = CascadeGraphOut(**graph_service.graph_payload(graph, rollup))
 
-    radius = blast_radius_service.compose_blast_radius(rollup=rollup, graph=graph)
+    # Accommodation figures come from Stream C's service, summed across the group. Without them the
+    # blast radius silently omits the room requirement and the shortfall entirely — the two figures
+    # an operator most needs when the inventory does not cover the disruption. The summing lives in
+    # the service, not here: aggregating an action payload in this layer is what
+    # `test_phase2_guards` forbids, and rightly.
+    radius = blast_radius_service.compose_blast_radius(
+        rollup=rollup,
+        graph=graph,
+        hotel_payload=await group_hotel_totals(session, group_id=group.id),
+    )
     radius_out = BlastRadiusOut(**blast_radius_service.blast_radius_payload(radius))
 
     return IncidentGroupDetailResponse(
@@ -330,7 +340,16 @@ async def get_blast_radius(
     group = await _resolve(session, group_ref)
     rollup = await cascade_rollup(session, group_id=group.id)
     graph = await graph_service.project_graph(session, group_id=group.id)
-    radius = blast_radius_service.compose_blast_radius(rollup=rollup, graph=graph)
+    # Accommodation figures come from Stream C's service, summed across the group. Without them the
+    # blast radius silently omits the room requirement and the shortfall entirely — the two figures
+    # an operator most needs when the inventory does not cover the disruption. The summing lives in
+    # the service, not here: aggregating an action payload in this layer is what
+    # `test_phase2_guards` forbids, and rightly.
+    radius = blast_radius_service.compose_blast_radius(
+        rollup=rollup,
+        graph=graph,
+        hotel_payload=await group_hotel_totals(session, group_id=group.id),
+    )
     return BlastRadiusOut(**blast_radius_service.blast_radius_payload(radius))
 
 

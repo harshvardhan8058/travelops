@@ -268,8 +268,9 @@ export interface PlanTaskRow {
  * because the UI must render whatever the endpoint actually returns and name what it does
  * not, rather than assuming a field exists.
  *
- * `route` arrives as ICAO codes from the real API (`VOBL → VIDP`) and as IATA in the
- * committed fixture (`BLR → DEL`). It is rendered as returned; the UI never translates one
+ * `route` arrives as ICAO codes from the real API (`VOBL -> VIDP`) and as IATA in the
+ * committed fixture (`BLR -> DEL`). ASCII, not U+2192: `Inter` and `JetBrains Mono` are webfonts and
+ * the fallback draws the arrow as a tofu box. It is rendered as returned; the UI never translates one
  * into the other, because it has no airport table to do that correctly.
  */
 export interface IncidentFlightSummary {

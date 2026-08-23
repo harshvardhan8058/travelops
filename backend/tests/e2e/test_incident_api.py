@@ -21,7 +21,7 @@ class TestIncidentDetail:
         assert body["state"] == "detected"
         assert body["trigger_type"] == "weather"
         assert body["flight"]["flight_number"] == "6E 2134"
-        assert body["flight"]["route"] == "VOBL → VIDP"
+        assert body["flight"]["route"] == "VOBL -> VIDP"
 
     def test_delay_minutes_is_computed_not_stored(self, client, incident):
         """420 = the 7-hour estimate against the scheduled departure."""
@@ -99,7 +99,8 @@ class TestRun:
     def test_the_low_risk_tasks_really_executed(self, client, incident):
         """Not refused, not faked: three Stream C services ran and recorded a result.
 
-        `find_hotel_options` joined this set when Phase 2 registered the hotel services. It is
+        `find_hotel_options` and `reserve_hotel_block` joined this set when Phase 2 registered the
+        hotel services. Allocation is planned as well as registered, or no room is ever held. It is
         listed explicitly rather than asserted loosely, because "some services ran" would still
         pass if one silently stopped running.
         """
@@ -110,6 +111,7 @@ class TestRun:
         assert set(done) == {
             "check_connections",
             "find_hotel_options",
+            "reserve_hotel_block",
             "assess_crew_impact",
         }
         for action in done.values():
@@ -137,6 +139,7 @@ class TestRun:
         assert [t["action_type"] for t in plan["tasks"]] == [
             "check_connections",
             "find_hotel_options",
+            "reserve_hotel_block",
             "assess_crew_impact",
             "notify_passengers",
         ]

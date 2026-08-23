@@ -29,8 +29,8 @@ function group(overrides: Partial<IncidentGroupDetail> = {}): IncidentGroupDetai
     state: 'executing',
     rollups: { flights_affected: 2, connections_at_risk: 22, candidate_hotels: 11 },
     flights: [
-      { id: 1, flight_number: '6E 2134', route: 'BLR → DEL', passengers: 174, state: 'executing' },
-      { id: 2, flight_number: '6E 811', route: 'BLR → BOM', passengers: 158, state: 'assuring' },
+      { id: 1, flight_number: '6E 2134', route: 'BLR -> DEL', passengers: 174, state: 'executing' },
+      { id: 2, flight_number: '6E 811', route: 'BLR -> BOM', passengers: 158, state: 'assuring' },
     ] as unknown as Record<string, unknown>[],
     crew_pairings: [
       pairing(),
@@ -97,8 +97,8 @@ describe('buildCascadeLayout', () => {
     rootCause: 'weather',
     airportIcao: 'VOBL',
     flights: [
-      { id: 1, flight_number: '6E 2134', route: 'BLR → DEL', passengers: 174, state: 'executing' },
-      { id: 2, flight_number: '6E 811', route: 'BLR → BOM', passengers: 158, state: 'assuring' },
+      { id: 1, flight_number: '6E 2134', route: 'BLR -> DEL', passengers: 174, state: 'executing' },
+      { id: 2, flight_number: '6E 811', route: 'BLR -> BOM', passengers: 158, state: 'assuring' },
     ],
     pairings: [pairing(), pairing({ pairing_reference: 'PAIR-B1', source_flight: '6E 811' })],
   };

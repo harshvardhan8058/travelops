@@ -16,11 +16,19 @@
     "crew_pairings_affected": 9,
     "note": "Each value is the length of the corresponding array, computed server-side."
   },
+  "rollup_status": {
+    "is_complete": true,
+    "computed_at": "2026-08-20T15:36:00Z",
+    "note": "All 8 incidents across 8 declared flights have been assessed for both connections and crew.",
+    "flights_without_incident": [],
+    "membership_is_declared": true
+  },
+  "awaiting_approval_count": 0,
   "flights": [
     {
       "id": 1,
       "flight_number": "6E 2134",
-      "route": "BLR → DEL",
+      "route": "BLR -> DEL",
       "delay_minutes": 420,
       "passengers": 174,
       "state": "executing"
@@ -28,7 +36,7 @@
     {
       "id": 2,
       "flight_number": "6E 811",
-      "route": "BLR → BOM",
+      "route": "BLR -> BOM",
       "delay_minutes": 110,
       "passengers": 158,
       "state": "assuring"
@@ -36,7 +44,7 @@
     {
       "id": 3,
       "flight_number": "AI 503",
-      "route": "BLR → HYD",
+      "route": "BLR -> HYD",
       "delay_minutes": 65,
       "passengers": 96,
       "state": "planning"
@@ -44,7 +52,7 @@
     {
       "id": 5,
       "flight_number": "6E 455",
-      "route": "BLR → MAA",
+      "route": "BLR -> MAA",
       "delay_minutes": 95,
       "passengers": 72,
       "state": "planning"
@@ -52,7 +60,7 @@
     {
       "id": 6,
       "flight_number": "UK 812",
-      "route": "BLR → CCU",
+      "route": "BLR -> CCU",
       "delay_minutes": 140,
       "passengers": 41,
       "state": "detected"
@@ -60,7 +68,7 @@
     {
       "id": 7,
       "flight_number": "AI 611",
-      "route": "BLR → COK",
+      "route": "BLR -> COK",
       "delay_minutes": 55,
       "passengers": 33,
       "state": "detected"
@@ -68,7 +76,7 @@
     {
       "id": 8,
       "flight_number": "6E 297",
-      "route": "BLR → GOI",
+      "route": "BLR -> GOI",
       "delay_minutes": 80,
       "passengers": 18,
       "state": "detected"
@@ -76,7 +84,7 @@
     {
       "id": 9,
       "flight_number": "UK 705",
-      "route": "AMD → BLR",
+      "route": "AMD -> BLR",
       "delay_minutes": 70,
       "passengers": 12,
       "state": "detected"
@@ -166,6 +174,8 @@
     }
   ],
   "graph": {
+    "group_reference": "GRP-2026-0820-VOBL",
+    "rule_version": "cascade-graph-v1",
     "nodes": [
       {
         "ref": "event:GRP-2026-0820-VOBL",
@@ -181,7 +191,7 @@
         "ref": "flight:1",
         "kind": "flight",
         "label": "6E 2134",
-        "sublabel": "BLR → DEL, +420 min",
+        "sublabel": "BLR -> DEL, +420 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -191,7 +201,7 @@
         "ref": "flight:2",
         "kind": "flight",
         "label": "6E 811",
-        "sublabel": "BLR → BOM, +110 min",
+        "sublabel": "BLR -> BOM, +110 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -201,7 +211,7 @@
         "ref": "flight:3",
         "kind": "flight",
         "label": "AI 503",
-        "sublabel": "BLR → HYD, +65 min",
+        "sublabel": "BLR -> HYD, +65 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -211,7 +221,7 @@
         "ref": "flight:5",
         "kind": "flight",
         "label": "6E 455",
-        "sublabel": "BLR → MAA, +95 min",
+        "sublabel": "BLR -> MAA, +95 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -221,7 +231,7 @@
         "ref": "flight:6",
         "kind": "flight",
         "label": "UK 812",
-        "sublabel": "BLR → CCU, +140 min",
+        "sublabel": "BLR -> CCU, +140 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -231,7 +241,7 @@
         "ref": "flight:7",
         "kind": "flight",
         "label": "AI 611",
-        "sublabel": "BLR → COK, +55 min",
+        "sublabel": "BLR -> COK, +55 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -241,7 +251,7 @@
         "ref": "flight:8",
         "kind": "flight",
         "label": "6E 297",
-        "sublabel": "BLR → GOI, +80 min",
+        "sublabel": "BLR -> GOI, +80 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -251,7 +261,7 @@
         "ref": "flight:9",
         "kind": "flight",
         "label": "UK 705",
-        "sublabel": "AMD → BLR, +70 min",
+        "sublabel": "AMD -> BLR, +70 min",
         "depth": 1,
         "at_risk": true,
         "has_evidence": true,
@@ -356,7 +366,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -365,7 +377,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -374,7 +388,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -383,7 +399,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -392,7 +410,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -401,7 +421,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -410,7 +432,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "event:GRP-2026-0820-VOBL",
@@ -419,7 +443,9 @@
         "mechanism": null,
         "detail": "Delay risk assessed against the recorded weather and runway state.",
         "depth": 1,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:1",
@@ -428,7 +454,9 @@
         "mechanism": "operating",
         "detail": "Crew are operating 6E 2134, delayed 420 minutes to 04:10 (+1) IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:1",
@@ -437,7 +465,9 @@
         "mechanism": "second_pairing",
         "detail": "A second rotation on 6E 2134: PAIR-A1 already carries this flight, so this is a distinct crew complement — cockpit and cabin sit on different pairings.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:2",
@@ -446,7 +476,9 @@
         "mechanism": "operating",
         "detail": "Crew are operating 6E 811, delayed 110 minutes to 23:15 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:2",
@@ -455,7 +487,9 @@
         "mechanism": "positioning",
         "detail": "Crew were positioning on 6E 811 to operate 6E 289, scheduled 23:50 IST. 6E 811 now arrives 00:55 (+1) IST, so 6E 289 loses its crew although it was never delayed.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:3",
@@ -464,7 +498,9 @@
         "mechanism": "operating",
         "detail": "Crew are operating AI 503, delayed 65 minutes to 21:55 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:5",
@@ -473,7 +509,9 @@
         "mechanism": "operating",
         "detail": "Crew are operating 6E 455, delayed 95 minutes to 23:10 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:9",
@@ -482,7 +520,9 @@
         "mechanism": "onward_duty",
         "detail": "UK 705 arrives 23:05 IST, 70 minutes late. The crew's next duty UK 812 is scheduled 22:40 IST and needs 45 minutes minimum connection, so it cannot be operated as published.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:7",
@@ -491,7 +531,9 @@
         "mechanism": "operating",
         "detail": "Crew are operating AI 611, delayed 55 minutes to 22:45 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       },
       {
         "source_ref": "flight:8",
@@ -500,22 +542,29 @@
         "mechanism": "operating",
         "detail": "Crew are operating 6E 297, delayed 80 minutes to 22:35 IST. No later leg of this pairing becomes infeasible, so the rotation is disrupted at this leg only.",
         "depth": 2,
-        "derived_from": "fixture"
+        "is_at_risk": true,
+        "derived_from_action_id": null,
+        "derived_from_prediction_id": null
       }
     ],
     "edge_counts_by_kind": {
       "root_cause": 8,
       "crew": 9
     },
+    "source_action_ids": [],
+    "source_prediction_ids": [],
+    "snapshot_hash": "d16a3a551ee4758e98ada7452e86a492",
     "completeness": {
       "member_flight_count": 8,
       "flights_with_evidence": 8,
       "is_complete": true,
       "note": "All 8 declared flights carry recorded evidence."
     },
-    "note": "Nodes are references to rows that already exist; there is no node table. Edge provenance is a fixture marker, not a row id — the live projection carries a real action or prediction reference."
+    "note": "Nodes are references to rows that already exist; there is no node table. Edge provenance is null here because a fixture edge names no recorded row — the live projection carries a real action or prediction id, and a CHECK constraint requires exactly one of them."
   },
   "blast_radius": {
+    "group_reference": "GRP-2026-0820-VOBL",
+    "headline": "8 flights, 604 passengers, 22 connections, 9 rotations, 11 hotels. All 8 declared flights assessed.",
     "basis": "composed_from_recorded_findings",
     "dimensions": [
       {

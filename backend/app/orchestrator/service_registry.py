@@ -374,11 +374,41 @@ async def _hotel_inputs(
 
 
 async def _origin_airport(session: AsyncSession, flight_ids: set[int]) -> str | None:
+    """The airport passengers are stranded at, for a hotel search.
+
+    Read from the **incident group** when there is one, because the group declares the airport the
+    disruption is at.
+
+    Taking the first flight's `origin_icao` was wrong twice. It is non-deterministic — `LIMIT 1`
+    with no `ORDER BY` — and it is simply the wrong airport for an arrival: UK 705 flies VAAH to
+    VOBL, so its origin is Ahmedabad while its passengers are stranded in Bengaluru. The search
+    then looked for rooms in a city with no seeded inventory and reported "0 properties within the
+    rate cap", which is indistinguishable from every hotel being full. A wrong airport that
+    produces an empty result is the worst kind of wrong: it reads as a finding.
+
+    Falls back to the flight's origin, ordered, for an ungrouped incident: a stranded departure
+    leaves its passengers where it was due out from.
+    """
     from app.models.reference import Flight
+    from app.models.workflow import Incident, IncidentGroup
+
+    grouped = (
+        await session.execute(
+            select(IncidentGroup.airport_icao)
+            .join(Incident, Incident.group_id == IncidentGroup.id)
+            .where(Incident.flight_id.in_(sorted(flight_ids)))
+            .limit(1)
+        )
+    ).first()
+    if grouped and grouped[0]:
+        return str(grouped[0])
 
     row = (
         await session.execute(
-            select(Flight.origin_icao).where(Flight.id.in_(sorted(flight_ids))).limit(1)
+            select(Flight.origin_icao)
+            .where(Flight.id.in_(sorted(flight_ids)))
+            .order_by(Flight.id)
+            .limit(1)
         )
     ).first()
     return str(row[0]) if row else None
@@ -428,11 +458,59 @@ async def run_hotel_allocation(
     if isinstance(inputs, ServiceResult):
         return inputs
     options, passengers, constraints = inputs
-    return await HotelAllocationService().execute(
+    result = await HotelAllocationService().execute(
         hotel_options=options,
         passengers=passengers,
         business_constraints=constraints,
     )
+
+    # Record the holds. Without this, `hotel_inventory_hold` stays empty and
+    # `load_hotel_options` — which computes availability as `total_rooms` minus active holds —
+    # always sees a full hotel, so eight flights each allocate the same 71 rooms and the shortfall
+    # never appears. The ledger is the whole reason availability is derived rather than a mutated
+    # counter, and a ledger nothing writes to is a counter that never decrements.
+    #
+    # A partial allocation is included: `needs_human` here means rooms *were* secured and a person
+    # must decide about the remainder, so skipping the write would report a shortfall against rooms
+    # that are already committed.
+    if result.payload.get("allocations"):
+        await _record_hotel_holds(session, result=result, target_refs=target_refs)
+    return result
+
+
+async def _record_hotel_holds(
+    session: AsyncSession, *, result: ServiceResult, target_refs: list[str]
+) -> None:
+    """Append one hold per allocated property.
+
+    `action_id` is left null: the action row does not exist until the orchestrator writes it after
+    this returns. The hold's purpose is to make the rooms unavailable to the next search, and it
+    carries the group so the allocation is attributable to the disruption that made it.
+    """
+    from app.models.cascade import HotelInventoryHold
+    from app.models.workflow import Incident
+
+    flight_ids = flight_ids_from(target_refs)
+    group_row = (
+        await session.execute(
+            select(Incident.group_id)
+            .where(Incident.flight_id.in_(sorted(flight_ids)), Incident.group_id.is_not(None))
+            .limit(1)
+        )
+    ).first()
+    group_id = int(group_row[0]) if group_row and group_row[0] is not None else None
+
+    for allocation in result.payload.get("allocations") or []:
+        session.add(
+            HotelInventoryHold(
+                action_id=None,
+                hotel_id=int(allocation["hotel_id"]),
+                incident_group_id=group_id,
+                rooms=int(allocation["rooms"]),
+                is_simulated=True,
+            )
+        )
+    await session.flush()
 
 
 # ---------------------------------------------------------------------- passenger impact

@@ -17,6 +17,7 @@ Owner: Stream C.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC
 from pathlib import Path
@@ -46,7 +47,7 @@ MECHANISM_LEGEND: dict[str, str] = {
 def _route(origin_icao: str, destination_icao: str) -> str:
     origin = IATA_BY_ICAO.get(origin_icao, origin_icao)
     destination = IATA_BY_ICAO.get(destination_icao, destination_icao)
-    return f"{origin} \u2192 {destination}"
+    return f"{origin} -> {destination}"
 
 
 def _why_nine_not_eight(impacts: list[PairingImpact]) -> str:
@@ -64,6 +65,12 @@ def _why_nine_not_eight(impacts: list[PairingImpact]) -> str:
         "can be counted from the graph rather than taken on trust. Coordination and display "
         "only: duty-time legality is not validated anywhere in this system."
     )
+
+
+def _digest(payload: dict) -> str:
+    """32 hex characters over canonical JSON. Deterministic, so a fixture edit moves the digest."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
 def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
@@ -118,7 +125,13 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
                 "mechanism": None,
                 "detail": "Delay risk assessed against the recorded weather and runway state.",
                 "depth": 1,
-                "derived_from": "fixture",
+                "is_at_risk": True,
+                # Null on both, because a fixture edge names no recorded row. Stated as null rather
+                # than given a plausible-looking id: an invented `action:57` would be provenance
+                # that turns out not to exist, which is worse than an honest absence. The live
+                # projection fills exactly one of these, and a CHECK constraint enforces that.
+                "derived_from_action_id": None,
+                "derived_from_prediction_id": None,
             }
         )
 
@@ -148,7 +161,9 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
                 "mechanism": impact.mechanism.value,
                 "detail": impact.detail,
                 "depth": 2,
-                "derived_from": "fixture",
+                "is_at_risk": True,
+                "derived_from_action_id": None,
+                "derived_from_prediction_id": None,
             }
         )
 
@@ -157,9 +172,21 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
         counts[edge["edge_kind"]] = counts.get(edge["edge_kind"], 0) + 1
 
     return {
+        # Same field names as `CascadeGraphOut`, so a renderer written against the live endpoint
+        # works against the fixture unchanged. A contract test asserts the two shapes match.
+        "group_reference": GROUP_REFERENCE,
+        "rule_version": "cascade-graph-v1",
         "nodes": nodes,
         "edges": edges,
         "edge_counts_by_kind": counts,
+        # Empty because a fixture edge names no recorded row. Stated as empty rather than omitted:
+        # "no source actions" is a fact about the fixture, and a missing key would read as an
+        # oversight.
+        "source_action_ids": [],
+        "source_prediction_ids": [],
+        # A real digest of this fixture's own graph, so it changes when the fixture changes. Not a
+        # stand-in for the live snapshot hash, which is computed over recorded actions.
+        "snapshot_hash": _digest({"nodes": nodes, "edges": edges}),
         "completeness": {
             "member_flight_count": len(scenario.affected),
             "flights_with_evidence": len(scenario.affected),
@@ -168,8 +195,9 @@ def _graph(scenario: CascadeScenario, at_risk: list[PairingImpact]) -> dict:
         },
         "note": (
             "Nodes are references to rows that already exist; there is no node table. Edge "
-            "provenance is a fixture marker, not a row id — the live projection carries a real "
-            "action or prediction reference."
+            "provenance is null here because a fixture edge names no recorded row — the live "
+            "projection carries a real action or prediction id, and a CHECK constraint requires "
+            "exactly one of them."
         ),
     }
 
@@ -230,6 +258,17 @@ def _blast_radius(scenario: CascadeScenario, rollups: dict) -> dict:
         },
     ]
     return {
+        "group_reference": GROUP_REFERENCE,
+        # Same phrasing rule as `BlastRadius.headline`: the dimension's own noun, not a bare unit,
+        # so two figures measured in the same unit cannot read as the same quantity.
+        "headline": (
+            ", ".join(
+                f"{dimension['value']} {dimension['unit']}"
+                for dimension in dimensions
+                if dimension["value"]
+            )
+            + f". All {rollups['flights_affected']} declared flights assessed."
+        ),
         "basis": "composed_from_recorded_findings",
         "dimensions": dimensions,
         "completeness": {
@@ -302,6 +341,23 @@ def build_payload(scenario: CascadeScenario = BENGALURU_STORM) -> dict:
         "state": "executing",
         "opened_at": opened_at,
         "rollups": rollups,
+        # Completeness is a property of the computation, so it sits beside `rollups` rather than in
+        # it. The fixture declares a complete cascade because it is a fully worked scenario; the
+        # live payload computes it, and a contract test asserts the two shapes match.
+        # Exactly Stream A's `RollupStatus`, field for field. A contract test compares the two,
+        # because the console reads this shape in fixtures mode and the API's shape live.
+        "rollup_status": {
+            "is_complete": True,
+            "computed_at": opened_at,
+            "note": (
+                f"All {len(flights)} incidents across {len(flights)} declared flights have been "
+                "assessed for both connections and crew."
+            ),
+            "flights_without_incident": [],
+            "membership_is_declared": True,
+        },
+        # Zero because this fixture describes a fully worked cascade: nothing is still held.
+        "awaiting_approval_count": 0,
         "flights": flights,
         "crew_pairings": crew_pairings,
         # Phase 2, additive. Every key above is unchanged, so the existing console keeps

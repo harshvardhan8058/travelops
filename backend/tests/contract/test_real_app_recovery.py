@@ -22,26 +22,20 @@ Owner: Stream C.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-
-import pytest
 from data.generators.cascade_spec import BENGALURU_STORM
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.scenario_queries import affected_pairings_recursive, cascade_rollup
 from app.db.seed import (
     DEMO_DATASET_ID,
     INCIDENT_GROUP_REFERENCE,
-    reset_demo_dataset,
-    seed_demo_dataset,
 )
 from app.models.enums import ActionStatus, ActionType, IncidentState
 from app.models.workflow import Action, Incident, IncidentGroup, Prediction
 from app.orchestrator import dispatch
 from app.orchestrator.engine import Orchestrator
-from tests.contract.postgres_support import create_postgres_engine, requires_postgres
+from tests.contract.postgres_support import requires_postgres
 
 PREFIX = "/api/v1"
 
@@ -57,99 +51,6 @@ EXPECTED_PASSENGERS = 604
 EXPECTED_HOTELS = 11
 
 pytestmark = requires_postgres
-
-
-@pytest.fixture
-async def engine() -> AsyncIterator:
-    db = create_postgres_engine()
-    yield db
-    await db.dispose()
-
-
-@pytest.fixture
-async def sessionmaker_for(engine):
-    return async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
-
-
-@pytest.fixture
-async def seeded(sessionmaker_for) -> AsyncIterator[None]:
-    """The committed dataset, seeded and torn down around each test.
-
-    Migrations are expected to have been applied already (`alembic upgrade head`); this
-    fixture owns rows, not schema, so a test can never mask a missing migration.
-    """
-    async with sessionmaker_for() as session:
-        await _clear_workflow(session)
-        await reset_demo_dataset(session)
-        await seed_demo_dataset(session)
-        await session.commit()
-    yield
-    async with sessionmaker_for() as session:
-        await _clear_workflow(session)
-        await reset_demo_dataset(session)
-        await session.commit()
-
-
-async def _clear_workflow(session) -> None:
-    """Remove any workflow output left by an earlier run, child-first."""
-    from sqlalchemy import delete
-
-    from app.models.workflow import (
-        Action as ActionRow,
-    )
-    from app.models.workflow import (
-        AssuranceEvaluation,
-        DecisionLog,
-        HumanDecision,
-        Notification,
-        Plan,
-        PlanTask,
-    )
-
-    await session.execute(delete(Notification))
-    await session.execute(delete(ActionRow))
-    await session.execute(delete(HumanDecision))
-    await session.execute(delete(AssuranceEvaluation))
-    await session.execute(delete(PlanTask))
-    await session.execute(delete(Plan))
-    await session.execute(delete(DecisionLog))
-    await session.flush()
-
-
-@pytest.fixture
-def registered() -> AsyncIterator[list[str]]:
-    """Stream A's registration path, and only that one.
-
-    `SERVICE_REGISTRY` is process-global, so it is populated explicitly here rather than
-    relying on the app lifespan having run first.
-    """
-    from app.orchestrator.service_registry import register_stage2_services
-
-    dispatch.SERVICE_REGISTRY.clear()
-    actions = register_stage2_services()
-    yield actions
-    dispatch.SERVICE_REGISTRY.clear()
-
-
-@pytest.fixture
-def client(sessionmaker_for, seeded, registered) -> AsyncIterator[TestClient]:
-    """The real app, pointed at the test database."""
-    from app.db.session import get_session
-    from app.main import app
-
-    async def override() -> AsyncIterator:
-        async with sessionmaker_for() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_session] = override
-    with TestClient(app, raise_server_exceptions=False) as test_client:
-        yield test_client
-    app.dependency_overrides.pop(get_session, None)
 
 
 async def _open_incident(sessionmaker_for, flight_id: int) -> str:
@@ -511,13 +412,31 @@ def test_no_second_registry_module_remains():
 
 
 def test_unimplemented_actions_still_refuse(registered):
+    """An action with no service must refuse explicitly rather than silently doing nothing.
+
+    Hotel search and allocation left this list when Phase 2 made them real, so what remains is the
+    genuinely unimplemented set. `evaluate_entitlements` is the interesting one: it *is* implemented
+    and deliberately left unregistered, because its gate requirements name facts the seed does not
+    carry, and registering it would hard-block resolution rather than refuse cleanly.
+    """
     for action in (
-        ActionType.find_hotel_options,
-        ActionType.reserve_hotel_block,
         ActionType.evaluate_entitlements,
         ActionType.record_outcome,
+        ActionType.arrange_ground_transport,
+        ActionType.reassign_gate,
     ):
         assert not dispatch.is_implemented(action)
+
+    # And the converse, so this test cannot pass by the registry having been emptied.
+    for action in (
+        ActionType.check_connections,
+        ActionType.assess_crew_impact,
+        ActionType.notify_passengers,
+        ActionType.find_hotel_options,
+        ActionType.reserve_hotel_block,
+        ActionType.rebook_passengers,
+    ):
+        assert dispatch.is_implemented(action)
 
 
 async def test_the_seeded_dataset_is_untouched_by_a_full_run(client, sessionmaker_for):

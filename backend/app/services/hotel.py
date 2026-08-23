@@ -18,7 +18,7 @@ double-books under a fast click is a demo that has to be explained. More importa
 cannot be replayed: after a reset there is no way to show *why* a property had six rooms left.
 A hold ledger answers both — every room taken names the action that took it.
 
-**Capacity is deliberately short.** Within the ₹6,000 cap the six eligible properties hold 71
+**Capacity is deliberately short.** Within the INR 6,000 cap the six eligible properties hold 71
 rooms; 174 stranded passengers at two per room need 87. The gap is the point. A recovery tool
 that always succeeds teaches an operator nothing, so this returns a partial allocation, a named
 shortfall and `needs_human` — the honest outcome — rather than quietly spilling over the rate
@@ -256,7 +256,7 @@ def allocate_rooms(
                 detail=(
                     f"{take} of {option.available_rooms} available rooms at "
                     f"{option.name}, {option.distance_km} km out, "
-                    f"\u20b9{option.rate_inr} per night"
+                    f"INR {option.rate_inr} per night"
                     + (", partner property" if option.is_partner else "")
                 ),
             )
@@ -279,7 +279,7 @@ def allocate_rooms(
             o.hotel_id for o in options if o.rate_inr > constraints.max_rate_inr
         ),
         constraints_note=(
-            f"Rate cap \u20b9{constraints.max_rate_inr}, "
+            f"Rate cap INR {constraints.max_rate_inr}, "
             f"{constraints.passengers_per_room} passengers per room, "
             f"partner preference {'on' if constraints.prefer_partner else 'off'}."
             + (
@@ -494,7 +494,7 @@ class HotelAllocationService:
             status=ActionStatus.success,
             reason=(
                 f"{result.rooms_allocated} rooms held across {len(result.allocations)} "
-                f"properties for \u20b9{result.total_cost_inr}"
+                f"properties for INR {result.total_cost_inr}"
             ),
             payload=payload,
             evidence_refs=evidence,
@@ -505,3 +505,66 @@ class HotelAllocationService:
 #: Phase 1 name, kept so nothing that imported it breaks. Search is the safe default: the read
 #: cannot take rooms off the market by accident.
 HotelService = HotelSearchService
+
+
+# ------------------------------------------------------------------- group-wide totals
+
+
+async def group_hotel_totals(session: AsyncSession, *, group_id: int) -> dict[str, Any] | None:
+    """Accommodation figures summed across a whole disruption, or None if none were recorded.
+
+    **Not the most recent allocation's payload.** Eight flights draw on one finite inventory, so the
+    last one to run sees only whatever is left. Reading its figures as the group's showed "9 rooms
+    required, 0 short" for a disruption needing 303 rooms against 71 available — and the gap is the
+    entire point of the scenario.
+
+    Lives here, in Stream C's service layer, rather than in the group API, for two reasons. The
+    aggregation is domain logic over recorded findings, which is what a service is for; and
+    `test_phase2_guards` forbids summing an action payload inside `app/api/`, because "just sum the
+    counts" is exactly how 22 distinct at-risk bookings become 176.
+
+    Partial allocations are included. A `needs_human` allocation that secured 71 rooms committed
+    real inventory, and excluding it would report a shortfall against rooms that are already held.
+    `None` — rather than a dictionary of zeros — when nothing has run, so an unknown requirement
+    never reads as no requirement.
+    """
+    from app.db.scenario_queries import group_affected_flights, recorded_actions
+    from app.models.enums import ActionType
+
+    members = await group_affected_flights(session, group_id=group_id)
+    incident_ids = [m.incident_id for m in members if m.incident_id is not None]
+    rows = await recorded_actions(
+        session,
+        incident_ids,
+        ActionType.reserve_hotel_block.value,
+        statuses=("success", "needs_human"),
+    )
+    if not rows:
+        return None
+
+    required = allocated = cost = 0
+    allocations: list[dict[str, Any]] = []
+    for _incident_id, _action_id, payload in rows:
+        required += int(payload.get("rooms_required") or 0)
+        allocated += int(payload.get("rooms_allocated") or 0)
+        cost += int(payload.get("total_cost_inr") or 0)
+        allocations.extend(payload.get("allocations") or [])
+
+    short = max(0, required - allocated)
+    return {
+        "rooms_required": required,
+        "rooms_allocated": allocated,
+        "shortfall_rooms": short,
+        "total_cost_inr": cost,
+        "allocations": allocations,
+        "is_complete": short == 0,
+        "shortfall_note": (
+            f"All {required} rooms secured across the group."
+            if short == 0
+            else (
+                f"{allocated} of {required} rooms secured across the group. {short} rooms short. "
+                "Every property within the rate cap is exhausted, so closing the gap needs a "
+                "decision: raise the cap, go further out, or accept that some passengers wait."
+            )
+        ),
+    }

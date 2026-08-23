@@ -47,7 +47,10 @@ export function GraphEdge({
   /** 'on' when this edge belongs to the selected hop or node; 'off' when something else is. */
   emphasis: 'on' | 'off' | 'neutral';
 }) {
-  // Mechanism is carried by the label, never by the line style alone.
+  // Mechanism is carried by the caption, never by the line style alone — but the caption is drawn
+  // only when this edge is the one being looked at. Every edge captioned at once produced a solid
+  // band of overlapping text rather than a readable label, and the mechanism remains available on
+  // selection, in the node detail panel, and in the crew table below.
   return (
     <g
       className={clsx(
@@ -65,17 +68,16 @@ export function GraphEdge({
           emphasis === 'on' ? 'stroke-2' : 'stroke-1',
         )}
       />
-      <text
-        x={(edge.fromX + edge.toX) / 2}
-        y={(edge.fromY + edge.toY) / 2 - 4}
-        textAnchor="middle"
-        className={clsx(
-          'font-mono text-[9px] uppercase',
-          emphasis === 'on' ? 'fill-accent' : 'fill-fg-muted',
-        )}
-      >
-        {edge.mechanism.replace(/_/g, ' ')}
-      </text>
+      {emphasis === 'on' && edge.mechanism !== edge.edgeKind && (
+        <text
+          x={(edge.fromX + edge.toX) / 2}
+          y={(edge.fromY + edge.toY) / 2 - 4}
+          textAnchor="middle"
+          className="fill-accent font-mono text-[9px] uppercase"
+        >
+          {edge.mechanism.replace(/_/g, ' ')}
+        </text>
+      )}
     </g>
   );
 }
@@ -86,6 +88,8 @@ export function GraphNode({
   dimmed,
   onSelect,
   itemProps,
+  showLabel,
+  showSublabel,
 }: {
   node: CascadeNode;
   selected: boolean;
@@ -97,8 +101,27 @@ export function GraphNode({
    * navigation while leaving the tab stops looking correct.
    */
   itemProps?: { tabIndex: number; 'data-active'?: true };
+  /**
+   * Whether to draw the text caption.
+   *
+   * Off for the dense rows. With 22 booking nodes and 9 rotations sharing one depth layer the
+   * captions overlapped into an unreadable smear — worse than no caption, because it looks like
+   * data and reads as noise, and at projector distance it made the whole layer look broken. The
+   * name stays on `aria-label`, appears when the node is selected, and every record is in the
+   * table below, so nothing is lost except the illegible part.
+   */
+  showLabel?: boolean;
+  /**
+   * Whether to draw the second line under the caption.
+   *
+   * Separate from `showLabel` because density bites the two differently: eight flight numbers fit
+   * across 1080px, but eight `VOBL -> VIDP, +420 min` sublabels run into each other. The route and
+   * delay are both in the blast-radius hop expansion and in the flights table.
+   */
+  showSublabel?: boolean;
 }) {
   const label = node.sublabel ? `${node.label}, ${node.sublabel}` : node.label;
+  const captioned = (showLabel ?? true) || selected;
   return (
     <g
       {...itemProps}
@@ -129,15 +152,17 @@ export function GraphNode({
           selected ? 'stroke-2' : 'stroke-1',
         )}
       />
-      <text
-        x={node.x}
-        y={node.y + node.radius + 12}
-        textAnchor="middle"
-        className={clsx('font-mono text-[10px]', selected ? 'fill-accent' : 'fill-fg')}
-      >
-        {node.label}
-      </text>
-      {node.sublabel && (
+      {captioned && (
+        <text
+          x={node.x}
+          y={node.y + node.radius + 12}
+          textAnchor="middle"
+          className={clsx('font-mono text-[10px]', selected ? 'fill-accent' : 'fill-fg')}
+        >
+          {node.label}
+        </text>
+      )}
+      {node.sublabel && captioned && (showSublabel ?? true) && (
         <text
           x={node.x}
           y={node.y + node.radius + 23}

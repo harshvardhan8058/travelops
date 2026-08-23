@@ -209,7 +209,7 @@ async def project_graph(session: AsyncSession, *, group_id: int) -> CascadeGraph
             kind=NODE_FLIGHT,
             label=member.flight_number,
             sublabel=(
-                f"{member.origin_icao} \u2192 {member.destination_icao}, "
+                f"{member.origin_icao} -> {member.destination_icao}, "
                 f"+{member.delay_minutes_at_injection} min"
             ),
             depth=1,
@@ -320,8 +320,14 @@ async def project_graph(session: AsyncSession, *, group_id: int) -> CascadeGraph
         nodes[_flight_ref(flight_id)].has_evidence = True
 
     # --------------------------------------------------------- accommodation (depth 2)
+    # Partial allocations included on purpose: a `needs_human` hotel action that secured 71 of
+    # 87 rooms committed real inventory, and the edges are what make those rooms visible in the
+    # cascade. The payload's `allocations` list is what is read, not the status.
     for incident_id, action_id, payload in await recorded_actions(
-        session, incident_ids, ActionType.reserve_hotel_block.value
+        session,
+        incident_ids,
+        ActionType.reserve_hotel_block.value,
+        statuses=("success", "needs_human"),
     ):
         flight_id = incident_flight.get(incident_id)
         if flight_id is None:

@@ -149,6 +149,11 @@ class GroupOrchestrator:
 
         Re-running opens nothing new: `open_incident` returns the existing active incident for
         a flight, so a repeated inject cannot double the cascade.
+
+        `opened_incident_ids` reports only the incidents this call actually created. It previously
+        listed every member incident, so a second click told the operator it had opened eight
+        incidents again — the cascade was intact but the report of it was false, which is worse than
+        a visible error because nothing looks wrong.
         """
         group = await self.resolve(reference_or_id)
         members = await group_affected_flights(self._session, group_id=group.id)
@@ -171,6 +176,8 @@ class GroupOrchestrator:
         correlation = correlation_id or f"group-{group.reference}"
         opened: list[int] = []
         outcomes: list[MemberOutcome] = []
+        # Which flights already carried an incident before this call, so "opened" can mean opened.
+        already_open = {member.flight_id for member in members if member.incident_id is not None}
 
         for member in members:
             ctx = await self._orchestrator.open_incident(
@@ -182,7 +189,7 @@ class GroupOrchestrator:
                 demo_dataset_id=group.demo_dataset_id,
                 opened_at=opened_at or group.opened_at,
             )
-            if ctx.incident_id not in opened:
+            if ctx.incident_id not in opened and member.flight_id not in already_open:
                 opened.append(ctx.incident_id)
             outcomes.append(
                 MemberOutcome(

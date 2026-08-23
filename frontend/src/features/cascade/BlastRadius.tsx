@@ -45,7 +45,7 @@ export function BlastRadius({
           <MonoValue>{radius.trigger.airport}</MonoValue> reaches{' '}
           {radius.hops.map((hop, index) => (
             <span key={hop.index}>
-              {index > 0 && ' → '}
+              {index > 0 && ' -> '}
               <Metric
                 value={hop.count}
                 derivation={arrayLengthDerivation(hop.to, hop.count, {
@@ -92,7 +92,7 @@ export function BlastRadius({
                   hop {hop.index}
                 </MonoValue>
                 <span className="min-w-0 flex-1 text-body text-fg">
-                  {hop.from} → {hop.to}
+                  {hop.from} {'->'} {hop.to}
                 </span>
                 <Metric
                   value={hop.count}

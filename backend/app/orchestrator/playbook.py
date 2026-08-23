@@ -53,6 +53,14 @@ class PlaybookStep:
 _WEATHER_PLAYBOOK: tuple[PlaybookStep, ...] = (
     PlaybookStep(action=ActionType.check_connections),
     PlaybookStep(action=ActionType.find_hotel_options),
+    # Allocation depends on the search, and is a separate step because it is a separate
+    # decision: the search commits nothing, this one takes rooms off the market. Two steps mean
+    # an operator can see the options before anything is spent, and the act of spending has its
+    # own evidence and its own place on the timeline.
+    PlaybookStep(
+        action=ActionType.reserve_hotel_block,
+        depends_on=(ActionType.find_hotel_options,),
+    ),
     PlaybookStep(action=ActionType.assess_crew_impact),
     PlaybookStep(
         action=ActionType.notify_passengers,

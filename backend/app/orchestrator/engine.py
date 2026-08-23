@@ -53,6 +53,7 @@ from app.events.types import (
 from app.models.enums import (
     ActionStatus,
     ActionType,
+    AssuranceDecision,
     HumanDecisionType,
     IncidentState,
     TaskState,
@@ -65,6 +66,7 @@ from app.models.workflow import (
     DecisionLog,
     HumanDecision,
     Incident,
+    IncidentGroup,
     Plan,
     Prediction,
 )
@@ -277,7 +279,7 @@ class Orchestrator:
                 event_type="INCIDENT_OPENED",
                 summary=(
                     f"Opened {incident.reference} for "
-                    f"{flight.flight_number} ({flight.origin_icao}→{flight.destination_icao})"
+                    f"{flight.flight_number} ({flight.origin_icao}->{flight.destination_icao})"
                 ),
                 detail={
                     "trigger_type": trigger.value,
@@ -809,9 +811,9 @@ class Orchestrator:
         self._session.add(evaluation)
         await self._session.flush()
 
-        summary = f"{task_row.action_type} → {result.decision.value}"
+        summary = f"{task_row.action_type} -> {result.decision.value}"
         if not outcome.gate_available:
-            summary = f"{task_row.action_type} → refused: {outcome.unavailable_reason}"
+            summary = f"{task_row.action_type} -> refused: {outcome.unavailable_reason}"
         await self._journal(
             ctx,
             stage=STAGE_ASSURE,
@@ -866,6 +868,11 @@ class Orchestrator:
         2. The gate said `needs_human` -> an `approved` human decision for **that same
            evaluation** is required. A rejected decision cannot be reused, and an approval
            for a different evaluation does not transfer.
+
+           A plan approval satisfies this without any special case: the approval service writes a
+           `human_decision` with `scope='plan'` for each evaluation it covers, so it arrives here
+           as an ordinary decision. The engine therefore never needs to know that plan approvals
+           exist, and `test_phase2_guards` asserts it does not.
 
         A replay of an already-recorded idempotency key returns the original result rather
         than acting a second time.
@@ -969,7 +976,7 @@ class Orchestrator:
             stage=STAGE_EXECUTE,
             actor=ACTOR_ORCHESTRATOR,
             event_type="ACTION_COMPLETED",
-            summary=f"{task_row.action_type} → {result.status.value}: {result.reason}",
+            summary=f"{task_row.action_type} -> {result.status.value}: {result.reason}",
             detail={
                 "action_id": action.id,
                 "plan_task_id": task_row.id,
@@ -1159,6 +1166,24 @@ class Orchestrator:
             detail={"llm_mode": self.modes.llm.value, **(assessment or {})},
         )
 
+    async def _risk_airport(self, incident: Incident | None, flight: Flight) -> str:
+        """Which airport's weather explains this flight's disruption.
+
+        The group's airport when the incident belongs to one, because the group declares where the
+        disruption is. Otherwise the flight's origin.
+
+        This matters for arrivals. UK 705 is VAAH to VOBL: the storm is at VOBL, its destination.
+        Reading the origin's weather asked "what is the weather in Ahmedabad", found no observation
+        for it, and left the one inbound flight in the cascade with no risk assessment — so the
+        cascade graph drew seven root-cause edges for eight declared flights and the flight
+        appeared in the picture with nothing explaining why it was there.
+        """
+        if incident is not None and incident.group_id is not None:
+            group = await self._session.get(IncidentGroup, int(incident.group_id))
+            if group is not None and group.airport_icao:
+                return str(group.airport_icao)
+        return str(flight.origin_icao)
+
     async def _assess_delay_risk(self, ctx: WorkflowContext) -> dict[str, Any] | None:
         """Score disruption risk from the recorded observation, and persist a Prediction.
 
@@ -1180,10 +1205,11 @@ class Orchestrator:
 
         incident = await self._session.get(Incident, ctx.incident_id)
         as_of = await self._incident_clock(ctx)
+        airport_icao = await self._risk_airport(incident, flight)
 
         try:
             weather, runways, ruleset = await load_delay_risk_inputs(
-                self._session, flight.origin_icao, as_of=as_of
+                self._session, airport_icao, as_of=as_of
             )
         except LookupError as exc:
             # No observation to reason from. Recorded, and the risk stays absent rather than
@@ -1193,8 +1219,8 @@ class Orchestrator:
                 stage=STAGE_ASSESS,
                 actor="delay_risk_service",
                 event_type="DELAY_RISK_UNAVAILABLE",
-                summary=f"No weather observation available for {flight.origin_icao}",
-                detail={"airport_icao": flight.origin_icao, "detail": str(exc)},
+                summary=f"No weather observation available for {airport_icao}",
+                detail={"airport_icao": airport_icao, "detail": str(exc)},
             )
             return None
 
@@ -1208,7 +1234,7 @@ class Orchestrator:
 
         prediction = Prediction(
             flight_id=flight.id,
-            airport_icao=flight.origin_icao,
+            airport_icao=airport_icao,
             predicted_at=as_of or self._now(),
             risk_index=int(payload["risk_index"]),
             risk_level=payload["risk_level"],
@@ -1357,10 +1383,33 @@ class Orchestrator:
         if evaluation_id is None or plan_task_id is None:
             resolved = await self._pending_approval(ctx)
             if resolved is None:
+                # Nothing the gate held is outstanding. If work remains, go and do it rather than
+                # blocking: an incident whose only `needs_human` task is a service's surfaced
+                # decision can never be cleared by an approval, so waiting would never end.
+                if await self._next_actionable_task(ctx) is not None:
+                    await self._transition(
+                        ctx,
+                        IncidentState.assuring,
+                        stage=STAGE_ASSURE,
+                        summary="No decision outstanding; submitting the next task to the gate",
+                        detail={"plan_id": ctx.plan_id},
+                    )
+                    return
+                # Genuinely nothing left and nothing pending. `awaiting_approval -> resolved` is
+                # not a legal transition and must not become one, so this blocks — and names the
+                # outstanding items so the reason is actionable rather than mysterious.
+                outstanding = [
+                    str(row.action_type)
+                    for row in await self._plan_tasks(ctx)
+                    if TaskState(row.state) is TaskState.needs_human
+                ]
                 await self._block(
                     ctx,
-                    reason="awaiting approval but no evaluation is pending a decision",
-                    detail={"plan_id": ctx.plan_id},
+                    reason=(
+                        "no operator decision is outstanding and no task can proceed; "
+                        f"outstanding items: {', '.join(sorted(outstanding)) or 'none'}"
+                    ),
+                    detail={"plan_id": ctx.plan_id, "outstanding_actions": sorted(outstanding)},
                 )
                 return
             plan_task_id, evaluation_id = resolved
@@ -1370,6 +1419,11 @@ class Orchestrator:
         decision = await self._human_decision(int(evaluation_id))
         if decision is None:
             # Not an error. Waiting for a person is a legitimate resting state.
+            #
+            # A plan approval needs no special case here: Stream A's approval service writes a
+            # `human_decision` with `scope='plan'` for every evaluation it covers, so this lookup
+            # finds it exactly as it finds an action-scoped one. The engine stays unaware that
+            # plan approvals exist, which is what `test_phase2_guards` asserts.
             ctx.steps_taken -= 1
             ctx.last_note = f"waiting for an operator decision on evaluation {evaluation_id}"
             return
@@ -1449,9 +1503,53 @@ class Orchestrator:
         ctx.metadata.pop("current_plan_task_id", None)
         ctx.metadata.pop("current_assurance_id", None)
 
+        if outcome.result.status is ActionStatus.needs_human and _carries_evidence(outcome.result):
+            # The service did its work and surfaced a decision. That is not a failure, and it
+            # must not stop the rest of the plan.
+            #
+            # The case that forced this distinction is the hotel allocation: 71 of 87 rooms are
+            # secured and 16 remain, which is a real decision for a person — raise the cap, go
+            # further out, or accept that some passengers wait. Treating it as a failure would
+            # abandon the 71 rooms that were secured *and* stop the connection, crew and
+            # notification work for 604 passengers because 32 of them lack a bed. The refusal is
+            # recorded on the action, named on the timeline, and carried into the blast radius as
+            # `rooms_short`; nothing about it is hidden by continuing.
+            #
+            # A `failure`, a `skipped`, or a `needs_human` with no provenance still blocks, below.
+            # The difference is whether the service actually worked: `_carries_evidence` is the
+            # test, and it is why an unimplemented service still stops the plan instead of being
+            # quietly filed as an outstanding item.
+            await self._journal(
+                ctx,
+                stage=STAGE_EXECUTE,
+                actor=ACTOR_ORCHESTRATOR,
+                event_type="TASK_NEEDS_HUMAN",
+                summary=(
+                    f"{task_row.action_type} needs a person: {outcome.result.reason} "
+                    "Continuing with the rest of the plan."
+                ),
+                detail={
+                    "action_id": outcome.action_id,
+                    "plan_task_id": task_row.id,
+                    "status": outcome.result.status.value,
+                    **outcome.result.payload,
+                },
+            )
+            if await self._next_actionable_task(ctx) is not None:
+                await self._transition(
+                    ctx,
+                    IncidentState.assuring,
+                    stage=STAGE_ASSURE,
+                    summary="Outstanding item recorded; submitting the next task to the gate",
+                    detail={"plan_id": ctx.plan_id, "plan_task_id": task_row.id},
+                )
+                return
+            await self._resolve(ctx)
+            return
+
         if outcome.result.status is not ActionStatus.success:
-            # An explicit refusal or failure stops the plan. Nothing is invented to keep
-            # the run looking healthy.
+            # A failure, a skip, or a refusal with no provenance stops the plan. Nothing is
+            # invented to keep the run looking healthy.
             await self._block(
                 ctx,
                 reason=outcome.result.reason,
@@ -1541,12 +1639,30 @@ class Orchestrator:
         return None
 
     async def _pending_approval(self, ctx: WorkflowContext) -> tuple[int, int] | None:
+        """The first task genuinely waiting on a person, as `(plan_task_id, evaluation_id)`.
+
+        "Pending approval" is defined by the **evaluation's decision**, not by the task state.
+        Task state `needs_human` is overloaded: the gate holding a task and a service surfacing a
+        decision both land there, and they need opposite handling.
+
+        Keying off the task state alone deadlocked the run. After the hotel allocation reported a
+        16-room shortfall its task became `needs_human`, and the engine then waited forever for an
+        operator decision on an evaluation that had already said `execute` and whose action had
+        already run. Filtering on `decision == needs_human` excludes it, because the gate never
+        held it.
+
+        Note what is deliberately *not* filtered: whether a decision already exists. An approved
+        evaluation still needs its task executed, so it is still the pending item until it runs.
+        """
         for row in await self._plan_tasks(ctx):
             if TaskState(row.state) is not TaskState.needs_human:
                 continue
             stmt = (
                 select(AssuranceEvaluation)
-                .where(AssuranceEvaluation.plan_task_id == row.id)
+                .where(
+                    AssuranceEvaluation.plan_task_id == row.id,
+                    AssuranceEvaluation.decision == AssuranceDecision.needs_human,
+                )
                 .order_by(AssuranceEvaluation.id.desc())
                 .limit(1)
             )
@@ -1616,17 +1732,32 @@ class Orchestrator:
 
     async def _resolve(self, ctx: WorkflowContext) -> None:
         rows = await self._plan_tasks(ctx)
+        outstanding = [r for r in rows if TaskState(r.state) is TaskState.needs_human]
         metrics = {
             "tasks_total": len(rows),
             "tasks_succeeded": sum(1 for r in rows if TaskState(r.state) is TaskState.succeeded),
             "tasks_skipped": sum(1 for r in rows if TaskState(r.state) is TaskState.skipped),
+            # Tasks whose service surfaced a decision rather than completing. Counted separately
+            # and named, so "resolved" can never be read as "nothing left to do".
+            "tasks_needing_human": len(outstanding),
+            "outstanding_actions": [str(r.action_type) for r in outstanding],
             "steps_taken": ctx.steps_taken,
         }
+        # The summary is the line an operator reads on the timeline, so it states the outstanding
+        # work rather than leaving it to be inferred from a metric.
+        summary = (
+            "Every task in the plan completed"
+            if not outstanding
+            else (
+                f"Plan worked to completion with {len(outstanding)} item(s) still needing a "
+                f"person: {', '.join(sorted(str(r.action_type) for r in outstanding))}"
+            )
+        )
         await self._transition(
             ctx,
             IncidentState.resolved,
             stage=STAGE_RESOLVE,
-            summary="Every task in the plan completed",
+            summary=summary,
             detail=metrics,
         )
         await self._publish(
@@ -1794,6 +1925,34 @@ def _contract_task(row: PlanTaskRow) -> PlanTask:
         inputs=dict(row.inputs or {}),
         depends_on=[str(dep) for dep in (row.depends_on or [])],
     )
+
+
+#: `provenance_kind` on a result that did not come from doing anything. `dispatch.refusal` and
+#: the service adapters' `_unavailable` both use it.
+PROVENANCE_UNAVAILABLE = "unavailable"
+
+
+def _carries_evidence(result: ServiceResult) -> bool:
+    """Whether a `needs_human` result came from a service that actually ran.
+
+    This is the line between two outcomes that share a status and mean opposite things:
+
+    * The hotel allocation secured 71 of 87 rooms and needs a person to decide about the other
+      16. It ran, it produced evidence, and the plan should continue around it.
+    * `evaluate_entitlements` has no implementation, so nothing happened at all. Continuing would
+      let an incident resolve with a task nobody performed and nobody was told about.
+
+    `provenance_kind == "unavailable"` is the discriminator because a result with no provenance is
+    not a finding. Checked alongside the refusal reason codes so a future adapter that forgets the
+    provenance still fails closed.
+    """
+    if result.provenance_kind == PROVENANCE_UNAVAILABLE:
+        return False
+    reason_code = (result.payload or {}).get("reason_code")
+    return reason_code not in {
+        dispatch.SERVICE_NOT_IMPLEMENTED,
+        "SERVICE_INPUTS_UNAVAILABLE",
+    }
 
 
 def _task_state_for(status: ActionStatus) -> TaskState:

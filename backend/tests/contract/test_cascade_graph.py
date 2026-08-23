@@ -228,6 +228,35 @@ async def worked(tmp_path):
                 payload={"at_risk": at_risk},
             )
 
+            # A recorded accommodation requirement, so the what-if levers below have a room basis
+            # to re-evaluate. The what-if reads the requirement the services established rather
+            # than recomputing it from `passengers_affected`; with no allocation recorded, zero
+            # rooms required is the honest answer, and a lever test against zero asserts nothing.
+            await _record_action(
+                session,
+                incident_id=incident_id,
+                action_type=ActionType.reserve_hotel_block,
+                payload={
+                    "rooms_required": 10,
+                    "rooms_allocated": 4,
+                    "shortfall_rooms": 6,
+                    "total_cost_inr": 12000,
+                    "allocations": [
+                        {
+                            "hotel_id": 1,
+                            "hotel_name": "Airport Transit Inn",
+                            "rooms": 4,
+                            "rate_inr": 2500,
+                            "nights": 1,
+                            "cost_inr": 10000,
+                            "is_partner": True,
+                            "distance_km": 1.5,
+                            "detail": "recorded by the test fixture",
+                        }
+                    ],
+                },
+            )
+
         await session.commit()
         yield session, group.id
     await engine.dispose()

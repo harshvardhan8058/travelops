@@ -200,7 +200,7 @@ export function flightRiskDerivation(flight: FlightRow, origin?: AirportConditio
 
   return {
     title: `Risk index ${flight.risk_index} · ${flight.risk_level}`,
-    subtitle: `${flight.flight_number} · ${flight.origin_icao} → ${flight.destination_icao}`,
+    subtitle: `${flight.flight_number} · ${flight.origin_icao} -> ${flight.destination_icao}`,
     inputs,
     // `rule` is deliberately omitted rather than filled in: the RULE section renders
     // "not recorded", which is the truthful answer for this endpoint.

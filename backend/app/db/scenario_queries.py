@@ -588,16 +588,25 @@ async def _group_incident_flight_ids(session: AsyncSession, group_id: int) -> di
 
 
 async def recorded_actions(
-    session: AsyncSession, incident_ids: list[int], action_type: str
+    session: AsyncSession,
+    incident_ids: list[int],
+    action_type: str,
+    *,
+    statuses: tuple[str, ...] | None = None,
 ) -> list[tuple[int, int, dict[str, Any]]]:
-    """(incident_id, action_id, payload) for every successful action of this type in the group.
+    """(incident_id, action_id, payload) for recorded actions of this type in the group.
 
-    Only `success` counts. A `needs_human` refusal carries no findings, and treating one as
-    an empty finding would quietly shrink a total.
+    `success` only by default. A refusal usually carries no findings, and treating one as an empty
+    finding would quietly shrink a total.
 
-    The action id is returned because `disruption_edge.derived_from_action_id` is NOT NULL:
-    every edge in the cascade graph names the recorded action it came from. An edge without
-    one would be an assertion rather than evidence.
+    `statuses` widens that, and exists for exactly one case: a **partial** hotel allocation is
+    recorded as `needs_human` and yet genuinely committed rooms. Excluding it would draw a cascade
+    with no accommodation edges while 71 rooms sat held in the ledger — the graph would be missing
+    a relationship the database can prove. Callers that widen it must read the payload rather than
+    the status, which is why this is opt-in per call site rather than a change to the default.
+
+    The action id is returned because every edge in the cascade graph names the recorded row it
+    came from. An edge without one would be an assertion rather than evidence.
     """
     from app.models.enums import ActionStatus
     from app.models.workflow import Action, Plan, PlanTask
@@ -613,7 +622,7 @@ async def recorded_actions(
             .where(
                 Plan.incident_id.in_(incident_ids),
                 PlanTask.action_type == action_type,
-                Action.status == ActionStatus.success,
+                Action.status.in_(statuses or (ActionStatus.success.value,)),
             )
             .order_by(Plan.incident_id, Action.id)
         )

@@ -176,6 +176,7 @@ Being precise about this matters more than a green tick.
 | `alembic upgrade head`, `make seed`, `make demo` | Inside the built API image, against PostgreSQL 16 |
 | The recovery journey above, to `resolved` | The real Uvicorn process over HTTP, against PostgreSQL 16, with Redis deliberately unreachable |
 | Backend suite | 1068 passing; 1084 with `TRAVELOPS_TEST_DATABASE_URL` set, including 16/16 real-app PostgreSQL tests |
+| Phase 2 journey | `POST /incident-groups/{ref}/run` → approve → run → 8 resolved; cascade graph, blast radius, plan assurance, what-if and replay all served from the database |
 | Determinism | Seed digest `fa9564fc4afefc5d` reproduced across runs |
 
 **Not yet confirmed by anyone:** `docker compose up` orchestrating all four services together on

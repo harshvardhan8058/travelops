@@ -305,12 +305,28 @@ class TestRealServiceResults:
         assert set(actions) == {
             "check_connections",
             "find_hotel_options",
+            # Allocation is planned as well as registered, or no room is ever held and the cascade
+            # shows no accommodation edge for a disruption that committed 71 rooms.
+            "reserve_hotel_block",
             "assess_crew_impact",
             "notify_passengers",
         }
         for action in actions.values():
-            assert action["status"] == "success"
             assert "SERVICE_NOT_IMPLEMENTED" not in action["reason"]
+            # `reserve_hotel_block` legitimately lands on `needs_human`: inside the rate cap the six
+            # eligible properties hold 71 rooms against the 87 the primary flight needs, and a
+            # partial allocation with a named shortfall is the honest outcome, not a failure.
+            # Everything else must succeed, so a service quietly refusing still fails this test.
+            expected = (
+                {"success", "needs_human"}
+                if action["action_type"] == "reserve_hotel_block"
+                else {"success"}
+            )
+            assert action["status"] in expected, action
+
+        shortfall = actions["reserve_hotel_block"]
+        if shortfall["status"] == "needs_human":
+            assert "rooms short" in shortfall["reason"]
 
     def test_connection_results_are_computed_from_itineraries(self, storm_client, injected):
         body = self._resolve(storm_client, injected)

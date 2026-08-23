@@ -48,6 +48,20 @@ class BlastRadiusDimension(BaseModel):
     def qualifier(self) -> str:
         return "" if self.is_complete else " (at least)"
 
+    @property
+    def headline_noun(self) -> str:
+        """A short noun for the headline: the unit, unless two dimensions would share one.
+
+        `rooms_required` and `rooms_short` are both measured in rooms, so the unit alone cannot tell
+        them apart in a sentence. Taken from the label rather than hardcoded per key, so a new
+        dimension is described by its own label instead of inheriting a mapping nobody updated.
+        """
+        if self.unit == "rooms":
+            return self.label.lower()
+        if self.unit == "INR":
+            return "INR committed"
+        return self.unit
+
 
 class BlastRadius(BaseModel):
     """The composed picture. No dimension originates here."""
@@ -80,9 +94,13 @@ class BlastRadius(BaseModel):
 
         Deliberately one string containing both the totals and the qualification. Splitting them
         into separate fields invites a UI that renders the first and drops the second.
+
+        Each figure carries its dimension's own short name rather than its bare unit. Units alone
+        produced "303 rooms, 232 rooms" — two different quantities reading as the same one, which is
+        exactly the kind of ambiguity that makes a reviewer stop trusting the row.
         """
         parts = [
-            f"{dimension.value} {dimension.unit}{dimension.qualifier}"
+            f"{dimension.value} {dimension.headline_noun}{dimension.qualifier}"
             for dimension in self.dimensions
             if dimension.value
         ]
