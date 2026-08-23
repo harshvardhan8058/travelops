@@ -72,13 +72,17 @@
    * TEXT on --state-neutral-bg, a 12% tint of itself: at #66757f that combination measured
    * 3.30:1. Badge labels are 12px, so they need the full 4.5:1 rather than the large-text
    * allowance. This value measures 4.94:1 on the tint over --bg-surface. */
-  --state-neutral: #8a96a0;
+  /* #8a96a0 measured 4.94:1 on the tint over --bg-surface, which is what the note above was
+   * written against — but the "not evaluated" badge in the plan assurance matrix sits over a
+   * table row, where the same tint composites lighter and it measured 4.49:1. One hundredth
+   * under the floor is still under it. This value measures 4.96:1 there. */
+  --state-neutral: #929ea8;
 
   --state-ok-bg: rgba(61, 214, 140, 0.12);
   --state-warn-bg: rgba(245, 166, 35, 0.12);
   --state-crit-bg: rgba(247, 125, 130, 0.12);
   --state-info-bg: rgba(91, 157, 249, 0.12);
-  --state-neutral-bg: rgba(138, 150, 160, 0.12);
+  --state-neutral-bg: rgba(146, 158, 168, 0.12);
 
   --focus-ring: #3fc9de;
 
