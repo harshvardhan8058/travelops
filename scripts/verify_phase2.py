@@ -9,8 +9,8 @@ Runs against a live API, so the same command works on Windows PowerShell, macOS 
     Get-Content scripts/verify_phase2.py | docker compose exec -T api python -
 
 Run it after `make up`, `make migrate`, `make seed` and `make demo-cascade`. It drives the whole
-network journey — group open, cascade run, blast radius, graph, candidate plans, plan comparison,
-group assurance, plan approval, execution, resolution, replay — and exits non-zero if any check
+network journey -- group open, cascade run, blast radius, graph, candidate plans, plan comparison,
+group assurance, plan approval, execution, resolution, replay -- and exits non-zero if any check
 fails, so a partial pass cannot be misread as a pass.
 
 It is a reporter, not a fixture. Every figure it prints came from a response or a row; nothing is
@@ -509,7 +509,7 @@ def check_what_if_zero_write() -> None:
 def check_action_approvals() -> int:
     """Approve each held evaluation individually, as P2-D3 requires for high risk.
 
-    A plan approval cannot cover these — they are high-risk notifications, and every one gets its
+    A plan approval cannot cover these -- they are high-risk notifications, and every one gets its
     own decision, its own record and its own actor. That is the whole argument the gate exists to
     make, so the journey has to actually make it rather than describe it.
     """

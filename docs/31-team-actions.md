@@ -193,6 +193,18 @@ If `Copy-Item` reports `Cannot find path ...\.env.example` or compose reports
 `no configuration file provided: not found`, you are one directory too high. `cd travelops`
 and try again — that is the single most common mistake here.
 
+If the API exits at step 3 with
+
+```text
+ValidationError: llm_mode  Input should be 'live', 'fixture' or 'off'
+```
+
+the `.env` values carry a trailing carriage return. `.gitattributes` pins LF so a fresh clone
+cannot produce this, and `Settings` strips whitespace so an older working copy no longer trips on
+it — but if you are on a checkout that predates both, `git rm -r --cached . && git reset --hard`
+re-checks-out with the correct endings. The value looks correct in every editor, which is why the
+error names the enum and not the character.
+
 PowerShell equivalents for the remaining targets:
 
 | Makefile target | PowerShell |
