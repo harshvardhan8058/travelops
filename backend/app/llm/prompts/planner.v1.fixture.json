@@ -1,0 +1,29 @@
+{
+  "note": "Canned planner.v1 response for LLM_MODE=fixture. An A-owned artefact next to the prompt it answers, so the parse-validate-reflect path is exercised on every run without a network call. Deliberately proposes reassign_gate, which has no registered service, so the tool-invocation boundary is exercised too: reflection drops it and records why.",
+  "response": {
+    "status": "success",
+    "reason": "Connections are time-critical and drive who needs accommodation, so they are assessed first; passenger contact follows the assessments that justify it.",
+    "evidence_refs": ["incident:fixture", "weather:VOBL"],
+    "payload_type": "planner.v1",
+    "tasks": [
+      { "action": "check_connections", "target_refs": [], "inputs": {}, "depends_on": [] },
+      { "action": "find_hotel_options", "target_refs": [], "inputs": {}, "depends_on": [] },
+      { "action": "assess_crew_impact", "target_refs": [], "inputs": {}, "depends_on": [] },
+      { "action": "reassign_gate", "target_refs": [], "inputs": {}, "depends_on": [] },
+      {
+        "action": "notify_passengers",
+        "target_refs": [],
+        "inputs": {},
+        "depends_on": ["check_connections"]
+      }
+    ]
+  },
+  "audit": {
+    "generator": "planner-agent",
+    "prompt_version": "planner.v1",
+    "model_self_report": 82,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 0
+  }
+}

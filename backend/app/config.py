@@ -103,7 +103,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://travelops:travelops@localhost:5432/travelops"
     redis_url: str = "redis://localhost:6379/0"
 
-    llm_mode: LLMMode = LLMMode.fixture
+    #: Reasoning agents are opt-in. `off` means the deterministic playbook is the planner,
+    #: which is the path the demo is verified on; a model is an improvement on it, never a
+    #: prerequisite. Defaulting to `fixture` would silently route the demo through an agent.
+    llm_mode: LLMMode = LLMMode.off
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     groq_temperature: float = 0.1
