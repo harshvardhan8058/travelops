@@ -58,6 +58,12 @@ from app.models.enums import ActionType, AssuranceDecision, CheckState, RiskTier
 #: semantics it was decided under says so, rather than implying a version it never loaded.
 CONFIG_UNAVAILABLE: Final = "unavailable"
 
+#: Sections of a versioned gate config that belong to the PLAN level, validated by
+#: `app.assurance.plan_gate.load_plan_config`. Listed here so one file can serve both levels:
+#: duplicating the action-level blocks into a second file would create two sources of truth for
+#: `risk_tiers`, and the copy nobody loads is the one that eventually disagrees.
+_PLAN_LEVEL_SECTIONS: Final[frozenset[str]] = frozenset({"plan", "what_if"})
+
 #: Aggregation rule 1. These three conditions are FAIL regardless of the state a check
 #: reported, so the rule holds even if a check is later written to be more forgiving.
 _HARD_FAIL_CODES: Final[frozenset[ReasonCode]] = frozenset(
@@ -508,11 +514,18 @@ def load_config_with_digest(path: str | Path) -> tuple[AssuranceConfig, str]:
             details={"path": str(resolved), "reason_code": ReasonCode.CONFIG_MISSING.value},
         )
 
+    # Plan-level sections belong to the same versioned file but are read by
+    # `app.assurance.plan_gate.load_plan_config`, which validates them properly. Removing them
+    # here lets ONE config file serve both levels instead of duplicating `risk_tiers`,
+    # `freshness` and `warn_allowed_actions` into a second file that would drift. `extra="forbid"`
+    # still applies to everything else, so a genuine typo remains an error.
+    action_level = {key: value for key, value in parsed.items() if key not in _PLAN_LEVEL_SECTIONS}
+
     try:
         # extra="forbid" on AssuranceConfig means an unrecognised key is an error rather than
         # a setting that silently does nothing. A safety config must not contain a typo that
         # reads as permissive.
-        config = AssuranceConfig.model_validate(parsed)
+        config = AssuranceConfig.model_validate(action_level)
     except ValidationError as exc:
         raise AssuranceConfigMissing(
             f"assurance config at {resolved} is invalid; no action can be authorised",

@@ -44,6 +44,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.assurance.authorship import ProposalAuthorship, authorship_constraints
 from app.assurance.checks import dedupe
 from app.assurance.gate import POLICY_BEARING_ACTIONS
 from app.config import PolicyMode, Settings, get_settings, resolve_repo_path
@@ -337,6 +338,10 @@ def gate_requirements(
     pack: LoadedPack | None = None,
     settings: Settings | None = None,
     business_rows: list[dict[str, Any]] | None = None,
+    authorship: ProposalAuthorship | None = None,
+    payload: dict[str, Any] | None = None,
+    proposed_evidence_refs: list[str] | None = None,
+    known_evidence_refs: list[str] | None = None,
 ) -> GateRequirements:
     """Derive what the gate must demand for this action, from the pack in force.
 
@@ -349,6 +354,12 @@ def gate_requirements(
     refusing internally where the decision is not recorded as an authorisation. Omitting it
     changes nothing.
 
+    `authorship` is Phase 3. When the proposal came from a reasoning agent, supply it along with
+    the proposed `payload` and, where the caller holds an evidence ledger,
+    `known_evidence_refs`. The gate then refuses a payload asserting something only the system
+    may determine, and a citation nobody recorded. Omitting it changes nothing, so a
+    deterministic plan behaves exactly as it did in Phase 2.
+
     Never raises. A pack that cannot be loaded, applicability that cannot be resolved and an
     entitlement that cannot be computed all come back as requirements that fail closed, so
     there is one path through the gate rather than an exception branch around it.
@@ -357,6 +368,16 @@ def gate_requirements(
     business, business_versions = _business_constraints(
         action_type=action_type, business_rows=business_rows
     )
+
+    # Phase 3. Empty for a deterministic proposal, so Phase 1 and Phase 2 behaviour is unchanged.
+    authored = authorship_constraints(
+        action_type=action_type,
+        payload=payload or {},
+        authorship=authorship,
+        proposed_evidence_refs=proposed_evidence_refs,
+        known_evidence_refs=known_evidence_refs,
+    )
+    business = [*business, *authored]
 
     if action_type not in POLICY_BEARING_ACTIONS:
         # The pack has nothing to say about reserving a hotel block or checking connections.

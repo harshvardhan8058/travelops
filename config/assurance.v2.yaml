@@ -22,6 +22,13 @@ freshness:
 
 # ---------------------------------------------------------------- action risk tiers
 # Unchanged from v1. An action type absent from this map is treated as HIGH.
+#
+# NOTE ON WHAT IS LIVE. `Settings.assurance_config_path` points at v1 and `plan_config_path`
+# points here, deliberately: switching the action path to v2 would change `config_version` on
+# every new evaluation from `assurance-v1` to `assurance-v2`, and a Phase 1 record must stay
+# interpretable under the semantics it was decided by. So today the ACTION-level blocks below
+# are carried for completeness and are not what the action gate reads — editing them changes
+# nothing until that path is switched. The `plan:` and `what_if:` sections below ARE live.
 risk_tiers:
   check_connections: low
   assess_crew_impact: low
