@@ -1620,6 +1620,85 @@
         "title": "GroupFlightOut",
         "type": "object"
       },
+      "GroupImpactResponse": {
+        "additionalProperties": false,
+        "description": "Per-entity impact for a disruption, read from `passenger_impact`.\n\nDerived at group scope alongside the cascade snapshot, because a ranking over persisted rows has\nno external effect \u2014 the same reason delay risk is not gated. It authorises nothing.",
+        "properties": {
+          "basis": {
+            "const": "persisted_records",
+            "default": "persisted_records",
+            "title": "Basis",
+            "type": "string"
+          },
+          "cohorts": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactCohortOut"
+            },
+            "title": "Cohorts",
+            "type": "array"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "group_reference": {
+            "title": "Group Reference",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "passengers": {
+            "items": {
+              "$ref": "#/components/schemas/PassengerImpactOut"
+            },
+            "title": "Passengers",
+            "type": "array"
+          },
+          "passengers_assessed": {
+            "title": "Passengers Assessed",
+            "type": "integer"
+          },
+          "returned": {
+            "default": 0,
+            "title": "Returned",
+            "type": "integer"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "ruleset_hash": {
+            "title": "Ruleset Hash",
+            "type": "string"
+          },
+          "unassessed_factors": {
+            "items": {
+              "$ref": "#/components/schemas/UnassessedFactorOut"
+            },
+            "title": "Unassessed Factors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "group_reference",
+          "rule_version",
+          "ruleset_hash",
+          "passengers_assessed",
+          "note"
+        ],
+        "title": "GroupImpactResponse",
+        "type": "object"
+      },
       "GroupMemberOut": {
         "additionalProperties": false,
         "properties": {
@@ -1908,6 +1987,75 @@
         ],
         "title": "HumanDecisionType",
         "type": "string"
+      },
+      "ImpactCohortOut": {
+        "additionalProperties": false,
+        "description": "A band of passengers needing the same kind of handling.",
+        "properties": {
+          "band": {
+            "title": "Band",
+            "type": "string"
+          },
+          "booking_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Booking Ids",
+            "type": "array"
+          },
+          "factor_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Factor Counts",
+            "type": "object"
+          },
+          "highest_index": {
+            "title": "Highest Index",
+            "type": "integer"
+          },
+          "lowest_index": {
+            "title": "Lowest Index",
+            "type": "integer"
+          },
+          "passenger_count": {
+            "title": "Passenger Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "band",
+          "passenger_count",
+          "lowest_index",
+          "highest_index"
+        ],
+        "title": "ImpactCohortOut",
+        "type": "object"
+      },
+      "ImpactFactorOut": {
+        "additionalProperties": false,
+        "description": "One named reason a passenger scored where they did.\n\nEvery point in `priority_index` is attributable to one of these. A score without its factors is\na number nobody in an operations room can argue with, which is worse than no score.",
+        "properties": {
+          "factor": {
+            "title": "Factor",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "factor",
+          "weight",
+          "source"
+        ],
+        "title": "ImpactFactorOut",
+        "type": "object"
       },
       "IncidentDetailResponse": {
         "additionalProperties": false,
@@ -2262,6 +2410,63 @@
         ],
         "title": "IncidentState",
         "type": "string"
+      },
+      "PassengerImpactOut": {
+        "additionalProperties": false,
+        "description": "One passenger's recorded priority. A constraint ranking, not a probability.",
+        "properties": {
+          "booking_id": {
+            "title": "Booking Id",
+            "type": "integer"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactFactorOut"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "passenger_id": {
+            "title": "Passenger Id",
+            "type": "integer"
+          },
+          "passenger_reference": {
+            "title": "Passenger Reference",
+            "type": "string"
+          },
+          "pnr": {
+            "title": "Pnr",
+            "type": "string"
+          },
+          "priority_band": {
+            "title": "Priority Band",
+            "type": "string"
+          },
+          "priority_index": {
+            "title": "Priority Index",
+            "type": "integer"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "ruleset_hash": {
+            "title": "Ruleset Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "passenger_id",
+          "passenger_reference",
+          "booking_id",
+          "pnr",
+          "priority_index",
+          "priority_band",
+          "rule_version",
+          "ruleset_hash"
+        ],
+        "title": "PassengerImpactOut",
+        "type": "object"
       },
       "PlanApprovalPreview": {
         "additionalProperties": false,
@@ -3390,6 +3595,31 @@
         "title": "TimelineResponse",
         "type": "object"
       },
+      "UnassessedFactorOut": {
+        "additionalProperties": false,
+        "description": "A factor the ruleset declares that no service has established yet.\n\nThis is the distinction the whole surface turns on. A factor that is **absent because its\ninput has not been produced** is not the same as a factor that is **false**, and a UI that\nrenders both as \"no\" tells an operator that nobody needs rebooking when nobody has looked.\n\n`no_onward_option_today` and `stranded_mid_itinerary` are Rebooking's findings. Until Rebooking\nruns they are unestablished, and they are named here rather than silently defaulted.",
+        "properties": {
+          "established_by": {
+            "title": "Established By",
+            "type": "string"
+          },
+          "factor": {
+            "title": "Factor",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor",
+          "reason",
+          "established_by"
+        ],
+        "title": "UnassessedFactorOut",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -4102,6 +4332,61 @@
           }
         },
         "summary": "The disruption graph, projected from recorded rows",
+        "tags": [
+          "cascade"
+        ]
+      }
+    },
+    "/api/v1/incident-groups/{group_ref}/impacts": {
+      "get": {
+        "description": "Read `passenger_impact`. Reads rows; derives nothing and authorises nothing.\n\nThe banding and the counts are built in `services/passenger_impact`, not here: aggregating in\nthe transport layer is what `test_phase2_guards` forbids, because a figure computed next to a\nresponse model is a figure nobody can trace back to a row.\n\n`unassessed_factors` is the part that matters. Two of the ruleset's factors \u2014 whether an onward\noption remains today, and whether a passenger is stranded mid-itinerary \u2014 are Rebooking's\nfindings and nothing has established them. They are false in the rows because that is all the\nrecord supports, and they are named here so the console can render \"not established\" rather than\n\"no\". The difference is the difference between \"nobody needs rebooking\" and \"nobody has looked\".",
+        "operationId": "get_group_impacts_api_v1_incident_groups__group_ref__impacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_ref",
+            "required": true,
+            "schema": {
+              "title": "Group Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupImpactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Per-passenger recorded priorities for the group",
         "tags": [
           "cascade"
         ]

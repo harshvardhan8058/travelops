@@ -30,7 +30,10 @@ const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
 function useRouteIncidentId(fallback: string): string {
   const { pathname } = useLocation();
-  const match = /^\/(?:incidents|policy|replay|reports|plans)\/([^/]+)/.exec(pathname);
+  // `(?!group\/)` keeps `/replay/group/GRP-...` out: 'group' is a scope, not an incident
+  // reference, and capturing it would send the shell's assurance query after an incident that
+  // does not exist. The group replay route falls back to the demo incident for the rail.
+  const match = /^\/(?:incidents|policy|replay|reports|plans)\/(?!group\/)([^/]+)/.exec(pathname);
   const captured = match?.[1];
   return captured ? decodeURIComponent(captured) : fallback;
 }
@@ -72,6 +75,8 @@ export function App() {
         <Route path="/cascade/:groupId" element={<CascadeExplorer />} />
         <Route path="/incidents/:incidentId" element={<RecoveryWorkspace />} />
         <Route path="/policy/:incidentId" element={<PolicyScreen />} />
+        {/* Group replay first: `/replay/group/:groupRef` must not match `:incidentId`. */}
+        <Route path="/replay/group/:groupRef" element={<ReplayScreen />} />
         <Route path="/replay/:incidentId" element={<ReplayScreen />} />
         <Route path="/sources" element={<SourcesLedger />} />
         {/*

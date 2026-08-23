@@ -32,7 +32,9 @@ import type {
   CheckResult,
   CrewPairingImpact,
   FlightRow,
+  ImpactCohort,
   IncidentDetail,
+  PassengerImpact,
   Provenance,
   RiskEvidence,
   WeatherObservation,
@@ -740,5 +742,84 @@ export function blastDimensionDerivation(
         : 'Not every declared flight has been assessed, so this is a floor rather than a total.',
     },
     evidenceRefs: [],
+  };
+}
+
+/**
+ * One passenger's priority index.
+ *
+ * The whole justification is on screen: every point is attributed to a named factor with the column
+ * or recorded finding it was read from. A score an operator cannot argue with is worse than no
+ * score, and this is the figure that would decide who is offered one of a short supply of rooms.
+ *
+ * The caveat is standing rather than per-passenger. It says what class of figure this is, because an
+ * index between 0 and 100 looks like a percentage and this one is not.
+ */
+export function passengerImpactDerivation(passenger: PassengerImpact): Derivation {
+  return {
+    title: `${passenger.priority_index}/100, ${passenger.priority_band}`,
+    subtitle: `${passenger.passenger_reference} · PNR ${passenger.pnr}`,
+    inputs:
+      passenger.factors.length > 0
+        ? passenger.factors.map((factor) => ({
+            label: factor.factor.replace(/_/g, ' '),
+            value: `+${factor.weight}`,
+            detail: `read from ${factor.source}`,
+          }))
+        : [
+            {
+              label: 'no factor applies',
+              value: '0',
+              detail: 'This passenger sits at the base priority; nothing recorded raises it.',
+            },
+          ],
+    rule: {
+      kind: 'rule',
+      id: passenger.rule_version,
+      version: `ruleset ${passenger.ruleset_hash}`,
+      formula: `sum of factor weights, clamped to 100 = ${passenger.priority_index}`,
+      refs: [`ruleset:${passenger.ruleset_hash}`],
+      note: 'Weights are held in business_constraint, not in code, so the ranking that decides an ordering is inspectable and versioned.',
+    },
+    evidenceRefs: [`passenger:${passenger.passenger_id}`, `booking:${passenger.booking_id}`],
+    caveat:
+      'A constraint ranking over persisted rows: fewest remaining options, not whose journey matters more. Not a probability, and not a percentage. It reserves nothing and authorises nothing.',
+  };
+}
+
+/** One band of the recorded priorities, with the factors its members carry. */
+export function impactCohortDerivation(
+  cohort: ImpactCohort,
+  totalAssessed: number,
+  rulesetHash: string,
+): Derivation {
+  return {
+    title: `${cohort.band}: ${cohort.passenger_count} passengers`,
+    inputs: [
+      { label: 'passengers', value: `${cohort.passenger_count} of ${totalAssessed} assessed` },
+      { label: 'index range', value: `${cohort.lowest_index} to ${cohort.highest_index}` },
+      ...Object.entries(cohort.factor_counts).map(([factor, count]) => ({
+        label: factor.replace(/_/g, ' '),
+        value: String(count),
+        detail: null,
+      })),
+    ],
+    rule: {
+      kind: 'rule',
+      id: 'band membership by index',
+      version: `ruleset ${rulesetHash}`,
+      refs: [],
+      note: 'Bands are rebuilt from the persisted rows rather than read from the assessment that wrote them, so what is shown is what the database holds.',
+    },
+    evidenceRefs: cohort.booking_ids.slice(0, 12).map((id) => `booking:${id}`),
+    absences:
+      cohort.booking_ids.length > 12
+        ? [
+            {
+              label: 'remaining bookings',
+              detail: `${cohort.booking_ids.length - 12} further booking ids are in the payload; the list is capped here for reading, not truncated at the API.`,
+            },
+          ]
+        : undefined,
   };
 }

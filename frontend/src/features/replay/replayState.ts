@@ -10,7 +10,27 @@
  * Owner: Stream D.
  */
 
-import type { IncidentState, TimelineEntry } from '@/api/types';
+import type { IncidentState } from '@/api/types';
+
+/**
+ * The structural subset of a record this fold needs.
+ *
+ * Deliberately not `TimelineEntry` or `ReplayFrame`. Replay reads `/replay`, which returns frames
+ * carrying `state_after` as a typed field rather than buried in `detail`; the incident timeline
+ * predates that. Both satisfy this shape, so the fold works over either without either contract
+ * having to pretend to be the other.
+ */
+export interface ReplayRecord {
+  occurred_at: string;
+  stage: string;
+  actor: string;
+  actor_kind: string;
+  event_type: string;
+  summary: string;
+  detail?: Record<string, unknown> | null;
+  /** Set by the server's replay frames. Preferred over reading `detail.to` when present. */
+  state_after?: string | null;
+}
 
 /** Bookkeeping entries the engine writes for idempotency. Hidden by default, counted openly. */
 export const BOOKKEEPING_EVENTS = new Set(['WORKFLOW_RUN_REQUESTED']);
@@ -36,7 +56,7 @@ export const NO_FILTERS: ReplayFilters = {
   includeBookkeeping: false,
 };
 
-export function applyFilters(entries: TimelineEntry[], filters: ReplayFilters): TimelineEntry[] {
+export function applyFilters<T extends ReplayRecord>(entries: T[], filters: ReplayFilters): T[] {
   return entries.filter((entry) => {
     if (!filters.includeBookkeeping && BOOKKEEPING_EVENTS.has(entry.event_type)) return false;
     if (filters.onlyDecisions && !DECISION_EVENTS.has(entry.event_type)) return false;
@@ -92,7 +112,7 @@ function detailNumber(
  * Monotonic by construction: adding an entry can only add to what is known. There is no
  * interpolation between entries, because nothing is recorded between them.
  */
-export function reconstruct(entries: TimelineEntry[], cursor: number): ReconstructedState {
+export function reconstruct(entries: ReplayRecord[], cursor: number): ReconstructedState {
   const upTo = entries.slice(0, Math.max(0, Math.min(cursor + 1, entries.length)));
   const statesReached: { state: string; at: string }[] = [];
   const decisionsRecorded: ReconstructedState['decisionsRecorded'] = [];
@@ -101,7 +121,10 @@ export function reconstruct(entries: TimelineEntry[], cursor: number): Reconstru
 
   for (const entry of upTo) {
     if (entry.event_type === 'STATE_CHANGED') {
-      const to = detailString(entry.detail, 'to');
+      // The replay frame's own field first; `detail.to` only for the timeline contract, which
+      // has no such field. Reading the typed value where it exists means the fold does not
+      // depend on the shape of a free-form JSON blob.
+      const to = entry.state_after ?? detailString(entry.detail, 'to');
       if (to) statesReached.push({ state: to, at: entry.occurred_at });
     }
     if (entry.event_type === 'INCIDENT_OPENED') {

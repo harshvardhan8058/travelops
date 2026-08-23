@@ -825,6 +825,68 @@ export interface WhatIfDelta {
   summary: string;
 }
 
+// ------------------------------------------------------------------ per-passenger impact
+
+/** One named reason a passenger scored where they did. Every point is attributable to one. */
+export interface ImpactFactor {
+  factor: string;
+  weight: number;
+  /** The column or recorded finding the factor was read from. */
+  source: string;
+}
+
+export interface PassengerImpact {
+  passenger_id: number;
+  passenger_reference: string;
+  booking_id: number;
+  pnr: string;
+  priority_index: number;
+  priority_band: string;
+  factors: ImpactFactor[];
+  rule_version: string;
+  ruleset_hash: string;
+}
+
+export interface ImpactCohort {
+  band: string;
+  passenger_count: number;
+  lowest_index: number;
+  highest_index: number;
+  /** How many passengers in this band carry each factor. The operational shopping list. */
+  factor_counts: Record<string, number>;
+  booking_ids: number[];
+}
+
+/**
+ * A factor the ruleset declares that no service has established yet.
+ *
+ * The distinction the whole surface turns on. "Absent because its input has not been produced" is
+ * not "false", and rendering the first as the second tells an operator that nobody needs rebooking
+ * when in truth nobody has looked.
+ */
+export interface UnassessedFactor {
+  factor: string;
+  reason: string;
+  /** The service that would establish it. */
+  established_by: string;
+}
+
+/** Read from `passenger_impact`. A constraint ranking, not a probability. Authorises nothing. */
+export interface GroupImpactResponse {
+  group_reference: string;
+  rule_version: string;
+  ruleset_hash: string;
+  computed_at: string | null;
+  passengers_assessed: number;
+  cohorts: ImpactCohort[];
+  /** Highest priority first, capped. `passengers_assessed` carries the true total. */
+  passengers: PassengerImpact[];
+  returned: number;
+  unassessed_factors: UnassessedFactor[];
+  basis: 'persisted_records';
+  note: string;
+}
+
 /**
  * A bounded, zero-write, deterministic re-evaluation.
  *
