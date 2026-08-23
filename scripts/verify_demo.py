@@ -82,8 +82,8 @@ def check_dependencies() -> None:
     record(
         PASS if ok else FAIL,
         "1. Postgres and Redis healthy, assurance config loaded",
-        f"HTTP {status} · database={database} · redis={redis} · "
-        f"workflow_executable={assurance.get('workflow_executable')} · "
+        f"HTTP {status} | database={database} | redis={redis} | "
+        f"workflow_executable={assurance.get('workflow_executable')} | "
         f"config={assurance.get('config_version')}",
     )
     for degradation in body.get("degradations") or []:
@@ -134,7 +134,7 @@ def check_migrations(facts: dict) -> None:
     record(
         PASS if ok else FAIL,
         "2. Migrations complete",
-        f"alembic_version={facts['alembic_version']} · {facts['tables']} tables in public",
+        f"alembic_version={facts['alembic_version']} | {facts['tables']} tables in public",
     )
 
 
@@ -145,12 +145,12 @@ def check_seed(facts: dict) -> None:
 
     ok = digest == EXPECTED_DIGEST and total == EXPECTED_ROWS
     detail = (
-        f"digest={digest} (expected {EXPECTED_DIGEST}) · {total} rows (expected {EXPECTED_ROWS})"
+        f"digest={digest} (expected {EXPECTED_DIGEST}) | {total} rows (expected {EXPECTED_ROWS})"
     )
     record(PASS if ok else FAIL, "3. Seed produced the expected dataset", detail)
     interesting = ("passenger", "booking_segment", "flight", "pairing", "hotel")
     print(
-        f"{INFO} " + " · ".join(f"{k}={counts.get(k)}" for k in interesting if k in counts),
+        f"{INFO} " + " | ".join(f"{k}={counts.get(k)}" for k in interesting if k in counts),
         flush=True,
     )
 
@@ -180,8 +180,8 @@ def check_injection() -> dict | None:
     record(
         PASS if ok else FAIL,
         "4. Injection opened the intended incident, attached to the cascade group",
-        f"{incident.get('reference')} · group={group} · state={incident.get('state')} · "
-        f"flight={flight.get('flight_number')} delay={flight.get('delay_minutes')}min · "
+        f"{incident.get('reference')} | group={group} | state={incident.get('state')} | "
+        f"flight={flight.get('flight_number')} delay={flight.get('delay_minutes')}min | "
         f"passengers={flight.get('passengers')}",
     )
     return incident
@@ -214,7 +214,7 @@ def check_risk_recorded() -> None:
     record(
         PASS if both else FAIL,
         "4b. Every risk factor carries a name and its point contribution",
-        f"{len(factors)} factors · named={len(named)} · with points={len(pointed)}",
+        f"{len(factors)} factors | named={len(named)} | with points={len(pointed)}",
     )
     for factor in factors[:6]:
         print(
@@ -247,7 +247,7 @@ def check_first_run() -> dict | None:
     record(
         PASS if ok else FAIL,
         "5. POST /run stops at awaiting_approval",
-        f"{body.get('previous_state')} -> {state} · steps={body.get('steps_taken')} · "
+        f"{body.get('previous_state')} -> {state} | steps={body.get('steps_taken')} | "
         f"note={body.get('note')}",
     )
     return body
@@ -286,8 +286,8 @@ def check_gate_held_it() -> int | None:
     record(
         PASS if ok else FAIL,
         "6a. The gate held the bulk action on its risk tier, not a data problem",
-        f"{held.get('action_type')} · tier={held.get('risk_tier')} · "
-        f"blocking={held.get('blocking')} · all six checks PASS={passing}",
+        f"{held.get('action_type')} | tier={held.get('risk_tier')} | "
+        f"blocking={held.get('blocking')} | all six checks PASS={passing}",
     )
     return held.get("id")
 
@@ -325,7 +325,7 @@ def check_approval_persists(evaluation_id: int) -> None:
     record(
         PASS if replayed else FAIL,
         "6c. Re-posting the same decision replays rather than re-deciding",
-        f"HTTP {status} · replayed={replay.get('replayed') if isinstance(replay, dict) else None}",
+        f"HTTP {status} | replayed={replay.get('replayed') if isinstance(replay, dict) else None}",
     )
 
 
@@ -335,8 +335,8 @@ def check_second_run() -> None:
     record(
         PASS if ok else FAIL,
         "7. Second POST /run reaches resolved",
-        f"HTTP {status} · {body.get('previous_state') if isinstance(body, dict) else '?'} -> "
-        f"{body.get('state') if isinstance(body, dict) else '?'} · "
+        f"HTTP {status} | {body.get('previous_state') if isinstance(body, dict) else '?'} -> "
+        f"{body.get('state') if isinstance(body, dict) else '?'} | "
         f"terminal={body.get('is_terminal') if isinstance(body, dict) else '?'}",
     )
 
@@ -368,8 +368,8 @@ def check_audit() -> None:
     record(
         PASS if ok else FAIL,
         "8. Timeline is ordered, complete and correlated",
-        f"{len(entries)} entries · ordered={ordered} · "
-        f"missing={sorted(missing) or 'none'} · every entry correlated={correlated}",
+        f"{len(entries)} entries | ordered={ordered} | "
+        f"missing={sorted(missing) or 'none'} | every entry correlated={correlated}",
     )
 
     status, incident = call("GET", f"/incidents/{REFERENCE}")
@@ -379,7 +379,7 @@ def check_audit() -> None:
     record(
         PASS if (actions and authorised) else FAIL,
         "8a. Every action references the evaluation that authorised it",
-        f"{len(actions or [])} actions · all carry assurance_id={authorised} · "
+        f"{len(actions or [])} actions | all carry assurance_id={authorised} | "
         f"{len(approved_ref)} also carry a human_decision_id",
     )
     for action in actions or []:
@@ -395,7 +395,7 @@ def check_audit() -> None:
 
 def main() -> int:
     print("=" * 78)
-    print("TravelOps AI — Stage 2 demo verification")
+    print("TravelOps AI -- Stage 2 demo verification")
     print(f"api={API}  incident={REFERENCE}")
     print("=" * 78)
 

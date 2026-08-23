@@ -1,0 +1,43 @@
+# Line endings, pinned because a Windows checkout silently broke the demo.
+#
+# Git for Windows installs with `core.autocrlf=true`, so a fresh `git clone` rewrites every text
+# file with CRLF. The documented Windows step `Copy-Item .env.example .env` then produced a `.env`
+# whose every value ended in a carriage return, and `LLM_MODE=fixture\r` is not a member of
+# `LLMMode` — so the API refused to start with a validation error naming the enum and never
+# mentioning the invisible character. The file looked correct in every editor.
+#
+# Everything in this repository is consumed by Linux: the API, migrations, seed and both
+# verification scripts run inside the container. `eol=lf` is therefore not a preference, it is what
+# the runtime requires.
+#
+# `working-tree-encoding` is deliberately not set: the files are UTF-8 and must stay UTF-8 on disk.
+* text=auto eol=lf
+
+# Belt and braces for the files where a CR is actively harmful rather than merely untidy.
+# `.env.example` is the one that broke the demo; the rest are read by tools inside the image.
+.env.example    text eol=lf
+*.py            text eol=lf
+*.sh            text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+*.ini           text eol=lf
+*.toml          text eol=lf
+*.json          text eol=lf
+*.sql           text eol=lf
+*.mjs           text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.css           text eol=lf
+*.md            text eol=lf
+Dockerfile      text eol=lf
+Makefile        text eol=lf
+
+# Binary, so Git never touches the bytes.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.webp          binary
+*.ico           binary
+*.woff          binary
+*.woff2         binary

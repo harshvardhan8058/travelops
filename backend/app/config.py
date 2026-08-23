@@ -17,8 +17,9 @@ import hashlib
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,6 +70,32 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_surrounding_whitespace(cls, values: Any) -> Any:
+        """Trim every incoming string value before anything is parsed.
+
+        This exists for one specific, invisible failure. Git for Windows defaults
+        `core.autocrlf=true`, so a fresh clone writes `.env.example` with CRLF; the documented
+        `Copy-Item .env.example .env` then produces a `.env` whose every value ends in `\\r`.
+        `LLM_MODE=fixture\\r` is not a member of `LLMMode`, so the API refuses to start — correctly,
+        per rule 1 above, but with a message that names the enum and never mentions the carriage
+        return. The value looks right in every editor and the operator has nothing to go on.
+
+        `.gitattributes` now pins LF so a fresh clone cannot produce it. This is the second line of
+        defence, for a working copy cloned before that landed or a `.env` touched by an editor that
+        appends CR.
+
+        Trimming whitespace only. It corrects nothing else and cannot turn an unknown mode into a
+        known one: an actually-wrong value still refuses startup, which is the whole point of this
+        module.
+        """
+        if not isinstance(values, dict):
+            return values
+        return {
+            key: value.strip() if isinstance(value, str) else value for key, value in values.items()
+        }
 
     app_env: AppEnv = AppEnv.development
     log_level: str = "INFO"

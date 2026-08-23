@@ -32,6 +32,59 @@ def _imported_modules(tree: ast.Module) -> set[str]:
     return modules
 
 
+class TestTheWindowsPipedScriptsStayAscii:
+    """`verify_demo.py` and `verify_phase2.py` are piped through PowerShell, so they must be ASCII.
+
+    The documented Windows step is
+    `Get-Content scripts/verify_demo.py | docker compose exec -T api python -`. Windows PowerShell
+    5.1 defaults `$OutputEncoding` to ASCII, so every non-ASCII byte in the file is replaced on
+    the way to the container's stdin, and the mangled result is the report the docs tell the
+    operator to paste into the PR. `verify_demo.py` used U+00B7 as a field separator 26 times.
+
+    Same rule the API already follows for U+2192 and U+20B9, applied to the one other place a
+    character has to survive a hostile transport.
+    """
+
+    REPO = Path(__file__).resolve().parents[4]
+
+    def test_neither_script_contains_a_non_ascii_byte(self):
+        offenders: dict[str, list[str]] = {}
+        for name in ("verify_demo.py", "verify_phase2.py"):
+            text = (self.REPO / "scripts" / name).read_text(encoding="utf-8")
+            found = sorted({repr(char) for char in text if ord(char) > 127})
+            if found:
+                offenders[name] = found
+        assert offenders == {}, f"non-ASCII in a PowerShell-piped script: {offenders}"
+
+
+class TestLineEndingsArePinned:
+    """A Windows clone must not rewrite text files with CRLF.
+
+    Git for Windows installs with `core.autocrlf=true`. Without `.gitattributes`, the documented
+    `Copy-Item .env.example .env` produced a `.env` whose every value ended in a carriage return,
+    and `LLM_MODE=fixture\\r` is not a member of `LLMMode` — so the API refused to start with a
+    message naming the enum and never mentioning the invisible character.
+    """
+
+    REPO = Path(__file__).resolve().parents[4]
+
+    def test_gitattributes_pins_lf(self):
+        text = (self.REPO / ".gitattributes").read_text(encoding="utf-8")
+        assert "* text=auto eol=lf" in text
+        assert ".env.example" in text, "the file that broke the demo must be pinned explicitly"
+
+    def test_no_committed_text_file_already_carries_crlf(self):
+        offenders: list[str] = []
+        for pattern in ("*.py", "*.yaml", "*.yml", "*.ini", "*.toml", "*.sh"):
+            for path in self.REPO.rglob(pattern):
+                parts = set(path.parts)
+                if {".venv", "node_modules", ".git", "__pycache__", "dist"} & parts:
+                    continue
+                if b"\r\n" in path.read_bytes():
+                    offenders.append(str(path.relative_to(self.REPO)))
+        assert offenders == [], f"CRLF in a file the container reads: {offenders}"
+
+
 class TestOneActorKindMapping:
     """Two mappings would let the timeline and replay disagree about a human decision.
 
