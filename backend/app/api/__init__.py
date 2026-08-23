@@ -40,6 +40,7 @@ from app.api import (
     incident_groups,
     incidents,
     plans,
+    reasoning,
     replay,
 )
 
@@ -52,6 +53,7 @@ router.include_router(assurance_router.router)
 router.include_router(incident_groups.router)
 router.include_router(plans.router)
 router.include_router(replay.router)
+router.include_router(reasoning.router)
 
 # Fixture-backed remainder. Each owning stream replaces its section in place, keeping the
 # response shape identical so the frontend never has to change.

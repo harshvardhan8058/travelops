@@ -58,7 +58,4 @@ async def get_policy(incident_id: str) -> Any:
 
 
 # ---------------------------------------------------------------- Stream D
-@router.get("/reports/{incident_id}", summary="Executive report [fixture]")
-async def get_report(incident_id: str) -> Any:
-    payload = _load("report")
-    return {**payload, "incident_id": incident_id}
+# /reports/{id} is now a real endpoint in app/api/reasoning.py (Phase 3).

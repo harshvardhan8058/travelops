@@ -105,6 +105,26 @@ async def seeded(db_engine) -> AsyncIterator:
 
 
 @pytest.fixture(autouse=True)
+def force_llm_off(monkeypatch):
+    """E2E tests validate the Phase 1/2 path.
+
+    Phase 3's reasoning agents produce additional candidates in fixture/live mode, which changes
+    "the plan" from "the playbook" to "one of two". These tests assert the playbook contract and
+    must run under `LLM_MODE=off` to avoid testing against a model output that is not what they
+    are verifying. Phase 3 has its own integration tests.
+    """
+    monkeypatch.setenv("LLM_MODE", "off")
+    # Clear the lru_cache on get_settings/get_modes so the env change takes effect.
+    from app.config import get_modes, get_settings
+
+    get_settings.cache_clear()
+    get_modes.cache_clear()
+    yield
+    get_settings.cache_clear()
+    get_modes.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def registered_services() -> AsyncIterator[list[str]]:
     """Bind the implemented services, as the application lifespan does in production.
 
