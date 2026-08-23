@@ -26,9 +26,9 @@ import { clsx } from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, ApiError } from '@/api/client';
-import type { ExcludedEvaluation, PlanCheck } from '@/api/types';
+import type { ExcludedEvaluation, GroupExposure, PlanCheck } from '@/api/types';
 import { CountBar, Metric } from '@/components/ui/Metric';
-import { planAssuranceDerivation } from '@/components/ui/derivation';
+import { planTotalDerivation } from '@/components/ui/derivation';
 import {
   CheckStateBadge,
   EmptyState,
@@ -81,6 +81,59 @@ function ExcludedList({ items }: { items: ExcludedEvaluation[] }) {
           <p className="text-body text-fg-secondary">{group[0]?.reason ?? ''}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The figures the exposure check measured, shown because it is the check most likely to block.
+ *
+ * An operator told "exposure within limits: FAIL" and not told what the exposure *was* cannot judge
+ * whether to accept it, and this endpoint has always carried the numbers.
+ *
+ * A `null` renders as "not established", never as zero, and the title says what that means: the gate
+ * treats an unknown figure as a breach. That distinction is the whole reason this row exists.
+ * `rooms_committed` and `total_exposure_inr` were `null` on every single run, because a status filter
+ * compared `Action.status` against a `TaskState` value and so matched nothing — the check reported a
+ * breach on a group whose rooms and money were fully recorded in the ledger, and nothing on screen
+ * could have revealed it.
+ */
+function ExposureRow({ exposure }: { exposure: GroupExposure }) {
+  const figures: { label: string; value: number | null | undefined }[] = [
+    { label: 'rooms committed', value: exposure.rooms_committed },
+    { label: 'exposure INR', value: exposure.total_exposure_inr },
+    { label: 'passengers', value: exposure.passengers_affected },
+    { label: 'external effects', value: exposure.external_effects },
+  ];
+  const unresolved = exposure.unresolved_cohorts ?? [];
+
+  return (
+    <div className="border-t border-border-subtle px-3 py-1.5">
+      <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+        {figures.map((figure) => (
+          <div key={figure.label} className="flex items-baseline gap-2">
+            <dt className="text-label uppercase text-fg-muted">{figure.label}</dt>
+            <dd>
+              {figure.value === null || figure.value === undefined ? (
+                <span
+                  className="text-caption text-fg-muted"
+                  title="Not established. The gate treats an unknown figure as a breach, not as zero."
+                >
+                  not established
+                </span>
+              ) : (
+                <MonoValue>{figure.value.toLocaleString('en-IN')}</MonoValue>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {unresolved.length > 0 && (
+        <p className="mt-1 text-caption text-fg-muted">
+          {unresolved.length} cohort{unresolved.length === 1 ? '' : 's'} unresolved, so exposure is
+          not established: <MonoValue muted>{unresolved.join(', ')}</MonoValue>
+        </p>
+      )}
     </div>
   );
 }
@@ -195,11 +248,22 @@ export function GroupApprovalQueue() {
   if (!data) return <LoadingState label="Loading the approval queue" />;
 
   const preview = data.approval_preview;
-  const totalTasks = data.incidents.reduce((sum, incident) => sum + incident.task_count, 0);
-  const awaiting = data.incidents.reduce(
-    (sum, incident) => sum + incident.awaiting_approval_count,
-    0,
-  );
+  /*
+   * The only addition this console performs. It is confined to per-plan counts the same response
+   * returned, every summand is listed in the derivation and in the table below, and the plans are
+   * disjoint because each is scoped to one incident. Cascade figures are never treated this way:
+   * those are derived server-side from recorded rows so a client cannot produce a second answer.
+   */
+  const taskContributions = data.incidents.map((incident) => ({
+    incidentReference: incident.incident_reference,
+    value: incident.task_count,
+  }));
+  const awaitingContributions = data.incidents.map((incident) => ({
+    incidentReference: incident.incident_reference,
+    value: incident.awaiting_approval_count,
+  }));
+  const totalTasks = taskContributions.reduce((sum, item) => sum + item.value, 0);
+  const awaiting = awaitingContributions.reduce((sum, item) => sum + item.value, 0);
   const canApprove = api.canWrite && reason.trim().length > 0 && (preview?.covered_count ?? 0) > 0;
 
   return (
@@ -219,12 +283,30 @@ export function GroupApprovalQueue() {
             <span className="text-label uppercase text-fg-muted">Tasks</span>
             <Metric
               value={totalTasks}
-              derivation={planAssuranceDerivation([], data.config_version, data.config_hash)}
+              derivation={planTotalDerivation({
+                label: 'Tasks',
+                field: 'task_count',
+                contributions: taskContributions,
+                configVersion: data.config_version,
+                configHash: data.config_hash,
+              })}
             />
           </span>
           <span className="flex items-baseline gap-2">
-            <span className="text-label uppercase text-fg-muted">Awaiting a person</span>
-            <MonoValue>{awaiting}</MonoValue>
+            {/* "Tasks", not "incidents": the shell's blocked badge counts incidents awaiting a
+                person, and two differently-scoped figures under one word is how a reviewer
+                concludes the console contradicts itself. */}
+            <span className="text-label uppercase text-fg-muted">Tasks awaiting a person</span>
+            <Metric
+              value={awaiting}
+              derivation={planTotalDerivation({
+                label: 'Tasks awaiting a person',
+                field: 'awaiting_approval_count',
+                contributions: awaitingContributions,
+                configVersion: data.config_version,
+                configHash: data.config_hash,
+              })}
+            />
           </span>
         </div>
 
@@ -258,6 +340,7 @@ export function GroupApprovalQueue() {
             Blocking: {data.blocking.map((name) => name.replace(/_/g, ' ')).join(', ')}
           </p>
         )}
+        <ExposureRow exposure={data.exposure} />
       </Panel>
 
       <Panel title="Per incident">

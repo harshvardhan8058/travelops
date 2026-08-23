@@ -492,6 +492,50 @@ async def test_plan_assurance_is_group_scoped_and_authorises_nothing(client):
     assert len(body["incidents"]) >= 1
 
 
+async def test_group_exposure_reports_the_rooms_and_money_actually_committed(
+    client, sessionmaker_for
+):
+    """The gate must measure real exposure, not a permanent "unknown".
+
+    `_recorded_exposure` filtered on `Action.status == "succeeded"` — a `TaskState` value, not an
+    `ActionStatus` member — so the query matched no rows on any run and both figures came back
+    `None` forever. Because Stream B treats an unknown figure as a breach rather than as zero, the
+    symptom was a group whose rooms and money were fully recorded in the ledger reporting an
+    unknown-exposure breach. That reads as caution, which is why nothing caught it.
+
+    Pinned against the hold ledger rather than against a constant: `rooms_committed` is a
+    commitment, and the earlier code read `rooms_required`, which is demand. Those differ by exactly
+    the shortfall this scenario exists to show.
+    """
+    _drive(client)
+    exposure = client.get(f"{PREFIX}/incident-groups/{GROUP}/assurance").json()["exposure"]
+
+    assert exposure["rooms_committed"] is not None, "rooms were committed; the gate must see them"
+    assert exposure["total_exposure_inr"] is not None
+    assert exposure["total_exposure_inr"] > 0
+
+    async with sessionmaker_for() as session:
+        held = int(
+            (
+                await session.execute(select(func.coalesce(func.sum(HotelInventoryHold.rooms), 0)))
+            ).scalar_one()
+        )
+    assert exposure["rooms_committed"] == held, (
+        "committed rooms must equal the rooms held in the ledger, not the rooms required"
+    )
+
+    radius = {
+        dimension["key"]: dimension["value"]
+        for dimension in _detail(client)["blast_radius"]["dimensions"]
+    }
+    assert exposure["rooms_committed"] < radius["rooms_required"], (
+        "the scenario is short of rooms, so a commitment below the requirement is the point"
+    )
+    assert exposure["total_exposure_inr"] == radius["committed_cost_inr"], (
+        "one service owns the accommodation totals; the gate and the blast radius must agree"
+    )
+
+
 async def test_a_plan_approval_never_covers_high_risk(client):
     """P2-D3. `notify_passengers` is high risk and always needs its own decision.
 
