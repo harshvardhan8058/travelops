@@ -20,10 +20,28 @@
  * Requires `playwright` and a Chromium build. Not part of `npm test`: it needs a running stack, so
  * it is a verification step rather than a unit test.
  *
+ * `playwright` is deliberately NOT a declared dependency. It pulls a browser download on install,
+ * and making every `npm install` — including the demo machine's, possibly offline — depend on that
+ * to build a frontend that does not need it is the wrong trade. It is loaded dynamically instead, so
+ * an absent install produces the one-line instruction below rather than an ERR_MODULE_NOT_FOUND
+ * stack trace that reads like a broken repository.
+ *
  * Owner: Stream D.
  */
 
-import { chromium } from 'playwright';
+/** @type {import('playwright').BrowserType} */
+let chromium;
+try {
+  ({ chromium } = await import('playwright'));
+} catch {
+  console.error(
+    'verify:console needs Playwright, which is not installed.\n' +
+      '  npm install --no-save playwright && npx playwright install chromium\n' +
+      'Then re-run:\n' +
+      '  npm run verify:console -- http://127.0.0.1:5173',
+  );
+  process.exit(2);
+}
 
 const BASE = process.argv[2] ?? 'http://127.0.0.1:5173';
 /** @type {{path: string, name: string, expect: string[], expectExactCase?: string[]}[]} */
