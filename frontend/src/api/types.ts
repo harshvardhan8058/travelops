@@ -804,7 +804,14 @@ export interface GroupAssuranceResponse {
   /** False when member incidents were judged under different config hashes. Must be surfaced. */
   config_hash_uniform: boolean;
   evaluated_at: string;
-  exposure: Record<string, unknown>;
+  /**
+   * The figures the exposure check measured, exactly as the gate received them.
+   *
+   * `null` means **not established**, and the gate treats that as a breach rather than as zero — a
+   * plan whose cost is unknown is not a plan whose cost is nothing. A client must therefore never
+   * render a null here as `0`.
+   */
+  exposure: GroupExposure;
   incidents: IncidentPlanAssurance[];
   approval_preview: PlanApprovalPreview | null;
 }
@@ -815,6 +822,15 @@ export interface PlanApprovalResponse extends PlanApprovalPreview {
 }
 
 // ---------------------------------------------------------------- what-if and replay
+
+export interface GroupExposure {
+  total_exposure_inr?: number | null;
+  passengers_affected?: number | null;
+  rooms_committed?: number | null;
+  external_effects?: number | null;
+  /** Cohorts the entitlement engine could not resolve. Any entry makes exposure unknown. */
+  unresolved_cohorts?: string[];
+}
 
 export interface WhatIfDelta {
   key: string;
