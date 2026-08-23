@@ -10,6 +10,12 @@ This document removes that risk by assigning **exclusive file ownership** per st
 
 Every stream may **read** the entire repository. Only writes are partitioned.
 
+> **Necessary but not sufficient — read [`36-integration-protocol.md`](36-integration-protocol.md) too.**
+> Phase 2 broke this rule five times, and none of the crossings was avoidable by staying more
+> carefully inside a directory: each was a **seam**, a file one stream owns whose content is partly
+> another stream's. Directory ownership says who may type; the seam register says how everyone else
+> gets what they need without editing the file.
+
 ## Why the steering file matters here
 
 `.kiro/steering/travelops.md` is loaded automatically in every session in this repository. That is what
