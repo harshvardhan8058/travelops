@@ -133,7 +133,15 @@ operator approve past a failed freshness check — exactly what P2-D3 forbids, a
   parses, and the API image was built and run against real Postgres and Redis with the same mounts
   and environment compose declares — which is a proxy for `make up`, not a substitute. **Needs one
   run on the demo machine.**
-- **The Windows PowerShell path.** Same reason: it needs the demo laptop.
+- **The Windows PowerShell path.** Narrower than it was. Two Windows-only defects were found by
+  auditing it and are fixed: a `core.autocrlf=true` clone gave every `.env` value a trailing
+  carriage return, so `LLM_MODE=fixture\r` refused startup with a message naming the enum and never
+  the invisible character; and `Get-Content ... | python -` mangled every U+00B7 in
+  `verify_demo.py`'s report, because Windows PowerShell 5.1 defaults `$OutputEncoding` to ASCII.
+  `.gitattributes` now pins LF, `Settings` strips whitespace as a second line of defence, and both
+  piped scripts are ASCII. A Windows-style clone was reproduced here and verified to produce zero
+  CRLF and to start cleanly. **What still needs the demo laptop is Docker Desktop itself** — the
+  WSL2 backend, volume mounts and `docker compose` on Windows.
 - **Projector contrast and keyboard sweep on real hardware.** The automated check covers rendering,
   overflow and fixture leakage at 1920×1080; it cannot judge a projector's gamma.
 
