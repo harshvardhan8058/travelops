@@ -1,17 +1,9 @@
 /**
- * Replay — `/replay/:incidentId` and `/replay/group/:groupRef`. docs/27 screen 6.
+ * Replay — `/replay/:incidentId`. docs/27 screen 6.
  *
- * A read over immutable records, from the endpoints built for it: `GET /incidents/{id}/replay` and
- * `GET /incident-groups/{ref}/replay`. It previously read the incident *timeline*, which worked but
- * could not do the one thing Phase 2 needs — a group replay interleaves eight incidents plus the
- * group's own entries in true chronological order, and the timeline endpoint is scoped to a single
- * incident by construction. The replay contract also carries `decision_scope`, `plan_approval_id`
- * and `evidence_refs` as typed fields, so a plan-covered action is distinguishable from a
- * per-action approval without parsing a JSON blob.
- *
- * Scrubbing is by record index, filters are by actor kind and stage, and the reconstructed state is
- * folded from the records' own transitions. Nothing is interpolated between records, because
- * nothing was recorded between them.
+ * A read over immutable records. Scrubbing is by entry index, filters are by actor kind and stage,
+ * and the reconstructed state is folded from the records' own `STATE_CHANGED` details. Nothing is
+ * interpolated between entries, because nothing was recorded between them.
  *
  * Owner: Stream D.
  */
@@ -20,6 +12,7 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
+import { User } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
 import type { ReplayFrame } from '@/api/types';
@@ -35,12 +28,12 @@ import {
 import { FilterChips } from '@/components/ui/Metric';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
 import {
-  applyFilters,
+  applyFrameFilters,
   BOOKKEEPING_EVENTS,
-  NO_FILTERS,
-  reconstruct,
+  foldFrames,
+  NO_FRAME_FILTERS,
   resolveCursor,
-  type ReplayFilters,
+  type FrameFilters,
 } from './replayState';
 
 const ACTOR_TONE: Record<string, string> = {
@@ -52,15 +45,7 @@ const ACTOR_TONE: Record<string, string> = {
 };
 
 export function ReplayScreen() {
-  const { incidentId = '', groupRef = '' } = useParams();
-  /**
-   * One screen, two scopes. A group replay is the Phase 2 view: the group's own cascade entries
-   * interleaved with every member incident's, in the order they were recorded. The scope comes from
-   * the route rather than from sniffing the reference format, so the client never has to guess what
-   * kind of thing an identifier names.
-   */
-  const scope = groupRef ? ('group' as const) : ('incident' as const);
-  const reference = groupRef || incidentId;
+  const { incidentId = '' } = useParams();
   /**
    * `null` means "the latest record", which is where replay opens: the screen's job is to show
    * everything that was recorded and let a reviewer scrub *back* through it. Starting at index 0
@@ -68,34 +53,44 @@ export function ReplayScreen() {
    * than as an un-scrubbed timeline.
    */
   const [cursor, setCursor] = useState<number | null>(null);
-  const [filters, setFilters] = useState<ReplayFilters>(NO_FILTERS);
+  const [filters, setFilters] = useState<FrameFilters>(NO_FRAME_FILTERS);
+  /**
+   * Incident or group. The group replay interleaves every member's frames by time, which is the
+   * only way to see that eight recoveries ran concurrently rather than in sequence — and the only
+   * place a plan-scoped approval reads as one act across several incidents.
+   */
+  const [scope, setScope] = useState<'incident' | 'group'>('incident');
 
-  const replayQuery = useQuery({
-    queryKey: ['replay', scope, reference],
-    queryFn: () => (scope === 'group' ? api.groupReplay(reference) : api.incidentReplay(reference)),
-    enabled: reference.length > 0,
-  });
-  /** The recorded rail is an incident property. A group has no single rail, so it is not shown. */
   const incidentQuery = useQuery({
     queryKey: ['incident', incidentId],
     queryFn: () => api.incident(incidentId),
-    enabled: scope === 'incident' && incidentId.length > 0,
+    enabled: incidentId.length > 0,
+  });
+
+  const groupRef = incidentQuery.data?.group_reference ?? null;
+
+  const replayQuery = useQuery({
+    queryKey: ['replay', scope, scope === 'group' ? groupRef : incidentId],
+    queryFn: () =>
+      scope === 'group' && groupRef ? api.groupReplay(groupRef) : api.incidentReplay(incidentId),
+    enabled: incidentId.length > 0 && (scope === 'incident' || Boolean(groupRef)),
   });
 
   // Stable identity for the filter and fold memos below.
   const all = useMemo(() => replayQuery.data?.frames ?? [], [replayQuery.data]);
-  const visible = useMemo(() => applyFilters(all, filters), [all, filters]);
-  const hiddenBookkeeping = all.filter((entry) => BOOKKEEPING_EVENTS.has(entry.event_type)).length;
+  const visible = useMemo(() => applyFrameFilters(all, filters), [all, filters]);
+  const hiddenBookkeeping = all.filter((frame) => BOOKKEEPING_EVENTS.has(frame.event_type)).length;
 
   // Resolved once, then used for both the fold and the controls so they can never disagree.
   const lastIndex = Math.max(0, visible.length - 1);
   const clampedCursor = resolveCursor(cursor, visible.length);
   const atLatest = clampedCursor === lastIndex;
-  const state = useMemo(() => reconstruct(visible, clampedCursor), [visible, clampedCursor]);
+  // Folds `state_after` as the server recorded it. Nothing here infers a state from a detail blob.
+  const state = useMemo(() => foldFrames(visible, clampedCursor), [visible, clampedCursor]);
 
   const keyboard = useKeyboardList({ count: visible.length, onOpen: setCursor });
 
-  if (replayQuery.isLoading) {
+  if (replayQuery.isLoading || incidentQuery.isLoading) {
     return (
       <Panel title="Replay">
         <div className="h-[540px]">
@@ -110,30 +105,54 @@ export function ReplayScreen() {
     return (
       <ErrorState
         code={error?.code ?? 'INTERNAL_ERROR'}
-        message={error?.message ?? `Could not load records for ${reference}.`}
+        message={error?.message ?? `Could not load replay frames for ${incidentId}.`}
         correlationId={error?.correlationId ?? null}
         onRetry={() => void replayQuery.refetch()}
       />
     );
   }
 
-  const actorKinds = [...new Set(all.map((entry) => entry.actor_kind))];
-  const stages = [...new Set(all.map((entry) => entry.stage))];
+  const actorKinds = [...new Set(all.map((frame) => frame.actor_kind))];
+  const stages = [...new Set(all.map((frame) => frame.stage))];
+  const memberRefs = [
+    ...new Set(
+      all.map((frame) => frame.incident_reference).filter((ref): ref is string => Boolean(ref)),
+    ),
+  ].sort();
 
   return (
     <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-3">
       <Panel
-        title={scope === 'group' ? 'Replay: whole cascade' : 'Replay'}
+        title="Replay"
         className="flex min-h-0 flex-col overflow-hidden"
         actions={
-          <span className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <MonoValue muted className="text-caption">
-              {reference}
+              {visible.length} of {all.length} frames
             </MonoValue>
-            <MonoValue muted className="text-caption">
-              {visible.length} of {all.length} records
-            </MonoValue>
-          </span>
+            {replayQuery.data?.is_read_only && (
+              <span
+                className="text-caption text-fg-muted"
+                title="The server states this endpoint writes nothing."
+              >
+                read-only
+              </span>
+            )}
+            <FilterChips
+              label="Replay scope"
+              value={scope}
+              onChange={(next) => {
+                setScope(next as 'incident' | 'group');
+                // A cursor from a 26-frame incident means nothing in a 226-frame group replay.
+                setCursor(null);
+                setFilters(NO_FRAME_FILTERS);
+              }}
+              options={[
+                { value: 'incident', label: 'This incident' },
+                ...(groupRef ? [{ value: 'group', label: 'Whole group' }] : []),
+              ]}
+            />
+          </div>
         }
       >
         <div className="flex flex-col gap-2 border-b border-border-subtle px-3 py-2">
@@ -202,6 +221,26 @@ export function ReplayScreen() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {scope === 'group' && memberRefs.length > 1 && (
+              <FilterChips
+                label="Member incident"
+                value={[...filters.incidentReferences][0] ?? 'all'}
+                onChange={(next) =>
+                  setFilters((current) => ({
+                    ...current,
+                    incidentReferences: next === 'all' ? new Set() : new Set([next]),
+                  }))
+                }
+                options={[
+                  { value: 'all', label: 'All members', count: all.length },
+                  ...memberRefs.map((ref) => ({
+                    value: ref,
+                    label: ref.replace(/^INC-\d{4}-\d{4}-/, ''),
+                    count: all.filter((frame) => frame.incident_reference === ref).length,
+                  })),
+                ]}
+              />
+            )}
             <FilterChips
               label="Stage"
               value={[...filters.stages][0] ?? 'all'}
@@ -264,26 +303,18 @@ export function ReplayScreen() {
             onKeyDown={keyboard.onKeyDown}
             aria-label="Recorded events"
           >
-            {visible.map((entry, index) => (
+            {visible.map((frame, index) => (
               <ReplayEntry
-                key={entry.sequence}
-                entry={entry}
+                key={`${frame.incident_reference ?? 'group'}-${frame.sequence}`}
+                frame={frame}
+                showIncident={scope === 'group'}
                 past={index <= clampedCursor}
                 current={index === clampedCursor}
                 onSelect={() => setCursor(index)}
                 itemProps={keyboard.itemProps(index)}
-                showIncident={scope === 'group'}
               />
             ))}
           </ol>
-        )}
-        {replayQuery.data && (
-          /* The endpoint states that it wrote nothing. Repeated here rather than asserted by
-           * this component, which has no way to know. */
-          <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
-            {replayQuery.data.is_read_only ? 'Read-only. ' : ''}
-            {replayQuery.data.note}
-          </p>
         )}
       </Panel>
 
@@ -314,31 +345,78 @@ export function ReplayScreen() {
             <dl className="mt-1 flex flex-col gap-1">
               <Row label="evaluations" value={state.evaluationsSeen} />
               <Row label="actions" value={state.actionsCompleted} />
-              <Row label="decisions" value={state.decisionsRecorded.length} />
+              <Row label="decisions" value={state.decisions.length} />
+              <Row label="transitions" value={state.statesReached.length} />
             </dl>
-            {state.decisionsRecorded.length > 0 && (
-              <ul className="mt-1 flex flex-col gap-0.5">
-                {state.decisionsRecorded.map((decision, i) => (
-                  <li key={i} className="text-caption text-fg-secondary">
-                    <MonoValue muted>{decision.actorId ?? 'operator'}</MonoValue>{' '}
-                    {decision.decision}
+
+            {state.decisions.length > 0 && (
+              <ul className="mt-1 flex flex-col gap-1">
+                {state.decisions.map((decision, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-1.5 text-caption">
+                    {/* A person's act reads as a person's, and its SCOPE is stated: a plan-wide
+                        signature and a per-action one are different commitments. */}
+                    <span className="rounded-sm border border-border-strong bg-raised px-1 py-0.5 font-medium text-fg">
+                      <User
+                        size={10}
+                        strokeWidth={1.5}
+                        className="mr-1 inline align-[-1px]"
+                        aria-hidden
+                      />
+                      {decision.actor}
+                    </span>
+                    {decision.scope && (
+                      <span className="text-fg-secondary">
+                        {decision.scope === 'plan' ? 'plan-scoped' : 'action-scoped'}
+                      </span>
+                    )}
                     {decision.assuranceId !== null && (
-                      <>
-                        {' '}
-                        evaluation <MonoValue muted>{decision.assuranceId}</MonoValue>
-                      </>
+                      <MonoValue muted>evaluation {decision.assuranceId}</MonoValue>
+                    )}
+                    {decision.planApprovalId !== null && (
+                      <MonoValue muted>approval {decision.planApprovalId}</MonoValue>
+                    )}
+                    {decision.incidentReference && scope === 'group' && (
+                      <MonoValue muted>{decision.incidentReference}</MonoValue>
                     )}
                   </li>
                 ))}
               </ul>
             )}
+
+            {scope === 'group' && state.incidentsTouched.length > 0 && (
+              <p className="mt-1 text-caption text-fg-muted">
+                covers <MonoValue muted>{state.incidentsTouched.length}</MonoValue> member incident
+                {state.incidentsTouched.length === 1 ? '' : 's'} — the group's state is the last
+                transition anywhere in it, not one member's
+              </p>
+            )}
+
+            {state.evidenceRefs.length > 0 && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-caption text-fg-muted">
+                  {state.evidenceRefs.length} evidence reference
+                  {state.evidenceRefs.length === 1 ? '' : 's'} up to here
+                </summary>
+                <ul className="mt-1 flex flex-wrap gap-1">
+                  {state.evidenceRefs.map((ref) => (
+                    <li key={ref}>
+                      <MonoValue muted className="text-caption">
+                        {ref}
+                      </MonoValue>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
             <p className="mt-1 text-caption text-fg-muted">
-              Folded from the records' own transitions. Nothing is interpolated between entries.
+              Folded from each frame's own <MonoValue muted>state_after</MonoValue>. The state is
+              read, not inferred, and nothing is interpolated between frames.
             </p>
           </div>
         </Panel>
 
-        {scope === 'incident' && incidentQuery.data && (
+        {incidentQuery.data && (
           <Panel title="Recorded rail">
             <div className="px-3 py-2">
               <StateRail rail={incidentQuery.data.state_rail} current={incidentQuery.data.state} />
@@ -362,24 +440,24 @@ function Row({ label, value }: { label: string; value: number }) {
 }
 
 function ReplayEntry({
-  entry,
+  frame,
   past,
   current,
   onSelect,
   itemProps,
   showIncident,
 }: {
-  entry: ReplayFrame;
+  frame: ReplayFrame;
   past: boolean;
   current: boolean;
   onSelect: () => void;
   /** Spread whole: `data-active` is how the roving-tabindex hook locates the item to focus. */
   itemProps: { tabIndex: number; 'data-active'?: true };
-  /** Which member flight a record belongs to. Meaningless for a single incident, essential for
-   *  a group replay interleaving eight of them. */
+  /** Group replay interleaves members, so each frame has to say which incident it belongs to. */
   showIncident: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const isHuman = frame.actor_kind === 'human' || frame.human_decision_id !== null;
   return (
     <li
       className={clsx(
@@ -396,40 +474,45 @@ function ReplayEntry({
           aria-current={current || undefined}
           className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
+          <MonoValue muted className="shrink-0 text-caption">
+            {frame.sequence}
+          </MonoValue>
           <MonoValue muted className="shrink-0">
-            {entry.occurred_at.slice(11, 19)}
+            {frame.occurred_at.slice(11, 19)}
           </MonoValue>
           <span
             className={clsx(
               'shrink-0 rounded-sm border px-1 py-0.5 text-caption uppercase',
-              ACTOR_TONE[entry.actor_kind] ?? 'text-fg-muted border-border-subtle',
+              ACTOR_TONE[frame.actor_kind] ?? 'text-fg-muted border-border-subtle',
             )}
           >
-            {entry.actor_kind}
+            {isHuman && (
+              <User size={10} strokeWidth={1.5} className="mr-1 inline align-[-1px]" aria-hidden />
+            )}
+            {frame.actor_kind}
           </span>
-          {showIncident && (
-            <MonoValue muted className="w-[168px] shrink-0 truncate text-caption">
-              {/* A group entry belongs to no single flight. Said, not blanked. */}
-              {entry.incident_reference ?? 'group'}
+          {showIncident && frame.incident_reference && (
+            <MonoValue muted className="shrink-0 text-caption">
+              {frame.incident_reference.replace(/^INC-\d{4}-\d{4}-/, '')}
             </MonoValue>
           )}
-          <span className="min-w-0 flex-1 truncate text-body text-fg">{entry.summary}</span>
-          {entry.decision_scope && (
-            /* `plan` or `action`. Both are a person's act; an auditor has to tell them apart, so
-             * the scope is on the row rather than hidden behind an expander. */
-            <span className="shrink-0 rounded-sm border border-border-strong bg-raised px-1 py-0.5 text-caption uppercase text-fg">
-              {entry.decision_scope}
+          <span className="min-w-0 flex-1 truncate text-body text-fg">{frame.summary}</span>
+          {/* The transition this frame caused, from the server's own fields. */}
+          {frame.state_after && frame.state_after !== frame.state_before && (
+            <span className="shrink-0 text-caption text-fg-muted">
+              {frame.state_before ?? '—'} →{' '}
+              <span className="text-fg-secondary">{frame.state_after}</span>
             </span>
           )}
           <MonoValue muted className="shrink-0 text-caption">
-            {entry.event_type}
+            {frame.event_type}
           </MonoValue>
         </button>
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
           aria-expanded={expanded}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} record ${entry.sequence}`}
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} frame ${frame.sequence}`}
           className="shrink-0 rounded-sm p-1 text-caption text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           {expanded ? '\u2212' : '+'}
@@ -438,61 +521,46 @@ function ReplayEntry({
       {expanded && (
         <div className="border-t border-border-subtle bg-inset px-3 py-2">
           <dl className="flex flex-col gap-1">
-            <DetailRow label="stage">
-              <MonoValue muted>{entry.stage}</MonoValue>
-            </DetailRow>
-            <DetailRow label="actor">
-              <MonoValue muted>{entry.actor}</MonoValue>
-            </DetailRow>
-            {(entry.state_before || entry.state_after) && (
-              <DetailRow label="transition">
-                <MonoValue muted>
-                  {entry.state_before ?? 'none'} to {entry.state_after ?? 'none'}
-                </MonoValue>
-              </DetailRow>
+            <Detail label="stage" value={frame.stage} />
+            <Detail label="actor" value={frame.actor} />
+            {frame.incident_reference && (
+              <Detail label="incident" value={frame.incident_reference} />
             )}
-            <DetailRow label="assurance">
-              {entry.assurance_id === null ? (
-                <span className="text-caption text-fg-muted">not an assured step</span>
-              ) : (
-                <MonoValue muted>{entry.assurance_id}</MonoValue>
-              )}
-            </DetailRow>
-            {entry.human_decision_id !== null && (
-              <DetailRow label="decision">
-                <MonoValue muted>
-                  #{entry.human_decision_id}
-                  {entry.decision_scope ? ` (${entry.decision_scope})` : ''}
-                  {entry.plan_approval_id !== null
-                    ? ` via plan approval ${entry.plan_approval_id}`
-                    : ''}
-                </MonoValue>
-              </DetailRow>
+            {frame.decision_scope && (
+              <Detail
+                label="scope"
+                value={frame.decision_scope}
+                note={
+                  frame.decision_scope === 'plan'
+                    ? 'One signature covering several evaluations at once.'
+                    : 'A decision on this action alone.'
+                }
+              />
             )}
-            <DetailRow label="evidence">
-              {entry.evidence_refs.length === 0 ? (
-                <span className="text-caption text-fg-muted">none recorded</span>
-              ) : (
-                <span className="flex flex-wrap gap-1">
-                  {/* Capped for reading, with the true total stated. 604 chips is not evidence. */}
-                  {entry.evidence_refs.slice(0, 12).map((ref) => (
-                    <MonoValue key={ref} muted className="text-caption">
+            {frame.assurance_id !== null && (
+              <Detail label="evaluation" value={String(frame.assurance_id)} />
+            )}
+            {frame.plan_approval_id !== null && (
+              <Detail label="approval" value={String(frame.plan_approval_id)} />
+            )}
+          </dl>
+          {frame.evidence_refs.length > 0 && (
+            <div className="mt-1.5">
+              <span className="text-caption uppercase text-fg-muted">evidence</span>
+              <ul className="mt-0.5 flex flex-wrap gap-1">
+                {frame.evidence_refs.map((ref) => (
+                  <li key={ref}>
+                    <MonoValue muted className="text-caption">
                       {ref}
                     </MonoValue>
-                  ))}
-                  {entry.evidence_refs.length > 12 && (
-                    <span className="text-caption text-fg-muted">
-                      and {entry.evidence_refs.length - 12} more of {entry.evidence_refs.length}{' '}
-                      recorded
-                    </span>
-                  )}
-                </span>
-              )}
-            </DetailRow>
-          </dl>
-          {Object.keys(entry.detail).length > 0 && (
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {frame.detail && Object.keys(frame.detail).length > 0 && (
             <pre className="mt-1.5 overflow-x-auto rounded-sm bg-base p-2 font-mono text-caption text-fg-secondary">
-              {JSON.stringify(entry.detail, null, 2)}
+              {JSON.stringify(frame.detail, null, 2)}
             </pre>
           )}
         </div>
@@ -501,11 +569,16 @@ function ReplayEntry({
   );
 }
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function Detail({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="flex gap-2">
       <dt className="w-[92px] shrink-0 text-caption uppercase text-fg-muted">{label}</dt>
-      <dd className="min-w-0">{children}</dd>
+      <dd className="min-w-0">
+        <MonoValue muted className="break-all">
+          {value}
+        </MonoValue>
+        {note && <span className="ml-1.5 text-caption text-fg-muted">{note}</span>}
+      </dd>
     </div>
   );
 }

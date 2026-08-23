@@ -823,3 +823,110 @@ export function impactCohortDerivation(
         : undefined,
   };
 }
+
+/**
+ * A per-entity figure read out of a recorded action payload.
+ *
+ * Used by the impact views, whose whole premise is that the per-entity detail already exists
+ * inside `action.payload` and does not need a new endpoint. The derivation therefore names the
+ * action, the payload field, and the rule version the service stamped on it — which is what makes
+ * a passenger-level figure on screen traceable to the service call that found it.
+ */
+export function impactFieldDerivation(args: {
+  label: string;
+  value: number | string | null;
+  actionId: number;
+  incidentReference: string;
+  field: string;
+  ruleVersion?: string | null;
+  /** The service's own sentence about this figure, when it recorded one. Rendered verbatim. */
+  note?: string | null;
+  provenance?: Provenance;
+  /** Named when the field is absent, so "not recorded" is distinguishable from zero. */
+  absentDetail?: string;
+}): Derivation {
+  const absent = args.value === null || args.value === '';
+  return {
+    title: `${args.label}${absent ? '' : ` · ${args.value}`}`,
+    subtitle: `GET /incidents/${args.incidentReference}/actions/${args.actionId}`,
+    inputs: [
+      { label: 'field', value: `payload.${args.field}` },
+      ...(absent
+        ? []
+        : [{ label: 'value', value: String(args.value), provenance: args.provenance }]),
+      { label: 'action', value: `#${args.actionId}` },
+    ],
+    rule: {
+      kind: 'rule',
+      id: args.ruleVersion ? `recorded by ${args.ruleVersion}` : 'recorded by the service',
+      note:
+        args.note ||
+        'Read from the action payload exactly as the service wrote it. The UI performs no arithmetic on it.',
+    },
+    absences: absent
+      ? [
+          {
+            label: args.field,
+            detail:
+              args.absentDetail ||
+              'This service did not record the field for this entity, so it is shown as absent rather than as zero.',
+          },
+        ]
+      : [],
+  };
+}
+
+/**
+ * A count of entities inside an action payload.
+ *
+ * Separate from `arrayLengthDerivation` because it can cite the service's OWN total alongside the
+ * array length. Where the two disagree the popover shows both rather than picking one — a
+ * disagreement means the payload is internally inconsistent, which a reviewer needs to see.
+ */
+export function impactCountDerivation(args: {
+  label: string;
+  arrayLength: number;
+  recordedTotal?: number | null;
+  actionId: number;
+  incidentReference: string;
+  field: string;
+  ruleVersion?: string | null;
+  note?: string | null;
+}): Derivation {
+  const mismatch =
+    typeof args.recordedTotal === 'number' && args.recordedTotal !== args.arrayLength;
+  return {
+    title: `${args.label} · ${args.arrayLength}`,
+    subtitle: `GET /incidents/${args.incidentReference}/actions/${args.actionId}`,
+    inputs: [
+      { label: 'rows returned', value: String(args.arrayLength) },
+      ...(typeof args.recordedTotal === 'number'
+        ? [
+            {
+              label: "service's own count",
+              value: String(args.recordedTotal),
+              detail: mismatch
+                ? 'This disagrees with the number of rows returned. Both are shown because a mismatch is a payload defect, not something to average away.'
+                : null,
+            },
+          ]
+        : []),
+      { label: 'counted', value: `length of payload.${args.field}` },
+    ],
+    rule: {
+      kind: 'formula',
+      formula: `payload.${args.field}.length`,
+      note:
+        args.note ||
+        'Counting a returned array is the only aggregate this UI computes. No mean, rate or score is derived anywhere.',
+    },
+    absences: mismatch
+      ? [
+          {
+            label: 'count mismatch',
+            detail: `The service reported ${args.recordedTotal} but returned ${args.arrayLength} rows.`,
+          },
+        ]
+      : [],
+  };
+}

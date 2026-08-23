@@ -1,5 +1,10 @@
 /**
- * Per-passenger impact — the surface that makes "604 passengers" into named people in an order.
+ * Recorded passenger priorities — the surface that makes "604 passengers" into an order.
+ *
+ * Lives beside the Impact Explorer's other tabs and closes the gap that screen's own Passengers
+ * table names: that table can only show passengers reachable from one incident's connection
+ * findings, because that is what `action.payload` carries. This one covers every passenger the
+ * group assessed, because the server wrote a row per passenger.
  *
  * Reads `GET /incident-groups/{ref}/impacts`. It derives nothing: the bands, the counts and the
  * factor tallies are built server-side in `services/passenger_impact`, and this component formats
@@ -55,7 +60,7 @@ function bandRank(band: string): number {
   return index === -1 ? BAND_ORDER.length : index;
 }
 
-export function PassengerImpactPanel({ groupRef }: { groupRef: string }) {
+export function PassengerPriorityPanel({ groupRef }: { groupRef: string }) {
   const [band, setBand] = useState<string>('all');
   const [expanded, setExpanded] = useState<number | null>(null);
 
@@ -91,7 +96,7 @@ export function PassengerImpactPanel({ groupRef }: { groupRef: string }) {
 
   if (impactsQuery.isLoading) {
     return (
-      <Panel title="Passenger impact">
+      <Panel title="Recorded priorities">
         <div className="h-[220px]">
           <LoadingState label="Loading recorded priorities" />
         </div>
@@ -102,7 +107,7 @@ export function PassengerImpactPanel({ groupRef }: { groupRef: string }) {
   if (impactsQuery.error || !impacts) {
     const error = impactsQuery.error instanceof ApiError ? impactsQuery.error : null;
     return (
-      <Panel title="Passenger impact">
+      <Panel title="Recorded priorities">
         <ErrorState
           code={error?.code ?? 'INTERNAL_ERROR'}
           message={error?.message ?? 'Could not load recorded passenger priorities.'}
@@ -115,7 +120,7 @@ export function PassengerImpactPanel({ groupRef }: { groupRef: string }) {
 
   if (impacts.passengers_assessed === 0) {
     return (
-      <Panel title="Passenger impact">
+      <Panel title="Recorded priorities">
         {/* Not zeros. Zero passengers in zero bands reads, on a wall display, as "everyone is
          *  fine" — which is a different claim from "nothing has been assessed". */}
         <EmptyState title="No priorities recorded yet" description={impacts.note} />
@@ -126,7 +131,7 @@ export function PassengerImpactPanel({ groupRef }: { groupRef: string }) {
 
   return (
     <Panel
-      title="Passenger impact"
+      title="Recorded priorities"
       actions={
         <span className="flex items-center gap-3 text-caption text-fg-muted">
           <span>

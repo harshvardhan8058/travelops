@@ -31,7 +31,6 @@ import { layoutServerGraph } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
 import { GroupRunControl } from './GroupRunControl';
 import { WhatIfPanel } from './WhatIfPanel';
-import { PassengerImpactPanel } from './PassengerImpactPanel';
 
 const ROLLUP_TILES = [
   { field: 'flights_affected', label: 'Flights' },
@@ -177,14 +176,6 @@ export function CascadeExplorer() {
           </span>
           <StateBadge status={group.severity} label={`severity ${group.severity}`} />
           <StateBadge status={group.state} />
-          {/* The group replay is the only view that interleaves all eight incidents with the
-           *  group's own cascade entries in recorded order, so it is reachable from here. */}
-          <Link
-            to={`/replay/group/${encodeURIComponent(group.reference)}`}
-            className="ml-auto rounded-sm border border-border-strong px-2 py-0.5 text-label uppercase text-fg-secondary underline decoration-dotted underline-offset-2 hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            Replay whole cascade
-          </Link>
         </div>
         <div className="flex flex-wrap gap-2 border-t border-border-subtle px-3 py-2">
           {ROLLUP_TILES.map((tile) => {
@@ -376,9 +367,6 @@ export function CascadeExplorer() {
             selectedMechanism={selectedMechanism}
             selectedFlight={selectedFlightNumber}
           />
-
-          {/* The rollup says 604 passengers. This says which 604, in what order, and why. */}
-          <PassengerImpactPanel groupRef={group.reference} />
         </div>
 
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">

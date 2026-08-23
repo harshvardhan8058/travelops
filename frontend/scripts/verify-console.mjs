@@ -41,7 +41,10 @@ const ROUTES = [
     // value the API returned — the same defect that once rendered a policy pack label as "MOCA".
     expectExactCase: ['recorded_evidence'],
   },
-  { path: '/replay/INC-2026-0820-VOBL-01', name: 'Replay', expect: [] },
+  { path: '/replay/INC-2026-0820-VOBL-01', name: 'Replay', expect: ['frames'] },
+  // Per-entity impact: the PNR proves a passenger-level row reached the DOM, not just a count.
+  { path: '/impact/INC-2026-0820-VOBL-01', name: 'Impact Explorer', expect: ['Connections'] },
+  { path: '/what-if/current', name: 'What-If', expect: ['what-if'] },
   { path: '/policy/INC-2026-0820-VOBL-01', name: 'Policy', expect: [] },
   { path: '/sources', name: 'Provenance ledger', expect: [] },
 ];
