@@ -26,7 +26,7 @@ import { clsx } from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, ApiError } from '@/api/client';
-import type { ExcludedEvaluation, PlanCheck } from '@/api/types';
+import type { ExcludedEvaluation, GroupExposure, PlanCheck } from '@/api/types';
 import { CountBar, Metric } from '@/components/ui/Metric';
 import { planTotalDerivation } from '@/components/ui/derivation';
 import {
@@ -81,6 +81,59 @@ function ExcludedList({ items }: { items: ExcludedEvaluation[] }) {
           <p className="text-body text-fg-secondary">{group[0]?.reason ?? ''}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The figures the exposure check measured, shown because it is the check most likely to block.
+ *
+ * An operator told "exposure within limits: FAIL" and not told what the exposure *was* cannot judge
+ * whether to accept it, and this endpoint has always carried the numbers.
+ *
+ * A `null` renders as "not established", never as zero, and the title says what that means: the gate
+ * treats an unknown figure as a breach. That distinction is the whole reason this row exists.
+ * `rooms_committed` and `total_exposure_inr` were `null` on every single run, because a status filter
+ * compared `Action.status` against a `TaskState` value and so matched nothing — the check reported a
+ * breach on a group whose rooms and money were fully recorded in the ledger, and nothing on screen
+ * could have revealed it.
+ */
+function ExposureRow({ exposure }: { exposure: GroupExposure }) {
+  const figures: { label: string; value: number | null | undefined }[] = [
+    { label: 'rooms committed', value: exposure.rooms_committed },
+    { label: 'exposure INR', value: exposure.total_exposure_inr },
+    { label: 'passengers', value: exposure.passengers_affected },
+    { label: 'external effects', value: exposure.external_effects },
+  ];
+  const unresolved = exposure.unresolved_cohorts ?? [];
+
+  return (
+    <div className="border-t border-border-subtle px-3 py-1.5">
+      <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+        {figures.map((figure) => (
+          <div key={figure.label} className="flex items-baseline gap-2">
+            <dt className="text-label uppercase text-fg-muted">{figure.label}</dt>
+            <dd>
+              {figure.value === null || figure.value === undefined ? (
+                <span
+                  className="text-caption text-fg-muted"
+                  title="Not established. The gate treats an unknown figure as a breach, not as zero."
+                >
+                  not established
+                </span>
+              ) : (
+                <MonoValue>{figure.value.toLocaleString('en-IN')}</MonoValue>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {unresolved.length > 0 && (
+        <p className="mt-1 text-caption text-fg-muted">
+          {unresolved.length} cohort{unresolved.length === 1 ? '' : 's'} unresolved, so exposure is
+          not established: <MonoValue muted>{unresolved.join(', ')}</MonoValue>
+        </p>
+      )}
     </div>
   );
 }
@@ -287,6 +340,7 @@ export function GroupApprovalQueue() {
             Blocking: {data.blocking.map((name) => name.replace(/_/g, ' ')).join(', ')}
           </p>
         )}
+        <ExposureRow exposure={data.exposure} />
       </Panel>
 
       <Panel title="Per incident">
