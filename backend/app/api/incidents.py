@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.actors import ACTOR_KINDS, actor_kind
@@ -332,7 +332,18 @@ async def _plan_summary(session: AsyncSession, incident_id: int) -> PlanSummary 
             await session.execute(
                 select(Plan)
                 .where(Plan.incident_id == incident_id)
-                .order_by(Plan.id.desc())
+                # The plan the engine is actually driving: the selected one, else the earliest.
+                #
+                # NOT the latest. Taking the latest was correct while an incident had one plan, and
+                # became wrong the moment the planner agent started adding a candidate alongside
+                # the playbook — this endpoint would show the candidate while the engine ran the
+                # playbook. A detail screen displaying a plan that is not executing is worse than
+                # showing none. Mirrors `Orchestrator._current_plan`; candidates are listed by
+                # `GET /incidents/{ref}/plans`.
+                .order_by(
+                    case((Plan.selection_state == "selected", 0), else_=1),
+                    Plan.id,
+                )
                 .limit(1)
             )
         )

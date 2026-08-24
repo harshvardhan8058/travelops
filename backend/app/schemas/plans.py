@@ -20,7 +20,9 @@ class PlanTaskOut(BaseModel):
     task_order: int
     state: str
     target_refs: list[str] = Field(default_factory=list)
-    depends_on: list[int] = Field(default_factory=list)
+    #: Task ids as strings, matching the stored JSON and `PlanTaskSummary`. Two response models
+    #: disagreeing about the type of one field is how a consumer ends up comparing 8 to "8".
+    depends_on: list[str] = Field(default_factory=list)
 
 
 class CandidatePlanOut(BaseModel):
@@ -30,6 +32,8 @@ class CandidatePlanOut(BaseModel):
     incident_reference: str
     variant_key: str | None = None
     generator: str
+    #: Set when a model produced the plan. `plan.prompt_version` is what makes it reproducible.
+    prompt_version: str | None = None
     generated_at: datetime
     rationale: str | None = None
     selection_state: str

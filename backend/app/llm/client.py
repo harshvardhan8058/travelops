@@ -40,8 +40,13 @@ MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 1.5
 
 
-class LLMUnavailable(Exception):
+class LLMUnavailable(Exception):  # noqa: N818 - see below
     """Raised when `LLM_MODE=off` or when the live call exhausts retries.
+
+    Deliberately not `LLMUnavailableError`. It is a public symbol the orchestrator imports and
+    catches, and it names a normal operating condition rather than a fault: `LLM_MODE=off` is a
+    supported configuration, not an error. Renaming it would ripple through every caller for a
+    naming convention, so the convention is suppressed here with the reason attached.
 
     The engine catches this and falls back to the playbook. It is never fatal.
     """
