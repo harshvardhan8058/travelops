@@ -1,222 +1,177 @@
-"""LLM client layer — Groq OpenAI-compatible, with fixture replay and off-mode.
+"""The single LLM client. One place that can call a model.
 
-Three modes, one interface:
+Three modes, resolved by `app.config`:
 
-    live     — real Groq API call with retry/backoff, structured JSON output, validated against the
-               response schema before returning. Requires `GROQ_API_KEY`.
-    fixture  — replays a committed JSON response keyed by (agent_name, prompt_version, scenario).
-               Deterministic, zero-latency, no network. This is the test oracle.
-    off      — raises `LLMUnavailable` immediately. The engine falls back to the deterministic
-               playbook, which is the Phase 1/2 path and the submission's demo moment.
+| Mode | Behaviour |
+| --- | --- |
+| `off` | No call, ever. Returns `None`; the caller uses its deterministic path |
+| `fixture` | No network. Returns the committed response stored next to the prompt, so the
+  parse, validate and reflect path runs on every machine and in CI |
+| `live` | Calls Groq with bounded tokens and near-zero temperature |
 
-The client produces a `ModelCallAudit` on every call regardless of mode, so the plan records
-which generator was involved, how much it cost, and whether it was a fixture replay.
+Rules this enforces so callers cannot get them wrong:
 
-Owner: Stream C.
+- **JSON only.** `response_format={"type": "json_object"}` on live calls, and a parse failure is a
+  failure — never salvaged by string-scraping, because a half-parsed plan is worse than no plan.
+- **Bounded.** A timeout and a token ceiling, so a slow model degrades to the deterministic path
+  instead of holding an incident open. `docs/04`: never let an LLM timeout mean passengers are not
+  notified.
+- **Deterministic-ish.** Temperature from config, default 0.1.
+- **Versioned prompts.** Loaded from `app/llm/prompts/<name>.md`, never inline. A prompt change is a
+  new file, because `plan.prompt_version` records which one produced a plan.
+- **No control flow from the model.** This returns text and audit metadata. It never decides
+  anything.
+
+Owner: Stream A.
 """
 
 from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 import structlog
-from pydantic import BaseModel, ValidationError
 
 from app.agents.contract import ModelCallAudit
-from app.config import LLMMode, get_settings
+from app.config import LLMMode, Settings, get_modes, get_settings
 
 log = structlog.get_logger(__name__)
 
-T = TypeVar("T", bound=BaseModel)
+PROMPT_DIR = Path(__file__).parent / "prompts"
 
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
+#: Hard ceiling regardless of config. A planner needs a few hundred tokens; anything beyond this is
+#: runaway generation, and paying for it during a demo is the least of the problems.
+MAX_OUTPUT_TOKENS = 1024
 
-# Retry settings for live calls. Transient failures (rate limit, timeout) retry; schema
-# validation failures do not, because the same prompt will produce the same shape.
-MAX_RETRIES = 2
-RETRY_DELAY_SECONDS = 1.5
+#: Wall-clock budget for one call. Past this the deterministic path is simply better.
+TIMEOUT_SECONDS = 12.0
 
 
-class LLMUnavailable(Exception):
-    """Raised when `LLM_MODE=off` or when the live call exhausts retries.
+@dataclass(frozen=True)
+class LLMResult:
+    """Raw model output plus the audit record for it. No decisions, no parsing beyond JSON."""
 
-    The engine catches this and falls back to the playbook. It is never fatal.
+    payload: dict[str, Any]
+    audit: ModelCallAudit
+    #: `fixture` or `live`. Recorded so a reviewer can tell which produced a plan.
+    source: str
+
+
+def load_prompt(name: str) -> str:
+    """Read a versioned prompt. Raises if it is missing, because a silent default is worse."""
+    path = PROMPT_DIR / f"{name}.md"
+    if not path.is_file():
+        raise FileNotFoundError(f"prompt artefact not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def render(template: str, fields: dict[str, Any]) -> str:
+    """Substitute `{{field}}` placeholders from typed values only.
+
+    Deliberately not a template engine. The planner receives typed fields, and a substitution that
+    can execute logic is an instruction channel by another name.
     """
+    rendered = template
+    for key, value in fields.items():
+        if isinstance(value, list | tuple):
+            text = ", ".join(str(item) for item in value) or "none"
+        elif value is None:
+            text = "not recorded"
+        else:
+            text = str(value)
+        rendered = rendered.replace(f"{{{{{key}}}}}", text)
+    return rendered
 
 
-class LLMClient:
-    """Single entry point for all reasoning-agent calls."""
+def _fixture_for(name: str) -> LLMResult | None:
+    path = PROMPT_DIR / f"{name}.fixture.json"
+    if not path.is_file():
+        log.error("llm_fixture_missing", outcome="error", prompt=name, path=str(path))
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return LLMResult(
+        payload=data["response"],
+        audit=ModelCallAudit(**data.get("audit", {"generator": "planner-agent"})),
+        source="fixture",
+    )
 
-    def __init__(self, *, mode: LLMMode | None = None, settings: Any = None) -> None:
-        self._settings = settings or get_settings()
-        self._mode = mode if mode is not None else LLMMode(self._settings.llm_mode)
 
-    async def call(
-        self,
-        *,
-        prompt: str,
-        system: str,
-        response_schema: type[T],
-        agent_name: str,
-        prompt_version: str,
-        scenario_key: str = "bengaluru_storm",
-    ) -> tuple[T, ModelCallAudit]:
-        """Invoke the configured mode and return (validated_response, audit).
+async def complete_json(
+    *,
+    prompt_name: str,
+    fields: dict[str, Any],
+    settings: Settings | None = None,
+) -> LLMResult | None:
+    """One structured completion, or `None` when the caller must use its deterministic path.
 
-        Raises `LLMUnavailable` when the model is not reachable or not configured.
-        """
-        if self._mode is LLMMode.off:
-            raise LLMUnavailable("LLM_MODE=off; falling back to deterministic playbook")
+    `None` is a normal outcome, not an error: `LLM_MODE=off`, a missing key, a timeout, malformed
+    JSON and a refusal all reduce to "no usable model output", and every caller already has a
+    deterministic answer. Returning `None` rather than raising is what keeps a model failure from
+    becoming an incident failure.
+    """
+    settings = settings or get_settings()
+    mode = get_modes().llm
 
-        if self._mode is LLMMode.fixture:
-            return self._replay_fixture(
-                agent_name=agent_name,
-                prompt_version=prompt_version,
-                scenario_key=scenario_key,
-                response_schema=response_schema,
-            )
+    if mode is LLMMode.off:
+        return None
+    if mode is LLMMode.fixture:
+        return _fixture_for(prompt_name)
 
-        return await self._call_groq(
-            prompt=prompt,
-            system=system,
-            response_schema=response_schema,
-            agent_name=agent_name,
-            prompt_version=prompt_version,
+    prompt = render(load_prompt(prompt_name), fields)
+    started = time.perf_counter()
+    try:
+        payload, usage = await _call_groq(prompt, settings)
+    except Exception as exc:
+        # Any failure is the same failure from the caller's point of view.
+        log.error(
+            "llm_call_failed",
+            outcome="error",
+            prompt=prompt_name,
+            detail=type(exc).__name__,
+            reason=str(exc)[:200],
         )
+        return None
 
-    def _replay_fixture(
-        self,
-        *,
-        agent_name: str,
-        prompt_version: str,
-        scenario_key: str,
-        response_schema: type[T],
-    ) -> tuple[T, ModelCallAudit]:
-        """Load and validate a committed fixture response."""
-        fixture_path = FIXTURE_DIR / f"{agent_name}_{prompt_version}_{scenario_key}.json"
-        if not fixture_path.exists():
-            raise LLMUnavailable(
-                f"fixture not found: {fixture_path.name}. "
-                f"Commit the fixture or switch to live mode."
-            )
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    self_report = payload.pop("confidence", None)
+    return LLMResult(
+        payload=payload,
+        audit=ModelCallAudit(
+            generator="planner-agent",
+            prompt_version=prompt_name,
+            # Recorded only so the record can show it did not decide anything.
+            model_self_report=self_report if isinstance(self_report, int) else None,
+            input_tokens=usage.get("prompt_tokens"),
+            output_tokens=usage.get("completion_tokens"),
+            latency_ms=latency_ms,
+        ),
+        source="live",
+    )
 
-        raw = json.loads(fixture_path.read_text(encoding="utf-8"))
-        try:
-            parsed = response_schema.model_validate(raw)
-        except ValidationError as exc:
-            raise LLMUnavailable(
-                f"fixture {fixture_path.name} does not validate against "
-                f"{response_schema.__name__}: {exc.error_count()} errors"
-            ) from exc
 
-        audit = ModelCallAudit(
-            generator=f"fixture:{agent_name}",
-            prompt_version=prompt_version,
-            model_self_report=None,
-            input_tokens=None,
-            output_tokens=None,
-            latency_ms=0,
+async def _call_groq(prompt: str, settings: Settings) -> tuple[dict[str, Any], dict[str, int]]:
+    """The only network call in the codebase that talks to a model."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+            json={
+                "model": settings.groq_model,
+                "temperature": settings.groq_temperature,
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                # Structured output is enforced by the API, not by hoping.
+                "response_format": {"type": "json_object"},
+                "messages": [{"role": "user", "content": prompt}],
+            },
         )
-        log.info(
-            "llm_fixture_replayed",
-            agent=agent_name,
-            prompt_version=prompt_version,
-            fixture=fixture_path.name,
-        )
-        return parsed, audit
+        response.raise_for_status()
+        body = response.json()
 
-    async def _call_groq(
-        self,
-        *,
-        prompt: str,
-        system: str,
-        response_schema: type[T],
-        agent_name: str,
-        prompt_version: str,
-    ) -> tuple[T, ModelCallAudit]:
-        """Live Groq call with retry on transient failures."""
-        import asyncio
-
-        from groq import APIError, AsyncGroq, RateLimitError
-
-        api_key = self._settings.groq_api_key
-        if not api_key:
-            raise LLMUnavailable("GROQ_API_KEY is not set; cannot call Groq in live mode")
-
-        client = AsyncGroq(api_key=api_key)
-        model = self._settings.groq_model
-        temperature = self._settings.groq_temperature
-
-        last_error: Exception | None = None
-        for attempt in range(MAX_RETRIES + 1):
-            start = time.perf_counter()
-            try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=temperature,
-                    max_tokens=4096,
-                    response_format={"type": "json_object"},
-                )
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                content = response.choices[0].message.content or "{}"
-                usage = response.usage
-
-                raw = json.loads(content)
-                parsed = response_schema.model_validate(raw)
-
-                audit = ModelCallAudit(
-                    generator=f"groq:{model}",
-                    prompt_version=prompt_version,
-                    model_self_report=raw.get("model_self_report"),
-                    input_tokens=usage.prompt_tokens if usage else None,
-                    output_tokens=usage.completion_tokens if usage else None,
-                    latency_ms=latency_ms,
-                )
-                log.info(
-                    "llm_call_succeeded",
-                    agent=agent_name,
-                    model=model,
-                    attempt=attempt + 1,
-                    latency_ms=latency_ms,
-                    input_tokens=audit.input_tokens,
-                    output_tokens=audit.output_tokens,
-                )
-                return parsed, audit
-
-            except ValidationError as exc:
-                # Schema failure: the model returned parseable JSON that does not match the
-                # contract. Retrying will likely produce the same shape, so fail immediately.
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                log.warning(
-                    "llm_schema_validation_failed",
-                    agent=agent_name,
-                    attempt=attempt + 1,
-                    errors=exc.error_count(),
-                )
-                raise LLMUnavailable(
-                    f"Groq returned JSON that does not match {response_schema.__name__}: "
-                    f"{exc.error_count()} validation errors"
-                ) from exc
-
-            except (RateLimitError, APIError, json.JSONDecodeError, TimeoutError) as exc:
-                last_error = exc
-                log.warning(
-                    "llm_call_retrying",
-                    agent=agent_name,
-                    attempt=attempt + 1,
-                    error=type(exc).__name__,
-                    detail=str(exc)[:200],
-                )
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
-
-        raise LLMUnavailable(
-            f"Groq call failed after {MAX_RETRIES + 1} attempts: {last_error}"
-        ) from last_error
+    content = body["choices"][0]["message"]["content"]
+    # A parse failure raises and is caught by the caller. Never scraped.
+    return json.loads(content), body.get("usage") or {}

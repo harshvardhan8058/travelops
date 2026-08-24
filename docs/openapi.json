@@ -4791,7 +4791,7 @@
     },
     "/api/v1/incidents/{incident_id}/explanation": {
       "get": {
-        "description": "On-demand explanation from the Explainer agent.\n\nGenerated from recorded evidence each time \u2014 not cached, because the value is in the\nexplanation reflecting the current state of the evidence, and caching introduces a\nstaleness question the system has no mechanism to answer.\n\nReturns 404 with mode information when `LLM_MODE=off`.",
+        "description": "Explain a recovery from its recorded actions.\n\nGenerated per request rather than stored. An explanation's value is that it reflects the\nevidence as it stands, and caching one introduces a staleness question this system has no\nmechanism to answer.",
         "operationId": "get_explanation_api_v1_incidents__incident_id__explanation_get",
         "parameters": [
           {
@@ -4828,7 +4828,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Natural-language explanation of the recovery (Phase 3 reasoning agent)",
+        "summary": "Natural-language explanation of a completed recovery. Authorises nothing.",
         "tags": [
           "reasoning"
         ]
@@ -5188,7 +5188,7 @@
     },
     "/api/v1/reports/{report_id}": {
       "get": {
-        "description": "On-demand executive report from the Report Generator agent.\n\n`report_id` is an incident reference or a group reference.\n\nReturns 404 with mode information when `LLM_MODE=off`.",
+        "description": "Summarise a disruption from its derived rollup. `report_id` is a group or incident reference.\n\nEvery figure the model may use comes from `cascade_rollup` and `group_hotel_totals`, which are\nthe same figures the console shows. The report cites them; it never computes one.",
         "operationId": "get_report_api_v1_reports__report_id__get",
         "parameters": [
           {
@@ -5225,7 +5225,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Executive report for a resolved incident or group (Phase 3 reasoning agent)",
+        "summary": "Executive report for a disruption. Authorises nothing.",
         "tags": [
           "reasoning"
         ]

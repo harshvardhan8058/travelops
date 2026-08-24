@@ -1,100 +1,95 @@
-"""Explainer reasoning agent — justifies a completed recovery plan in natural language.
+"""Explainer agent — justifies a completed recovery in natural language.
 
-A read-only artifact. It never enters assurance, triggers no action, and authorises nothing.
-It is called after an incident reaches resolved, and its output is stored alongside the plan.
+A read-only artefact. It enters no gate, authorises nothing and writes nothing. The Decision
+Assurance Gate has already run and the actions have already executed by the time this is asked;
+an explanation that could change an outcome would be a second decision path.
 
-Owner: Stream C.
+Uses Stream A's `llm.client.complete_json`, so the failure protocol is A's: `None` means "no
+usable model output" and the caller shows the deterministic record instead. `LLM_MODE=off`, a
+missing key, a timeout and malformed JSON all reduce to the same thing, and none is an error here.
+
+Owner: Stream C. Client, prompt loading and mode resolution are Stream A's.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
+from pydantic import ValidationError
 
 from app.agents.contract import ExplanationResponse, ModelCallAudit
-from app.llm.client import LLMClient
+from app.llm import client
 
 log = structlog.get_logger(__name__)
 
-PROMPT_VERSION = "explainer.v1"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "llm" / "prompts" / "explainer.v1.md"
-GENERATOR = "explainer-agent"
-
-SYSTEM_PROMPT = """\
-You are the Recovery Explainer. Given a completed recovery plan and its outcomes, produce a
-clear natural-language explanation of what happened, why each action was taken, and what the
-results were. Cite evidence references for every claim.
-
-Return JSON matching this schema:
-{
-  "status": "success",
-  "reason": "...",
-  "evidence_refs": ["action:1", ...],
-  "payload_type": "explanation.v1",
-  "explanation": "... multi-paragraph explanation ...",
-  "citation_refs": ["action:check_connections:1", ...]
-}
-
-Rules:
-- Every factual claim must reference a recorded action or metric.
-- Never invent figures — use only what is provided in the context.
-- Write for an operations manager, not a developer.
-"""
+PROMPT = "explainer.v1"
 
 
-def _build_prompt(
+@dataclass
+class ExplanationArtefact:
+    """A validated explanation plus the audit record for the call that produced it."""
+
+    response: ExplanationResponse
+    audit: ModelCallAudit
+    source: str
+
+
+def _format_actions(actions: list[dict[str, Any]]) -> list[str]:
+    """One line per recorded action. Typed values only — never raw external text."""
+    return [
+        f"{item.get('action_type', 'unknown')}: {item.get('status', 'unknown')}"
+        f" | {str(item.get('reason', ''))[:160]}"
+        for item in actions
+    ]
+
+
+def _format_rollup(rollup: dict[str, Any] | None) -> list[str]:
+    if not rollup:
+        return []
+    return [f"{key}={value}" for key, value in sorted(rollup.items())]
+
+
+async def explain(
     *,
     incident_reference: str,
-    actions_summary: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
     rollup: dict[str, Any] | None = None,
-) -> str:
-    parts = [
-        "## Incident",
-        f"Reference: {incident_reference}",
-        "",
-        "## Completed actions",
-    ]
-    for action in actions_summary:
-        parts.append(
-            f"- {action.get('action_type', '?')}: {action.get('status', '?')} "
-            f"| {action.get('reason', '')[:120]}"
-        )
-    if rollup:
-        parts.append("")
-        parts.append("## Group rollup")
-        for key, value in rollup.items():
-            parts.append(f"- {key}: {value}")
-    parts.append("")
-    parts.append("Produce the explanation as specified in the system prompt.")
-    return "\n".join(parts)
+) -> ExplanationArtefact | None:
+    """Explain a completed recovery, or return `None` when no model output is available.
 
+    `actions` must be the actions that actually ran, with the reason each recorded. The model is
+    given no session, no provider and no tool — only these typed facts.
+    """
+    result = await client.complete_json(
+        prompt_name=PROMPT,
+        fields={
+            "incident_reference": incident_reference,
+            "actions": _format_actions(actions),
+            "rollup": _format_rollup(rollup),
+        },
+    )
+    if result is None:
+        return None
 
-class ExplainerAgent:
-    def __init__(self, *, client: LLMClient | None = None) -> None:
-        self._client = client or LLMClient()
-
-    async def explain(
-        self,
-        *,
-        incident_reference: str,
-        actions_summary: list[dict[str, Any]],
-        rollup: dict[str, Any] | None = None,
-        scenario_key: str = "bengaluru_storm",
-    ) -> tuple[ExplanationResponse, ModelCallAudit]:
-        prompt = _build_prompt(
+    try:
+        response = ExplanationResponse.model_validate(result.payload)
+    except ValidationError as exc:
+        # A malformed explanation is discarded, never repaired. The console shows the
+        # deterministic record, which is complete without it.
+        log.error(
+            "explainer_response_invalid",
+            outcome="error",
             incident_reference=incident_reference,
-            actions_summary=actions_summary,
-            rollup=rollup,
+            errors=exc.error_count(),
         )
-        response, audit = await self._client.call(
-            prompt=prompt,
-            system=SYSTEM_PROMPT,
-            response_schema=ExplanationResponse,
-            agent_name="explainer",
-            prompt_version=PROMPT_VERSION,
-            scenario_key=scenario_key,
-        )
-        log.info("explainer_agent_succeeded", incident_reference=incident_reference)
-        return response, audit
+        return None
+
+    log.info(
+        "explainer_succeeded",
+        incident_reference=incident_reference,
+        source=result.source,
+        citations=len(response.citation_refs),
+    )
+    return ExplanationArtefact(response=response, audit=result.audit, source=result.source)

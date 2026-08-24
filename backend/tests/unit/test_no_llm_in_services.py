@@ -89,28 +89,40 @@ def test_no_llm_imports_in_services(path: pathlib.Path):
 
 
 @pytest.mark.parametrize("path", _module_scope_files(), ids=lambda p: p.name)
-def test_no_llm_at_module_scope_in_orchestrator(path: pathlib.Path):
-    """The orchestrator may call agents (Phase 3) through deferred imports only.
+def test_no_model_sdk_at_module_scope_in_orchestrator(path: pathlib.Path):
+    """The orchestrator may import the agents; it may not import a model SDK.
 
-    A top-level import would mean the engine cannot start without the SDK installed, which
-    breaks `LLM_MODE=off` — the design rule that the system works without any model.
+    Calling the planner is the control plane's job, so banning `app.agents` outright was the wrong
+    rule -- it asserted a proxy rather than the invariant. What matters is that `LLM_MODE=off` works
+    on a machine with no SDK installed, which means importing the engine must not pull one in.
+    `test_importing_the_engine_loads_no_model_sdk` asserts that directly; this keeps a module-scope
+    SDK import from becoming the way it breaks.
     """
     imported = _module_scope_imports(path)
-
     banned = {m for m in imported if m.split(".")[0] in FORBIDDEN_MODULES}
     assert not banned, f"{path.relative_to(BACKEND)} has a top-level LLM SDK import: {banned}"
 
-    internal = {m for m in imported if m.startswith(FORBIDDEN_PREFIXES)}
-    assert not internal, f"{path.relative_to(BACKEND)} has a top-level app.llm import: {internal}"
 
-    agent_imports = {
-        m for m in imported if m.startswith("app.agents") and m != "app.agents.contract"
-    }
-    assert not agent_imports, (
-        f"{path.relative_to(BACKEND)} has a top-level app.agents import: {agent_imports}. "
-        "Use a deferred import inside the method that calls the agent. "
-        "app.agents.contract (type definitions) is exempt."
+def test_importing_the_engine_loads_no_model_sdk():
+    """The real invariant behind `LLM_MODE=off`, asserted by observation rather than by proxy.
+
+    Stream A's client imports `httpx` inside the call rather than at module scope, so the whole
+    reasoning layer imports on a machine that will never talk to a model. If this fails,
+    `LLM_MODE=off` has acquired a dependency on the thing it exists to be independent of.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys, app.orchestrator.engine;"
+        "sdks={'groq','openai','anthropic','litellm','ollama'};"
+        "print(','.join(sorted(m for m in sys.modules if m.split('.')[0] in sdks)))"
     )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, cwd=BACKEND, check=True
+    )
+    loaded = result.stdout.strip()
+    assert loaded == "", f"importing the engine loaded a model SDK: {loaded}"
 
 
 def test_agents_are_the_only_reasoning_layer():

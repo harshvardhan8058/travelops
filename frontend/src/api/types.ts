@@ -504,7 +504,11 @@ export interface ReportResponse {
   reference: string;
   generator: string;
   prompt_version: string | null;
+  /** `fixture` or `live` — which produced this artefact. Stream A's client records it. */
+  source: string;
   llm_mode: string;
+  /** Literal true on the contract: a model artefact grants nothing. */
+  authorises_no_action: boolean;
   status: string;
   reason: string;
   evidence_refs: string[];
@@ -520,7 +524,11 @@ export interface ExplanationResponse {
   incident_reference: string;
   generator: string;
   prompt_version: string | null;
+  /** `fixture` or `live` — which produced this artefact. */
+  source: string;
   llm_mode: string;
+  /** Literal true on the contract: a model artefact grants nothing. */
+  authorises_no_action: boolean;
   status: string;
   reason: string;
   evidence_refs: string[];

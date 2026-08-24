@@ -131,6 +131,97 @@ export function ReportScreen() {
           </span>
         </div>
       </Panel>
+
+      <ExplanationPanel incidentId={incidentId} />
     </div>
+  );
+}
+
+/**
+ * The Explainer agent's account of the same recovery.
+ *
+ * On this route alongside the report because they are one subject read two ways: the report
+ * summarises the figures, the explanation justifies the ordering. Absent is a normal outcome and
+ * renders as a stated absence, never as an error — the recorded actions are complete without it.
+ */
+function ExplanationPanel({ incidentId }: { incidentId: string }) {
+  const query = useQuery({
+    queryKey: ['explanation', incidentId],
+    queryFn: () => api.explanation(incidentId),
+    enabled: incidentId.length > 0,
+    retry: false,
+  });
+
+  if (query.isLoading) {
+    return (
+      <Panel title="Why this recovery">
+        <div className="h-[140px]">
+          <LoadingState label="Loading explanation" />
+        </div>
+      </Panel>
+    );
+  }
+
+  if (query.error || !query.data) {
+    const error = query.error instanceof ApiError ? query.error : null;
+    const mode = typeof error?.details?.llm_mode === 'string' ? error.details.llm_mode : null;
+    const reason = typeof error?.details?.reason === 'string' ? error.details.reason : null;
+    return (
+      <Panel title="Why this recovery">
+        <EmptyState
+          title={mode === 'off' ? 'No explanation was generated' : 'No explanation is available'}
+          description={
+            reason ??
+            error?.message ??
+            'The Explainer agent produced no output. The recorded actions are unaffected.'
+          }
+        />
+      </Panel>
+    );
+  }
+
+  const explanation = query.data;
+  return (
+    <Panel
+      title="Why this recovery"
+      actions={
+        <span className="flex items-center gap-3 text-caption text-fg-muted">
+          <span>
+            by <MonoValue muted>{explanation.generator}</MonoValue>
+          </span>
+          <span>
+            source <MonoValue muted>{explanation.source}</MonoValue>
+          </span>
+        </span>
+      }
+    >
+      <div className="px-3 py-2.5">
+        {/* The model writes paragraphs separated by a blank line. Rendered as paragraphs rather
+            than one block, because a wall of text is not read. */}
+        {explanation.explanation.split('\n\n').map((paragraph, index) => (
+          <p key={index} className="mb-2 max-w-[86ch] text-body text-fg-secondary last:mb-0">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+
+      {explanation.citation_refs.length > 0 && (
+        <div className="border-t border-border-subtle px-3 py-2">
+          <span className="text-label uppercase text-fg-muted">Cited</span>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {explanation.citation_refs.map((ref) => (
+              <MonoValue key={ref} muted className="text-caption">
+                {ref}
+              </MonoValue>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
+        An explanation of a recovery that already happened. It authorises nothing and changed
+        nothing.
+      </p>
+    </Panel>
   );
 }

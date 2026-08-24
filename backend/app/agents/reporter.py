@@ -1,122 +1,87 @@
-"""Report Generator reasoning agent — executive summary of a resolved incident or group.
+"""Report Generator agent — executive summary of a resolved disruption.
 
-A read-only artifact. It never enters assurance, triggers no action, and authorises nothing.
-Called when a group reaches resolved (or on demand via the reports endpoint).
+A read-only artefact, on the same terms as the Explainer: no gate, no authorisation, no write. It
+summarises figures the rollup already derived; it never computes one. A number in a report that
+cannot be traced to `metric_refs` is a number nobody can defend in a review.
 
-Owner: Stream C.
+Uses Stream A's `llm.client.complete_json`, so `None` means "no usable model output" and the caller
+falls back to the recorded figures.
+
+Owner: Stream C. Client, prompt loading and mode resolution are Stream A's.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
+from pydantic import ValidationError
 
 from app.agents.contract import ModelCallAudit, ReportResponse
-from app.llm.client import LLMClient
 
 log = structlog.get_logger(__name__)
 
-PROMPT_VERSION = "report.v1"
-GENERATOR = "report-generator"
-
-SYSTEM_PROMPT = """\
-You are the Executive Report Generator. Given a resolved disruption group with its cascade
-metrics and recovery outcomes, produce a structured executive summary.
-
-Return JSON matching this schema:
-{
-  "status": "success",
-  "reason": "...",
-  "evidence_refs": ["incident:...", "group:..."],
-  "payload_type": "report.v1",
-  "summary": "... one paragraph executive summary ...",
-  "sections": [
-    {"heading": "...", "body": "..."},
-    ...
-  ],
-  "metric_refs": ["rollup:flights_affected:8", ...]
-}
-
-Rules:
-- Every metric must reference the source field it was read from.
-- Structure into 4-6 sections: scope, passenger impact, recovery actions, accommodation, resolution.
-- Write for a C-suite audience: concise, factual, no jargon.
-- Never invent figures — use only what is in the context.
-"""
+PROMPT = "report.v1"
 
 
-def _build_prompt(
-    *,
-    group_reference: str,
-    rollup: dict[str, Any],
-    blast_radius: dict[str, Any] | None = None,
-    actions_summary: list[dict[str, Any]] | None = None,
-    hotel_summary: dict[str, Any] | None = None,
-) -> str:
-    parts = [
-        "## Disruption group",
-        f"Reference: {group_reference}",
-        "",
-        "## Cascade rollup",
+@dataclass
+class ReportArtefact:
+    """A validated report plus the audit record for the call that produced it."""
+
+    response: ReportResponse
+    audit: ModelCallAudit
+    source: str
+
+
+def _format_mapping(values: dict[str, Any] | None) -> list[str]:
+    if not values:
+        return []
+    return [
+        f"{key}={value}"
+        for key, value in sorted(values.items())
+        # Nested structures are not flattened into a prompt: a list of allocations is not a
+        # figure, and offering it invites the model to aggregate one.
+        if not isinstance(value, (list, dict))
     ]
-    for key, value in rollup.items():
-        parts.append(f"- {key}: {value}")
-
-    if blast_radius:
-        parts.append("")
-        parts.append("## Blast radius")
-        for key, value in blast_radius.items():
-            parts.append(f"- {key}: {value}")
-
-    if hotel_summary:
-        parts.append("")
-        parts.append("## Hotel allocation")
-        for key, value in hotel_summary.items():
-            parts.append(f"- {key}: {value}")
-
-    if actions_summary:
-        parts.append("")
-        parts.append("## Recovery actions across the group")
-        for action in actions_summary[:20]:
-            parts.append(
-                f"- {action.get('action_type', '?')}: {action.get('status', '?')} "
-                f"| {action.get('reason', '')[:100]}"
-            )
-
-    parts.append("")
-    parts.append("Produce the executive report as specified in the system prompt.")
-    return "\n".join(parts)
 
 
-class ReportGeneratorAgent:
-    def __init__(self, *, client: LLMClient | None = None) -> None:
-        self._client = client or LLMClient()
+async def generate(
+    *,
+    reference: str,
+    rollup: dict[str, Any],
+    hotel_summary: dict[str, Any] | None = None,
+) -> ReportArtefact | None:
+    """Produce an executive report, or `None` when no model output is available."""
+    from app.llm import client
 
-    async def generate(
-        self,
-        *,
-        group_reference: str,
-        rollup: dict[str, Any],
-        blast_radius: dict[str, Any] | None = None,
-        actions_summary: list[dict[str, Any]] | None = None,
-        hotel_summary: dict[str, Any] | None = None,
-        scenario_key: str = "bengaluru_storm",
-    ) -> tuple[ReportResponse, ModelCallAudit]:
-        prompt = _build_prompt(
-            group_reference=group_reference,
-            rollup=rollup,
-            blast_radius=blast_radius,
-            actions_summary=actions_summary,
-            hotel_summary=hotel_summary,
+    result = await client.complete_json(
+        prompt_name=PROMPT,
+        fields={
+            "reference": reference,
+            "rollup": _format_mapping(rollup),
+            "hotel_summary": _format_mapping(hotel_summary),
+        },
+    )
+    if result is None:
+        return None
+
+    try:
+        response = ReportResponse.model_validate(result.payload)
+    except ValidationError as exc:
+        log.error(
+            "report_response_invalid",
+            outcome="error",
+            reference=reference,
+            errors=exc.error_count(),
         )
-        response, audit = await self._client.call(
-            prompt=prompt,
-            system=SYSTEM_PROMPT,
-            response_schema=ReportResponse,
-            agent_name="reporter",
-            prompt_version=PROMPT_VERSION,
-            scenario_key=scenario_key,
-        )
-        log.info("report_generator_succeeded", group_reference=group_reference)
-        return response, audit
+        return None
+
+    log.info(
+        "report_generator_succeeded",
+        reference=reference,
+        source=result.source,
+        sections=len(response.sections),
+        metrics=len(response.metric_refs),
+    )
+    return ReportArtefact(response=response, audit=result.audit, source=result.source)

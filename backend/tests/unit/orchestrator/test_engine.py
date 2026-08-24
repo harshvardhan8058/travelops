@@ -1326,39 +1326,18 @@ class TestBengaluruStormSlice:
         # The outage is recorded, not swallowed.
         assert any("EVENT_PUBLICATION_FAILED" in s for s in summaries)
 
-    async def test_no_llm_is_reachable_from_the_engine_at_module_scope(self):
-        """The engine may call agents (Phase 3), but only through deferred imports inside methods.
+    async def test_the_engine_never_reaches_a_model_sdk(self):
+        """Pointer to the canonical guard, kept so this suite still states the boundary.
 
-        Top-level (module-scope) imports of `app.llm` or a model SDK in the orchestrator would
-        mean the engine cannot import at all without the SDK installed, which breaks `LLM_MODE=off`.
-        Deferred imports inside `_propose_planner_candidate` are fine: they execute only when the
-        mode check passes, so `LLM_MODE=off` never reaches them.
+        The rule and its enforcement live in `tests/unit/test_no_llm_in_services.py`:
+        `test_no_model_sdk_at_module_scope_in_orchestrator` plus
+        `test_importing_the_engine_loads_no_model_sdk`. A second copy here drifted the moment the
+        engine's planner seam changed shape, which is the argument against having one.
         """
-        import ast
-        import pathlib
+        from tests.unit import test_no_llm_in_services as canonical
 
-        source = pathlib.Path(__file__).resolve().parents[3] / "app" / "orchestrator"
-        for path in source.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            # Only check MODULE-LEVEL imports (not inside function bodies)
-            for node in ast.iter_child_nodes(tree):
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    names: list[str] = []
-                    if isinstance(node, ast.Import):
-                        names = [a.name for a in node.names]
-                    elif node.module:
-                        names = [node.module]
-                    for name in names:
-                        assert not name.startswith("app.llm"), (
-                            f"{path.name} has a top-level import of {name}"
-                        )
-                        assert name.split(".")[0] not in {
-                            "groq",
-                            "openai",
-                            "anthropic",
-                            "litellm",
-                            "ollama",
-                        }, f"{path.name} has a top-level import of {name}"
+        assert hasattr(canonical, "test_importing_the_engine_loads_no_model_sdk")
+        canonical.test_importing_the_engine_loads_no_model_sdk()
 
 
 # ------------------------------------------------------------------------------ helpers

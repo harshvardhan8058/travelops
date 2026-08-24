@@ -36,9 +36,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents import planner
 from app.agents.contract import PlanTask
 from app.assurance.contract import AssuranceResult
-from app.config import ResolvedModes, Settings, get_modes, get_settings
+from app.config import LLMMode, ResolvedModes, Settings, get_modes, get_settings
 from app.db.scenario_queries import load_delay_risk_inputs
 from app.errors import AssuranceBlocked, EntityNotFound, WorkflowLimitExceeded
 from app.events.types import (
@@ -405,12 +406,15 @@ class Orchestrator:
     async def propose_tasks(self, ctx: WorkflowContext) -> list[PlanTask]:
         """Get a plan from the deterministic playbook, persisting it as a Plan row.
 
-        The fallback comes FIRST and unconditionally in this slice. The Planner agent
-        arrives later and will be an improvement on this, not a replacement for it: with
-        `LLM_MODE=off` the playbook alone must still produce a usable plan.
+        The playbook comes first and is the whole planner with `LLM_MODE=off`. The Planner
+        agent is asked afterwards and is an improvement on it when a model is available,
+        never a replacement: any failure — off, no key, timeout, malformed output, nothing
+        executable proposed — returns the playbook plan, which is already built.
 
         Every task's action is an `ActionType`, validated by the `PlanTask` contract before
-        anything is persisted, so an unknown action type cannot reach assurance.
+        anything is persisted, so an unknown action type cannot reach assurance. That holds
+        for a model proposal too: the enum rejects an invented action inside the agent, and
+        reflection drops anything with no registered service.
         """
         steps, deferred = self._executable_steps(ctx)
         tasks = [
@@ -439,15 +443,31 @@ class Orchestrator:
                 f"{', '.join(sorted(action.value for action in deferred))}."
             )
 
+        generator = FALLBACK_GENERATOR
+        prompt_version: str | None = None
+        model_self_report: int | None = None
+        raw_response: dict[str, Any] | None = None
+        agent_detail: dict[str, Any] | None = None
+
+        proposal = await self._ask_planner(ctx)
+        if proposal is not None:
+            tasks = proposal.tasks
+            rationale = proposal.rationale
+            generator = proposal.audit.generator
+            prompt_version = proposal.audit.prompt_version
+            model_self_report = proposal.audit.model_self_report
+            agent_detail = proposal.as_detail()
+            raw_response = agent_detail
+
         plan = Plan(
             incident_id=ctx.incident_id,
             generated_at=self._now(),
-            generator=FALLBACK_GENERATOR,
-            # No model was involved, so there is no prompt version and no self-report.
-            prompt_version=None,
-            model_self_report=None,
+            generator=generator,
+            prompt_version=prompt_version,
+            # Recorded so the record can show it did not determine execution. Never branched on.
+            model_self_report=model_self_report,
             rationale=rationale,
-            raw_response=None,
+            raw_response=raw_response,
             retrieved_incident_ids=[],
         )
         self._session.add(plan)
@@ -482,15 +502,19 @@ class Orchestrator:
             stage=STAGE_PLAN,
             actor=ACTOR_ORCHESTRATOR,
             event_type="PLAN_PROPOSED",
-            summary=f"{len(tasks)} tasks proposed by the deterministic playbook",
+            summary=f"{len(tasks)} tasks proposed by {generator}",
             detail={
                 "plan_id": plan.id,
-                "generator": FALLBACK_GENERATOR,
-                "prompt_version": None,
-                "model_self_report": None,
+                "generator": generator,
+                "prompt_version": prompt_version,
+                "model_self_report": model_self_report,
                 "llm_mode": self.modes.llm.value,
                 "actions": [task.action.value for task in tasks],
                 "deferred_actions": sorted(action.value for action in deferred),
+                # Present only when a model produced the plan: what it proposed, what was
+                # dropped, and why. Absent means the playbook, which is not the same thing as
+                # a model that returned nothing.
+                **({"agent": agent_detail} if agent_detail else {}),
             },
         )
         await self._publish(
@@ -499,18 +523,101 @@ class Orchestrator:
                 correlation_id=ctx.correlation_id,
                 incident_id=ctx.incident_id,
                 plan_id=plan.id,
-                generator=FALLBACK_GENERATOR,
-                prompt_version=None,
+                generator=generator,
+                prompt_version=prompt_version,
                 task_ids=task_ids,
                 evidence_refs=list(ctx.evidence_refs),
             ),
             ctx,
         )
-
-        # ----- Phase 3: Planner agent produces a second candidate alongside the playbook -----
-        await self._propose_planner_candidate(ctx)
-
         return tasks
+
+    async def _ask_planner(self, ctx: WorkflowContext) -> Any:
+        """Ask the Planner agent for an ordered plan. `None` means keep the playbook plan.
+
+        The agent gets typed facts and nothing else — no session, no raw text, no tool. It orders
+        work; the orchestrator decides what exists, the gate decides what is allowed, and dispatch
+        is the only thing that turns an action into a call.
+
+        A failure here must never fail the incident, so every exception is caught: a model is an
+        optimisation on a path that already works, and `docs/04` is explicit that an LLM timeout
+        must not mean passengers are not notified.
+        """
+        if self.modes.llm is LLMMode.off:
+            return None
+
+        available = {action for action in ActionType if dispatch.is_implemented(action)}
+        if not available:
+            return None
+
+        try:
+            return await planner.propose(
+                planner.PlanningFacts(
+                    incident_reference=ctx.incident_reference,
+                    trigger_type=str(ctx.trigger_type or "other"),
+                    severity=str(ctx.metadata.get("severity") or "high"),
+                    target_refs=self._target_refs(ctx),
+                    available_actions=available,
+                    evidence_refs=list(ctx.evidence_refs),
+                    flight_summary=ctx.metadata.get("flight_summary"),
+                    risk_summary=ctx.metadata.get("risk_summary"),
+                    # `PlanningFacts` declares this field and the prompt renders it; without a
+                    # supplier it read "none" on every call. Stream C's SQL retrieval fills it.
+                    precedent_refs=await self._precedent_refs(ctx),
+                )
+            )
+        except Exception as exc:
+            log.error(
+                "planner_agent_failed",
+                outcome="error",
+                incident_reference=ctx.incident_reference,
+                detail=type(exc).__name__,
+                reason=str(exc)[:200],
+            )
+            return None
+
+    async def _precedent_refs(self, ctx: WorkflowContext) -> list[str]:
+        """Resolved incidents at this airport, as `reference (reasons)` strings for the prompt.
+
+        Explainable by construction: the reasons are the WHERE clauses that matched, so a precedent
+        offered to the model can always be defended. A retrieval failure yields no precedents rather
+        than failing the call — precedent is context, not a requirement.
+        """
+        from app.memory.retrieval import find_precedents
+
+        incident = await self._session.get(Incident, ctx.incident_id)
+        if incident is None:
+            return []
+
+        airport = None
+        if incident.group_id is not None:
+            group = await self._session.get(IncidentGroup, incident.group_id)
+            airport = group.airport_icao if group else None
+        if airport is None and ctx.flight_id is not None:
+            flight = await self._session.get(Flight, ctx.flight_id)
+            airport = flight.origin_icao if flight else None
+        if airport is None:
+            return []
+
+        try:
+            matches = await find_precedents(
+                self._session,
+                airport_icao=airport,
+                trigger_type=str(ctx.trigger_type or "other"),
+                severity=incident.severity,
+                exclude_incident_id=incident.id,
+            )
+        except Exception as exc:
+            log.warning(
+                "precedent_retrieval_failed",
+                incident_reference=ctx.incident_reference,
+                detail=type(exc).__name__,
+            )
+            return []
+
+        return [
+            f"{match.incident_reference} ({'; '.join(match.match_reasons)})" for match in matches
+        ]
 
     def _executable_steps(
         self, ctx: WorkflowContext
@@ -544,174 +651,6 @@ class Orchestrator:
         if ctx.flight_id is not None:
             refs.append(f"flight:{ctx.flight_id}")
         return refs
-
-    async def _propose_planner_candidate(self, ctx: WorkflowContext) -> None:
-        """Phase 3: produce a second candidate plan from the Planner reasoning agent.
-
-        The playbook plan is already persisted and selected. This is an ADDITIONAL candidate
-        with `generator='planner-agent'`. If it fails for any reason — mode=off, network error,
-        malformed output, validation failure — the playbook plan is unaffected and the incident
-        continues. A model failure must never block recovery.
-
-        Budget-minimal for Stream A: all reasoning logic lives in Stream C's agent/client layer.
-        This method calls it, persists the result, journals it, and moves on.
-        """
-        from app.agents.planner import GENERATOR as PLANNER_GENERATOR
-        from app.agents.planner import PROMPT_VERSION, PlannerAgent
-        from app.config import LLMMode
-        from app.llm.client import LLMUnavailable
-        from app.memory.retrieval import find_precedents
-
-        if self.modes.llm is LLMMode.off:
-            return
-
-        try:
-            # Get airport from the group (which carries airport_icao) or from the flight
-            incident = await self._session.get(Incident, ctx.incident_id)
-            if incident and incident.group_id:
-                group = await self._session.get(IncidentGroup, incident.group_id)
-                airport_icao = group.airport_icao if group else "VOBL"
-            elif ctx.flight_id:
-                flight_for_airport = await self._session.get(Flight, ctx.flight_id)
-                airport_icao = flight_for_airport.origin_icao if flight_for_airport else "VOBL"
-            else:
-                airport_icao = "VOBL"
-            trigger_type = ctx.trigger_type or "weather"
-            severity = incident.severity if incident else "high"
-
-            precedents = await find_precedents(
-                self._session,
-                airport_icao=airport_icao,
-                trigger_type=trigger_type,
-                severity=severity,
-                exclude_incident_id=ctx.incident_id,
-            )
-
-            # Get flight info for prompt context
-            flight = await self._session.get(Flight, ctx.flight_id) if ctx.flight_id else None
-
-            agent = PlannerAgent()
-            planner_response, audit = await agent.propose(
-                incident_reference=ctx.incident_reference,
-                flight_id=ctx.flight_id,
-                flight_number=flight.flight_number if flight else None,
-                route=(f"{flight.origin_icao}->{flight.destination_icao}" if flight else None),
-                delay_minutes=None,  # not stored on the Flight model
-                trigger_type=trigger_type,
-                severity=severity,
-                airport_icao=airport_icao,
-                precedents=[p.to_dict() for p in precedents],
-            )
-
-            # Persist as a second Plan row
-            planner_plan = Plan(
-                incident_id=ctx.incident_id,
-                generated_at=self._now(),
-                generator=PLANNER_GENERATOR,
-                prompt_version=PROMPT_VERSION,
-                model_self_report=audit.model_self_report,
-                rationale=planner_response.reason,
-                raw_response=planner_response.model_dump(mode="json"),
-                retrieved_incident_ids=[p.incident_id for p in precedents],
-                variant_key="planner",
-                selection_state="candidate",
-            )
-            self._session.add(planner_plan)
-            await self._session.flush()
-
-            # Persist tasks
-            planner_rows: dict[str, PlanTaskRow] = {}
-            for order, task in enumerate(planner_response.tasks, start=1):
-                row = PlanTaskRow(
-                    plan_id=planner_plan.id,
-                    action_type=task.action.value,
-                    task_order=order,
-                    depends_on=[],
-                    target_refs=list(task.target_refs),
-                    inputs=dict(task.inputs),
-                    state=TaskState.proposed,
-                )
-                self._session.add(row)
-                planner_rows[task.action.value] = row
-            await self._session.flush()
-
-            # Resolve dependencies
-            for task in planner_response.tasks:
-                row = planner_rows[task.action.value]
-                row.depends_on = [
-                    str(planner_rows[name].id) for name in task.depends_on if name in planner_rows
-                ]
-            await self._session.flush()
-
-            await self._journal(
-                ctx,
-                stage=STAGE_PLAN,
-                actor=ACTOR_ORCHESTRATOR,
-                event_type="PLAN_PROPOSED",
-                summary=(f"{len(planner_response.tasks)} tasks proposed by the planner agent"),
-                detail={
-                    "plan_id": planner_plan.id,
-                    "generator": PLANNER_GENERATOR,
-                    "prompt_version": PROMPT_VERSION,
-                    "model_self_report": audit.model_self_report,
-                    "llm_mode": self.modes.llm.value,
-                    "actions": [t.action.value for t in planner_response.tasks],
-                    "precedents_used": len(precedents),
-                    "latency_ms": audit.latency_ms,
-                    "input_tokens": audit.input_tokens,
-                    "output_tokens": audit.output_tokens,
-                },
-            )
-            log.info(
-                "planner_candidate_created",
-                incident_reference=ctx.incident_reference,
-                plan_id=planner_plan.id,
-                tasks=len(planner_response.tasks),
-                precedents=len(precedents),
-            )
-
-        except LLMUnavailable as exc:
-            # Expected in fixture-missing or rate-limited scenarios. The playbook plan
-            # is already persisted; this failure is informational, never fatal.
-            log.info(
-                "planner_candidate_skipped",
-                incident_reference=ctx.incident_reference,
-                reason=str(exc)[:200],
-            )
-            await self._journal(
-                ctx,
-                stage=STAGE_PLAN,
-                actor=ACTOR_ORCHESTRATOR,
-                event_type="PLANNER_AGENT_UNAVAILABLE",
-                summary=(
-                    "The planner agent could not produce a candidate. "
-                    "The deterministic playbook plan is unaffected."
-                ),
-                detail={"reason": str(exc)[:300], "llm_mode": self.modes.llm.value},
-            )
-        except Exception as exc:
-            # Any other failure must not block recovery.
-            log.error(
-                "planner_candidate_failed",
-                incident_reference=ctx.incident_reference,
-                error=type(exc).__name__,
-                detail=str(exc)[:200],
-            )
-            await self._journal(
-                ctx,
-                stage=STAGE_PLAN,
-                actor=ACTOR_ORCHESTRATOR,
-                event_type="PLANNER_AGENT_FAILED",
-                summary=(
-                    "The planner agent failed unexpectedly. "
-                    "The deterministic playbook plan is unaffected."
-                ),
-                detail={
-                    "error": type(exc).__name__,
-                    "reason": str(exc)[:300],
-                    "llm_mode": self.modes.llm.value,
-                },
-            )
 
     # ------------------------------------------------------------------------ assurance
 

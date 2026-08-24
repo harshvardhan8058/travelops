@@ -1,11 +1,12 @@
-"""Phase 3 reasoning-agent endpoints — Explanation and Report.
+"""Explanation and report endpoints — read-only model artefacts.
 
-Both are read-only artifacts generated on demand from recorded evidence. Neither enters assurance,
-triggers an action, or modifies any row. They are the model's contribution to the audit trail and
-the executive display, not to the recovery itself.
+Neither enters the assurance gate, triggers an action, nor modifies a row. Both are generated on
+demand from recorded evidence.
 
-When `LLM_MODE=off` these return 404 with a message naming the mode, not an error. A missing
-artifact is a configuration fact, not a system failure.
+The absence protocol is Stream A's: the agents return `None` when there is no usable model output,
+and that covers `LLM_MODE=off`, a missing key, a timeout and malformed JSON alike. This module turns
+`None` into a 404 that names the mode, because "no model ran" is a configuration fact rather than a
+failure, and the deterministic record is complete without it.
 
 Owner: Stream C.
 """
@@ -18,7 +19,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import LLMMode, get_settings
+from app.config import get_modes
 from app.db.session import get_session
 from app.errors import EntityNotFound
 from app.models.enums import ActionStatus
@@ -27,6 +28,33 @@ from app.observability.logging import get_logger
 
 router = APIRouter(tags=["reasoning"])
 log = get_logger(__name__)
+
+
+def _unavailable(kind: str) -> EntityNotFound:
+    """A 404 that names why, so a client can render a state rather than an error.
+
+    `details.llm_mode` is what the console keys off to distinguish "the model is switched off" from
+    "the model failed", which are different things to show an operator.
+    """
+    mode = get_modes().llm.value
+    return EntityNotFound(
+        f"no {kind} is available",
+        details={
+            "llm_mode": mode,
+            "reason": (
+                "LLM_MODE=off, so no reasoning agent ran. The deterministic record is complete "
+                "without it."
+                if mode == "off"
+                else "The reasoning agent returned no usable output. The deterministic record is "
+                "unaffected."
+            ),
+            "resolution": (
+                "Set LLM_MODE=fixture or LLM_MODE=live to enable reasoning agents."
+                if mode == "off"
+                else "Retry, or read the recorded actions directly."
+            ),
+        },
+    )
 
 
 async def _resolve_incident(session: AsyncSession, reference: str) -> Incident:
@@ -41,20 +69,12 @@ async def _resolve_incident(session: AsyncSession, reference: str) -> Incident:
     return incident
 
 
-async def _resolve_group(session: AsyncSession, reference: str) -> IncidentGroup:
-    group: IncidentGroup | None = None
-    if reference.isdigit():
-        group = await session.get(IncidentGroup, int(reference))
-    if group is None:
-        stmt = select(IncidentGroup).where(IncidentGroup.reference == reference)
-        group = (await session.execute(stmt)).scalars().first()
-    if group is None:
-        raise EntityNotFound("disruption group not found", details={"group": reference})
-    return group
+async def _recorded_actions(session: AsyncSession, incident_id: int) -> list[dict[str, Any]]:
+    """The actions that actually ran, with the reason each recorded.
 
-
-async def _actions_summary(session: AsyncSession, incident_id: int) -> list[dict[str, Any]]:
-    """Summary of completed actions for the explainer's context."""
+    Includes `needs_human`: a partial hotel allocation committed real rooms and is part of what
+    happened. Excluding it would let an explanation describe a cleaner recovery than occurred.
+    """
     stmt = (
         select(Action, PlanTask.action_type)
         .join(PlanTask, PlanTask.id == Action.plan_task_id)
@@ -65,130 +85,89 @@ async def _actions_summary(session: AsyncSession, incident_id: int) -> list[dict
         )
         .order_by(Action.id)
     )
-    rows = (await session.execute(stmt)).all()
     return [
-        {
-            "action_type": action_type,
-            "status": action.status,
-            "reason": action.reason or "",
-        }
-        for action, action_type in rows
+        {"action_type": action_type, "status": action.status, "reason": action.reason or ""}
+        for action, action_type in (await session.execute(stmt)).all()
     ]
 
 
 @router.get(
     "/incidents/{incident_id}/explanation",
-    summary="Natural-language explanation of the recovery (Phase 3 reasoning agent)",
+    summary="Natural-language explanation of a completed recovery. Authorises nothing.",
 )
 async def get_explanation(
     incident_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """On-demand explanation from the Explainer agent.
+    """Explain a recovery from its recorded actions.
 
-    Generated from recorded evidence each time — not cached, because the value is in the
-    explanation reflecting the current state of the evidence, and caching introduces a
-    staleness question the system has no mechanism to answer.
-
-    Returns 404 with mode information when `LLM_MODE=off`.
+    Generated per request rather than stored. An explanation's value is that it reflects the
+    evidence as it stands, and caching one introduces a staleness question this system has no
+    mechanism to answer.
     """
-    settings = get_settings()
-    if settings.llm_mode == LLMMode.off:
-        raise EntityNotFound(
-            "explanation not available: LLM_MODE=off",
-            details={
-                "llm_mode": "off",
-                "resolution": "Set LLM_MODE=fixture or LLM_MODE=live to enable reasoning agents.",
-            },
-        )
+    from app.agents import explainer
 
     incident = await _resolve_incident(session, incident_id)
-    actions = await _actions_summary(session, incident.id)
-
+    actions = await _recorded_actions(session, incident.id)
     if not actions:
         raise EntityNotFound(
-            "no completed actions to explain",
+            "no completed action to explain",
             details={
                 "incident_reference": incident.reference,
-                "resolution": "Run the incident to completion first.",
+                "resolution": "Run the incident first.",
             },
         )
 
-    from app.agents.explainer import ExplainerAgent
-
-    agent = ExplainerAgent()
-    response, audit = await agent.explain(
-        incident_reference=incident.reference,
-        actions_summary=actions,
-    )
+    artefact = await explainer.explain(incident_reference=incident.reference, actions=actions)
+    if artefact is None:
+        raise _unavailable("explanation")
 
     return {
         "incident_reference": incident.reference,
-        "generator": audit.generator,
-        "prompt_version": audit.prompt_version,
-        "llm_mode": settings.llm_mode.value,
-        **response.model_dump(mode="json"),
-        "audit": audit.model_dump(mode="json"),
+        "generator": artefact.audit.generator,
+        "prompt_version": artefact.audit.prompt_version,
+        "source": artefact.source,
+        "llm_mode": get_modes().llm.value,
+        **artefact.response.model_dump(mode="json"),
+        "audit": artefact.audit.model_dump(mode="json"),
+        "authorises_no_action": True,
     }
 
 
 @router.get(
     "/reports/{report_id}",
-    summary="Executive report for a resolved incident or group (Phase 3 reasoning agent)",
+    summary="Executive report for a disruption. Authorises nothing.",
 )
 async def get_report(
     report_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """On-demand executive report from the Report Generator agent.
+    """Summarise a disruption from its derived rollup. `report_id` is a group or incident reference.
 
-    `report_id` is an incident reference or a group reference.
-
-    Returns 404 with mode information when `LLM_MODE=off`.
+    Every figure the model may use comes from `cascade_rollup` and `group_hotel_totals`, which are
+    the same figures the console shows. The report cites them; it never computes one.
     """
-    settings = get_settings()
-    if settings.llm_mode == LLMMode.off:
-        raise EntityNotFound(
-            "report not available: LLM_MODE=off",
-            details={
-                "llm_mode": "off",
-                "resolution": "Set LLM_MODE=fixture or LLM_MODE=live to enable reasoning agents.",
-            },
-        )
-
-    # Try as a group first (the primary Phase 3 use case), then as an incident
-    group: IncidentGroup | None = None
-    incident: Incident | None = None
+    from app.agents import reporter
+    from app.db.scenario_queries import cascade_rollup
+    from app.services.hotel import group_hotel_totals
 
     stmt = select(IncidentGroup).where(IncidentGroup.reference == report_id)
     group = (await session.execute(stmt)).scalars().first()
 
-    if group is None:
-        incident = await _resolve_incident(session, report_id)
-
-    # Build context from the cascade rollup
-    from app.db.scenario_queries import cascade_rollup
-    from app.services.hotel import group_hotel_totals
-
-    if group:
-        rollup = await cascade_rollup(session, group_id=group.id)
-        hotel = await group_hotel_totals(session, group_id=group.id)
-        reference = group.reference
-    elif incident and incident.group_id:
-        rollup = await cascade_rollup(session, group_id=incident.group_id)
-        hotel = await group_hotel_totals(session, group_id=incident.group_id)
-        reference = incident.reference
+    if group is not None:
+        group_id, reference = group.id, group.reference
     else:
-        raise EntityNotFound(
-            "no group context for report generation",
-            details={"report_id": report_id},
-        )
+        incident = await _resolve_incident(session, report_id)
+        if incident.group_id is None:
+            raise EntityNotFound(
+                "this incident belongs to no disruption group, so there is no rollup to report",
+                details={"incident_reference": incident.reference},
+            )
+        group_id, reference = incident.group_id, incident.reference
 
-    from app.agents.reporter import ReportGeneratorAgent
-
-    agent = ReportGeneratorAgent()
-    response, audit = await agent.generate(
-        group_reference=reference,
+    rollup = await cascade_rollup(session, group_id=group_id)
+    artefact = await reporter.generate(
+        reference=reference,
         rollup={
             "flights_affected": rollup.flights_affected,
             "passengers_affected": rollup.passengers_affected,
@@ -196,14 +175,18 @@ async def get_report(
             "crew_pairings_affected": rollup.crew_pairings_affected,
             "candidate_hotels": rollup.candidate_hotels,
         },
-        hotel_summary=hotel,
+        hotel_summary=await group_hotel_totals(session, group_id=group_id),
     )
+    if artefact is None:
+        raise _unavailable("report")
 
     return {
         "reference": reference,
-        "generator": audit.generator,
-        "prompt_version": audit.prompt_version,
-        "llm_mode": settings.llm_mode.value,
-        **response.model_dump(mode="json"),
-        "audit": audit.model_dump(mode="json"),
+        "generator": artefact.audit.generator,
+        "prompt_version": artefact.audit.prompt_version,
+        "source": artefact.source,
+        "llm_mode": get_modes().llm.value,
+        **artefact.response.model_dump(mode="json"),
+        "audit": artefact.audit.model_dump(mode="json"),
+        "authorises_no_action": True,
     }

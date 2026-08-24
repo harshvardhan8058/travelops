@@ -7,8 +7,8 @@ Run against a live stack (after seed + inject --cascade):
     LLM_MODE=live    python scripts/verify_phase3.py   # requires GROQ_API_KEY
 
 Checks:
-  off     -- exactly 1 plan variant (playbook only), no planner journal entry
-  fixture -- 2+ plan variants (playbook + planner-agent), explanation + report available
+  off     -- every plan's generator is the playbook; no agent detail in the journal
+  fixture -- the plan's generator is the agent, reflection findings recorded, artefacts available
   live    -- same as fixture but with a real Groq call
 
 All modes: the full journey still completes (detected -> resolved).
@@ -126,33 +126,44 @@ def main() -> int:
     variants = [p.get("variant_key") for p in plans]
 
     if mode == "off":
-        # Off mode: exactly the playbook, no planner candidate
+        # The playbook is the whole planner. No agent ran, so no plan may claim one.
         check(
             len(plans) >= 1,
-            f"off mode has at least 1 plan (got {len(plans)})",
+            f"off mode produced a plan (got {len(plans)})",
             f"generators={generators}",
         )
         check(
             "planner-agent" not in generators,
-            "off mode: no planner-agent plan",
+            "off mode: no plan claims an agent generator",
             f"generators={generators}",
         )
     else:
-        # Fixture or live: playbook + planner
+        # Stream A's model: the agent REPLACES the task list inside the plan row rather than
+        # adding a second one, so the assertion is on the generator, not on a plan count.
         check(
-            len(plans) >= 2,
-            f"fixture/live mode has 2+ plans (got {len(plans)})",
+            len(plans) >= 1,
+            f"fixture/live mode produced a plan (got {len(plans)})",
             f"generators={generators}",
         )
         check(
-            "fallback-playbook" in generators,
-            "playbook plan present",
-        )
-        check(
             "planner-agent" in generators,
-            "planner-agent plan present",
-            f"variants={variants}",
+            "the agent produced a plan (generator=planner-agent)",
+            f"generators={generators} variants={variants}",
         )
+        # Every task must still be an executable action: reflection drops anything unregistered.
+        planner_plans = [p for p in plans if p.get("generator") == "planner-agent"]
+        for plan in planner_plans:
+            actions = [t.get("action_type") for t in plan.get("tasks", [])]
+            check(
+                "reassign_gate" not in actions,
+                "reflection dropped the unregistered action the fixture proposes",
+                f"actions={actions}",
+            )
+            check(
+                len(actions) == len(set(actions)),
+                "no duplicate action survived reflection",
+                f"actions={actions}",
+            )
 
     # 3. Plan comparison shows generator
     print("\n--- plan comparison ---")
@@ -227,13 +238,21 @@ def main() -> int:
         check("PLAN_PROPOSED" in events, "PLAN_PROPOSED in group replay")
         if mode != "off":
             planner_frames = [
-                f for f in frames
+                f
+                for f in frames
                 if f.get("event_type") == "PLAN_PROPOSED"
                 and f.get("detail", {}).get("generator") == "planner-agent"
             ]
             check(
                 len(planner_frames) > 0,
-                "planner-agent PLAN_PROPOSED visible in replay",
+                "the agent's PLAN_PROPOSED is in the replay",
+            )
+            # Reflection must be auditable: what the model proposed and what was dropped.
+            with_agent = [f for f in planner_frames if f.get("detail", {}).get("agent")]
+            check(
+                len(with_agent) > 0,
+                "the journal records the agent's proposal and reflection findings",
+                f"keys={sorted((with_agent[0]['detail']['agent'] or {}).keys()) if with_agent else []}",
             )
     else:
         check(False, f"replay returned {status}")
