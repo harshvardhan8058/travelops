@@ -409,6 +409,32 @@ class TestLoadPlanConfig:
     def test_the_digest_is_stable(self):
         assert load_plan_config(V2).digest == load_plan_config(V2).digest
 
+    def test_v2_also_loads_through_the_action_level_loader(self):
+        """One file can serve both levels.
+
+        `AssuranceConfig` is extra="forbid", so v2's `plan:` and `what_if:` sections would have
+        made it unloadable at action level — a trap for whoever eventually points
+        `assurance_config_path` at it. The action loader now drops the plan-level sections and
+        still rejects a genuine typo, so the alternative of duplicating `risk_tiers` into a
+        second file is avoided.
+        """
+        from app.assurance.gate import load_config_with_digest
+
+        config, _ = load_config_with_digest(V2)
+        assert config.version == "assurance-v2"
+        assert config.tier_for("evaluate_entitlements") is RiskTier.high
+        assert config.freshness.metar_minutes == 60
+
+    def test_a_typo_in_a_plan_config_is_still_rejected_at_action_level(self, tmp_path):
+        typo = tmp_path / "typo.yaml"
+        typo.write_text(
+            "version: v3\nplan:\n  limits: {}\nwarn_allowed_everything: true\n", encoding="utf-8"
+        )
+        from app.assurance.gate import load_config_with_digest
+
+        with pytest.raises(AssuranceConfigMissing):
+            load_config_with_digest(str(typo))
+
     def test_v1_and_v2_are_different_configs(self):
         """v1 stays on disk so Phase 1 records remain interpretable."""
         from app.assurance.gate import load_config_with_digest

@@ -1,0 +1,79 @@
+# Which parts of a proposed action a model is allowed to author — version 1
+#
+# Phase 3 changes one thing that matters to assurance: the payload the gate checks is now
+# written by a language model. `PlanTask.inputs` is `dict[str, Any]`, it flows straight into
+# `GateInputs.payload`, and several gate constraints are checks AGAINST that payload.
+#
+# So a model that writes the right key can satisfy the check that was meant to constrain it.
+# `presented_as_current_law: false` looks compliant. `rate_inr: 1` passes a rate cap while the
+# service books something else entirely. `cash_inr` is caught today only because a separate
+# constraint compares it to the engine's figure — which is the pattern this file generalises.
+#
+# The rule: a field that ASSERTS something about the system's own determinations may only be
+# set by the system. A model-authored proposal containing one is refused, not sanitised —
+# stripping it silently would hide that a model tried to assert authority it does not have.
+#
+# Owner: Stream B. Adding a field here makes the gate refuse something it previously allowed,
+# so it is a reviewed change.
+
+version: "proposal-authority-v1"
+
+# ---------------------------------------------------------------- system-authored fields
+# Never valid in a model-authored payload, for any action.
+#
+# Each one is a statement only the deterministic layer can truthfully make.
+system_authored_fields:
+  # Legal and policy determinations. Only app.policy.entitlements.calculate produces these.
+  - cash_inr
+  - currency
+  - formula
+  - formula_used
+  - cited_rule_ids
+  - pack_version
+  - pack_hash
+  - pack_status
+  - presented_as_current_law
+  - source_clause_refs
+
+  # Assurance's own record. A proposal that arrives claiming it was already assured is either
+  # confused or malicious; either way it is not evidence.
+  - assurance_decision
+  - risk_tier
+  - config_version
+  - config_hash
+  - approved_by
+  - approval_scope
+  - plan_hash
+
+  # Commercial limits are read from business_constraint rows, never declared by a proposer.
+  - business_constraint_versions
+
+# ---------------------------------------------------------------- per-action additions
+# Fields only the system may author for one specific action, on top of the global list.
+system_authored_by_action:
+  evaluate_entitlements:
+    - entitlements
+    - cohorts
+    - exposure_inr
+  reserve_hotel_block:
+    # The rate a reservation is booked at is read from inventory, not proposed.
+    - rate_inr
+  find_hotel_options:
+    - rate_inr
+
+# ---------------------------------------------------------------- evidence integrity
+evidence:
+  # A model can invent a plausible-looking reference as easily as a real one. When true, an
+  # evidence ref in a model-authored proposal must appear in the set of refs the caller has
+  # actually recorded; an uncorroborated one refuses the action rather than being recorded as
+  # evidence nobody can trace.
+  #
+  # Only enforced when the caller supplies the known set. It cannot be inferred here, because
+  # Stream B does not hold the evidence ledger.
+  require_corroboration: true
+
+# ---------------------------------------------------------------- self-report
+# `model_self_report` is recorded on ModelCallAudit and is NEVER read by assurance. There is
+# deliberately no setting here that could change that: a threshold in config would be a
+# threshold someone could raise. The prohibition is asserted statically by
+# tests/unit/assurance/test_authorship.py::TestSelfReportNeverGates.
