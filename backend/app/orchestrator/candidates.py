@@ -406,6 +406,12 @@ def comparison_payload(result: CandidateSet, plans: list[Plan]) -> dict[str, Any
                 if comparison.candidate_id in by_variant
                 else None,
                 "variant_key": comparison.candidate_id,
+                "generator": by_variant[comparison.candidate_id].generator
+                if comparison.candidate_id in by_variant
+                else None,
+                "prompt_version": by_variant[comparison.candidate_id].prompt_version
+                if comparison.candidate_id in by_variant
+                else None,
                 "selection_state": by_variant[comparison.candidate_id].selection_state
                 if comparison.candidate_id in by_variant
                 else None,

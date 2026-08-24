@@ -1326,29 +1326,39 @@ class TestBengaluruStormSlice:
         # The outage is recorded, not swallowed.
         assert any("EVENT_PUBLICATION_FAILED" in s for s in summaries)
 
-    async def test_no_llm_is_reachable_from_the_engine(self):
-        """The orchestrator is covered by the frozen AST guard; assert intent here too."""
+    async def test_no_llm_is_reachable_from_the_engine_at_module_scope(self):
+        """The engine may call agents (Phase 3), but only through deferred imports inside methods.
+
+        Top-level (module-scope) imports of `app.llm` or a model SDK in the orchestrator would
+        mean the engine cannot import at all without the SDK installed, which breaks `LLM_MODE=off`.
+        Deferred imports inside `_propose_planner_candidate` are fine: they execute only when the
+        mode check passes, so `LLM_MODE=off` never reaches them.
+        """
         import ast
         import pathlib
 
         source = pathlib.Path(__file__).resolve().parents[3] / "app" / "orchestrator"
         for path in source.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                names: list[str] = []
-                if isinstance(node, ast.Import):
-                    names = [a.name for a in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.module:
-                    names = [node.module]
-                for name in names:
-                    assert not name.startswith("app.llm"), f"{path.name} imports {name}"
-                    assert name.split(".")[0] not in {
-                        "groq",
-                        "openai",
-                        "anthropic",
-                        "litellm",
-                        "ollama",
-                    }, f"{path.name} imports {name}"
+            # Only check MODULE-LEVEL imports (not inside function bodies)
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names: list[str] = []
+                    if isinstance(node, ast.Import):
+                        names = [a.name for a in node.names]
+                    elif node.module:
+                        names = [node.module]
+                    for name in names:
+                        assert not name.startswith("app.llm"), (
+                            f"{path.name} has a top-level import of {name}"
+                        )
+                        assert name.split(".")[0] not in {
+                            "groq",
+                            "openai",
+                            "anthropic",
+                            "litellm",
+                            "ollama",
+                        }, f"{path.name} has a top-level import of {name}"
 
 
 # ------------------------------------------------------------------------------ helpers

@@ -218,6 +218,10 @@ export function PlanComparison() {
                     className="px-3 py-2 text-left text-label uppercase text-fg-secondary"
                   >
                     <span className="block">{row.variant_key}</span>
+                    <span className="block text-caption font-normal normal-case text-fg-muted">
+                      {row.generator ?? 'unknown'}
+                      {row.prompt_version ? ` · ${row.prompt_version}` : ''}
+                    </span>
                     <span
                       className={clsx(
                         'block font-normal normal-case',

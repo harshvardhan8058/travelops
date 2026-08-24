@@ -637,6 +637,17 @@
             ],
             "title": "External Effects"
           },
+          "generator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generator"
+          },
           "high_risk_actions": {
             "default": 0,
             "title": "High Risk Actions",
@@ -671,6 +682,17 @@
           "plan_risk_tier": {
             "title": "Plan Risk Tier",
             "type": "string"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
           },
           "rationale": {
             "anyOf": [
@@ -4767,6 +4789,51 @@
         ]
       }
     },
+    "/api/v1/incidents/{incident_id}/explanation": {
+      "get": {
+        "description": "On-demand explanation from the Explainer agent.\n\nGenerated from recorded evidence each time \u2014 not cached, because the value is in the\nexplanation reflecting the current state of the evidence, and caching introduces a\nstaleness question the system has no mechanism to answer.\n\nReturns 404 with mode information when `LLM_MODE=off`.",
+        "operationId": "get_explanation_api_v1_incidents__incident_id__explanation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Explanation Api V1 Incidents  Incident Id  Explanation Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Natural-language explanation of the recovery (Phase 3 reasoning agent)",
+        "tags": [
+          "reasoning"
+        ]
+      }
+    },
     "/api/v1/incidents/{incident_id}/plans": {
       "get": {
         "operationId": "list_plans_api_v1_incidents__incident_id__plans_get",
@@ -5119,16 +5186,17 @@
         ]
       }
     },
-    "/api/v1/reports/{incident_id}": {
+    "/api/v1/reports/{report_id}": {
       "get": {
-        "operationId": "get_report_api_v1_reports__incident_id__get",
+        "description": "On-demand executive report from the Report Generator agent.\n\n`report_id` is an incident reference or a group reference.\n\nReturns 404 with mode information when `LLM_MODE=off`.",
+        "operationId": "get_report_api_v1_reports__report_id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "incident_id",
+            "name": "report_id",
             "required": true,
             "schema": {
-              "title": "Incident Id",
+              "title": "Report Id",
               "type": "string"
             }
           }
@@ -5138,7 +5206,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Report Api V1 Reports  Incident Id  Get"
+                  "additionalProperties": true,
+                  "title": "Response Get Report Api V1 Reports  Report Id  Get",
+                  "type": "object"
                 }
               }
             },
@@ -5155,9 +5225,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Executive report [fixture]",
+        "summary": "Executive report for a resolved incident or group (Phase 3 reasoning agent)",
         "tags": [
-          "fixtures"
+          "reasoning"
         ]
       }
     },

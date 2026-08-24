@@ -23,7 +23,7 @@ import { SourcesLedger } from '@/features/sources/SourcesLedger';
 import { DecisionTimeline } from '@/features/timeline/DecisionTimeline';
 import { GroupApprovalQueue } from '@/features/assurance/GroupApprovalQueue';
 import { PlanComparison } from '@/features/plans/PlanComparison';
-import { StreamPlaceholder } from '@/features/placeholder/StreamPlaceholder';
+import { ReportScreen } from '@/features/reports/ReportScreen';
 import { ImpactExplorer } from '@/features/impact/ImpactExplorer';
 import { WhatIfScreen } from '@/features/cascade/WhatIfScreen';
 import { AgentConsole } from '@/features/agent/AgentConsole';
@@ -101,16 +101,7 @@ export function App() {
          */}
         <Route path="/assurance" element={<GroupApprovalQueue />} />
         <Route path="/plans/:incidentId" element={<PlanComparison />} />
-        <Route
-          path="/reports/:incidentId"
-          element={
-            <StreamPlaceholder
-              screen="Executive report"
-              owner="Stream D"
-              spec="docs/27-ui-specification.md screen 7, sequenced after C2-8"
-            />
-          }
-        />
+        <Route path="/reports/:incidentId" element={<ReportScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

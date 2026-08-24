@@ -501,10 +501,43 @@ export interface SourcesResponse {
 
 /** Metrics are derived from recorded rows. An absent metric is absent, never estimated. */
 export interface ReportResponse {
+  reference: string;
+  generator: string;
+  prompt_version: string | null;
+  llm_mode: string;
+  status: string;
+  reason: string;
+  evidence_refs: string[];
+  payload_type: string;
+  summary: string;
+  sections: { heading: string; body: string }[];
+  metric_refs: string[];
+  audit: ModelCallAudit;
+}
+
+/** Phase 3: structured explanation from the Explainer agent. */
+export interface ExplanationResponse {
   incident_reference: string;
-  metrics: Record<string, number | string | null>;
-  narrative: { generated_by: string | null; text: string | null; note?: string };
-  caveats?: string[];
+  generator: string;
+  prompt_version: string | null;
+  llm_mode: string;
+  status: string;
+  reason: string;
+  evidence_refs: string[];
+  payload_type: string;
+  explanation: string;
+  citation_refs: string[];
+  audit: ModelCallAudit;
+}
+
+/** Model call diagnostic metadata. Never used for control flow. */
+export interface ModelCallAudit {
+  generator: string;
+  prompt_version: string | null;
+  model_self_report: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  latency_ms: number | null;
 }
 
 /** One declared member flight of the cascade. */
@@ -699,6 +732,8 @@ export interface CandidateComparisonRow {
   variant_key: string;
   plan_id: number | null;
   plan_hash: string;
+  generator: string | null;
+  prompt_version: string | null;
   admissible: boolean;
   decision: string;
   plan_risk_tier: string;

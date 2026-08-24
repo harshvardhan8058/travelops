@@ -60,6 +60,8 @@ class CandidateComparisonRow(BaseModel):
     variant_key: str
     plan_id: int | None = None
     plan_hash: str
+    generator: str | None = None
+    prompt_version: str | None = None
     admissible: bool
     decision: str
     plan_risk_tier: str

@@ -506,6 +506,10 @@ class Orchestrator:
             ),
             ctx,
         )
+
+        # ----- Phase 3: Planner agent produces a second candidate alongside the playbook -----
+        await self._propose_planner_candidate(ctx)
+
         return tasks
 
     def _executable_steps(
@@ -540,6 +544,174 @@ class Orchestrator:
         if ctx.flight_id is not None:
             refs.append(f"flight:{ctx.flight_id}")
         return refs
+
+    async def _propose_planner_candidate(self, ctx: WorkflowContext) -> None:
+        """Phase 3: produce a second candidate plan from the Planner reasoning agent.
+
+        The playbook plan is already persisted and selected. This is an ADDITIONAL candidate
+        with `generator='planner-agent'`. If it fails for any reason — mode=off, network error,
+        malformed output, validation failure — the playbook plan is unaffected and the incident
+        continues. A model failure must never block recovery.
+
+        Budget-minimal for Stream A: all reasoning logic lives in Stream C's agent/client layer.
+        This method calls it, persists the result, journals it, and moves on.
+        """
+        from app.agents.planner import GENERATOR as PLANNER_GENERATOR
+        from app.agents.planner import PROMPT_VERSION, PlannerAgent
+        from app.config import LLMMode
+        from app.llm.client import LLMUnavailable
+        from app.memory.retrieval import find_precedents
+
+        if self.modes.llm is LLMMode.off:
+            return
+
+        try:
+            # Get airport from the group (which carries airport_icao) or from the flight
+            incident = await self._session.get(Incident, ctx.incident_id)
+            if incident and incident.group_id:
+                group = await self._session.get(IncidentGroup, incident.group_id)
+                airport_icao = group.airport_icao if group else "VOBL"
+            elif ctx.flight_id:
+                flight_for_airport = await self._session.get(Flight, ctx.flight_id)
+                airport_icao = flight_for_airport.origin_icao if flight_for_airport else "VOBL"
+            else:
+                airport_icao = "VOBL"
+            trigger_type = ctx.trigger_type or "weather"
+            severity = incident.severity if incident else "high"
+
+            precedents = await find_precedents(
+                self._session,
+                airport_icao=airport_icao,
+                trigger_type=trigger_type,
+                severity=severity,
+                exclude_incident_id=ctx.incident_id,
+            )
+
+            # Get flight info for prompt context
+            flight = await self._session.get(Flight, ctx.flight_id) if ctx.flight_id else None
+
+            agent = PlannerAgent()
+            planner_response, audit = await agent.propose(
+                incident_reference=ctx.incident_reference,
+                flight_id=ctx.flight_id,
+                flight_number=flight.flight_number if flight else None,
+                route=(f"{flight.origin_icao}->{flight.destination_icao}" if flight else None),
+                delay_minutes=None,  # not stored on the Flight model
+                trigger_type=trigger_type,
+                severity=severity,
+                airport_icao=airport_icao,
+                precedents=[p.to_dict() for p in precedents],
+            )
+
+            # Persist as a second Plan row
+            planner_plan = Plan(
+                incident_id=ctx.incident_id,
+                generated_at=self._now(),
+                generator=PLANNER_GENERATOR,
+                prompt_version=PROMPT_VERSION,
+                model_self_report=audit.model_self_report,
+                rationale=planner_response.reason,
+                raw_response=planner_response.model_dump(mode="json"),
+                retrieved_incident_ids=[p.incident_id for p in precedents],
+                variant_key="planner",
+                selection_state="candidate",
+            )
+            self._session.add(planner_plan)
+            await self._session.flush()
+
+            # Persist tasks
+            planner_rows: dict[str, PlanTaskRow] = {}
+            for order, task in enumerate(planner_response.tasks, start=1):
+                row = PlanTaskRow(
+                    plan_id=planner_plan.id,
+                    action_type=task.action.value,
+                    task_order=order,
+                    depends_on=[],
+                    target_refs=list(task.target_refs),
+                    inputs=dict(task.inputs),
+                    state=TaskState.proposed,
+                )
+                self._session.add(row)
+                planner_rows[task.action.value] = row
+            await self._session.flush()
+
+            # Resolve dependencies
+            for task in planner_response.tasks:
+                row = planner_rows[task.action.value]
+                row.depends_on = [
+                    str(planner_rows[name].id) for name in task.depends_on if name in planner_rows
+                ]
+            await self._session.flush()
+
+            await self._journal(
+                ctx,
+                stage=STAGE_PLAN,
+                actor=ACTOR_ORCHESTRATOR,
+                event_type="PLAN_PROPOSED",
+                summary=(f"{len(planner_response.tasks)} tasks proposed by the planner agent"),
+                detail={
+                    "plan_id": planner_plan.id,
+                    "generator": PLANNER_GENERATOR,
+                    "prompt_version": PROMPT_VERSION,
+                    "model_self_report": audit.model_self_report,
+                    "llm_mode": self.modes.llm.value,
+                    "actions": [t.action.value for t in planner_response.tasks],
+                    "precedents_used": len(precedents),
+                    "latency_ms": audit.latency_ms,
+                    "input_tokens": audit.input_tokens,
+                    "output_tokens": audit.output_tokens,
+                },
+            )
+            log.info(
+                "planner_candidate_created",
+                incident_reference=ctx.incident_reference,
+                plan_id=planner_plan.id,
+                tasks=len(planner_response.tasks),
+                precedents=len(precedents),
+            )
+
+        except LLMUnavailable as exc:
+            # Expected in fixture-missing or rate-limited scenarios. The playbook plan
+            # is already persisted; this failure is informational, never fatal.
+            log.info(
+                "planner_candidate_skipped",
+                incident_reference=ctx.incident_reference,
+                reason=str(exc)[:200],
+            )
+            await self._journal(
+                ctx,
+                stage=STAGE_PLAN,
+                actor=ACTOR_ORCHESTRATOR,
+                event_type="PLANNER_AGENT_UNAVAILABLE",
+                summary=(
+                    "The planner agent could not produce a candidate. "
+                    "The deterministic playbook plan is unaffected."
+                ),
+                detail={"reason": str(exc)[:300], "llm_mode": self.modes.llm.value},
+            )
+        except Exception as exc:
+            # Any other failure must not block recovery.
+            log.error(
+                "planner_candidate_failed",
+                incident_reference=ctx.incident_reference,
+                error=type(exc).__name__,
+                detail=str(exc)[:200],
+            )
+            await self._journal(
+                ctx,
+                stage=STAGE_PLAN,
+                actor=ACTOR_ORCHESTRATOR,
+                event_type="PLANNER_AGENT_FAILED",
+                summary=(
+                    "The planner agent failed unexpectedly. "
+                    "The deterministic playbook plan is unaffected."
+                ),
+                detail={
+                    "error": type(exc).__name__,
+                    "reason": str(exc)[:300],
+                    "llm_mode": self.modes.llm.value,
+                },
+            )
 
     # ------------------------------------------------------------------------ assurance
 
