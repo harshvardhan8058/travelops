@@ -9,6 +9,7 @@
  */
 
 import {
+  Bot,
   Database,
   FileText,
   FlaskConical,
@@ -32,6 +33,7 @@ const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Ops Board' },
   { to: '/cascade/current', icon: GitFork, label: 'Cascade' },
   { to: '/incidents/INC-2026-0820-VOBL-01', icon: ListChecks, label: 'Recovery workspace' },
+  { to: '/agent/INC-2026-0820-VOBL-01', icon: Bot, label: 'Agent operations' },
   { to: '/impact/INC-2026-0820-VOBL-01', icon: Users, label: 'Impact' },
   { to: '/assurance', icon: ShieldCheck, label: 'Approval queue' },
   { to: '/what-if/current', icon: FlaskConical, label: 'What-if' },

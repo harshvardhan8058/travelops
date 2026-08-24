@@ -26,6 +26,7 @@ import { PlanComparison } from '@/features/plans/PlanComparison';
 import { StreamPlaceholder } from '@/features/placeholder/StreamPlaceholder';
 import { ImpactExplorer } from '@/features/impact/ImpactExplorer';
 import { WhatIfScreen } from '@/features/cascade/WhatIfScreen';
+import { AgentConsole } from '@/features/agent/AgentConsole';
 
 /** Used only when the current route names no incident, e.g. the Command Center. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
@@ -35,7 +36,7 @@ function useRouteIncidentId(fallback: string): string {
   // `impact` joins the list because that screen is incident-scoped too. There is no `/replay/group`
   // route: Replay carries its own incident/group toggle, and a second entry path to the same screen
   // would be the duplicate seam this integration exists to avoid.
-  const match = /^\/(?:incidents|policy|replay|reports|plans|impact)\/([^/]+)/.exec(pathname);
+  const match = /^\/(?:incidents|policy|replay|reports|plans|impact|agent)\/([^/]+)/.exec(pathname);
   const captured = match?.[1];
   return captured ? decodeURIComponent(captured) : fallback;
 }
@@ -76,6 +77,11 @@ export function App() {
         <Route path="/" element={<CommandCenter />} />
         <Route path="/cascade/:groupId" element={<CascadeExplorer />} />
         <Route path="/incidents/:incidentId" element={<RecoveryWorkspace />} />
+        {/*
+         * The agent console is incident-scoped and joins the regex above, so the Decision Timeline
+         * beside it follows the same incident. It reads only contracts that already exist.
+         */}
+        <Route path="/agent/:incidentId" element={<AgentConsole />} />
         <Route path="/policy/:incidentId" element={<PolicyScreen />} />
         <Route path="/replay/:incidentId" element={<ReplayScreen />} />
         <Route path="/impact/:incidentId" element={<ImpactExplorer />} />
