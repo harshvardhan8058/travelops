@@ -816,7 +816,7 @@ class Orchestrator:
         """
         referenced = list(task.target_refs)
         facts = self._policy_facts(task)
-        requirements = self._policy_requirements(task, facts)
+        requirements = await self._policy_requirements(ctx, task, facts)
         gathered = {
             "action_type": task.action.value,
             "target_refs": referenced,
@@ -843,12 +843,93 @@ class Orchestrator:
         supplied = task.inputs.get("facts")
         return dict(supplied) if isinstance(supplied, dict) else {}
 
-    def _policy_requirements(self, task: PlanTask, facts: dict[str, Any]) -> Any:
-        """Ask Stream B what this action must satisfy. Never raises, by their contract."""
+    async def _policy_requirements(
+        self, ctx: WorkflowContext, task: PlanTask, facts: dict[str, Any]
+    ) -> Any:
+        """Ask Stream B what this action must satisfy. Never raises, by their contract.
+
+        Supplies the proposal's **authorship** as well, which is what lets Stream B refuse two
+        things a deterministic proposal can never do: assert a field only the system may author,
+        and cite a reference nobody recorded. Without it those constraints are never generated, so
+        a model could put `assurance_decision` in a payload or invent an evidence ref and nothing
+        would object — the gate would evaluate a claim it had no reason to distrust.
+
+        For a deterministic plan this is `Authorship.deterministic`, for which Stream B returns no
+        constraints at all. Phase 1 and Phase 2 behaviour is therefore byte-identical, which is the
+        property that lets the frozen gate stay frozen.
+
+        The refusal arrives as `POLICY_CONSTRAINT_BREACH` on `policy_compliant`, classified as a
+        conflict rather than an approval request — an operator cannot make a fabricated assertion
+        true by agreeing with it.
+        """
         from app.policy.requirements import gate_requirements
 
+        authorship, proposed_refs = await self._proposal_authorship(ctx)
         return gate_requirements(
-            action_type=task.action.value, facts=facts, settings=self._settings
+            action_type=task.action.value,
+            facts=facts,
+            settings=self._settings,
+            authorship=authorship,
+            payload=dict(task.inputs),
+            proposed_evidence_refs=proposed_refs,
+            known_evidence_refs=self._corroboration_baseline(ctx, task),
+        )
+
+    def _corroboration_baseline(self, ctx: WorkflowContext, task: PlanTask) -> list[str]:
+        """Every reference the system can independently trace, for the citation check.
+
+        Two sources, and leaving either out breaks the check in a different direction:
+
+        * `ctx.evidence_refs` — what the services recorded: the observation, the airport, the
+          runway, the ruleset hash.
+        * `task.target_refs` — the incident and flight the **orchestrator itself supplied** to the
+          planner. Reflection replaces a model's invented refs with these before anything persists,
+          so they are traceable by construction.
+
+        Omitting the target refs was a real defect: the fixture planner cites exactly the refs it
+        was handed, and the gate refused every one as uncorroborated. A well-behaved model citing
+        what the orchestrator gave it must pass, or the check is noise and gets ignored — which is
+        worse than not having it, because the one time it fires for real nobody will look.
+
+        This does not weaken the check. An invented `metar:NOWHERE` is in neither set and is still
+        refused; that is what the check exists for.
+        """
+        baseline = list(ctx.evidence_refs)
+        for ref in task.target_refs:
+            if ref not in baseline:
+                baseline.append(ref)
+        return baseline
+
+    async def _proposal_authorship(self, ctx: WorkflowContext) -> tuple[Any, list[str]]:
+        """Who wrote the plan being assured, and which refs it claimed.
+
+        Read from the plan row rather than tracked in memory, because the plan is the durable
+        record of authorship and a resumed run has no in-memory history. A plan that cannot be
+        loaded is treated as model-authored: the conservative direction, since the alternative is
+        extending deterministic trust to a proposal whose origin is unknown.
+        """
+        from app.assurance.authorship import ProposalAuthorship
+
+        plan = (
+            await self._current_plan(ctx.incident_id)
+            if ctx.plan_id is None
+            else (await self._session.get(Plan, ctx.plan_id))
+        )
+        if plan is None:
+            return ProposalAuthorship.from_model(generator="unknown"), []
+
+        generator = plan.generator or FALLBACK_GENERATOR
+        if generator == FALLBACK_GENERATOR:
+            return ProposalAuthorship.deterministic(generator=generator), []
+
+        # Model-authored. The refs it cited live in the stored response, which is the only place
+        # they exist — the plan's task rows carry the orchestrator's refs, not the model's.
+        raw = plan.raw_response if isinstance(plan.raw_response, dict) else {}
+        cited = raw.get("evidence_refs")
+        proposed = [str(ref) for ref in cited] if isinstance(cited, list) else []
+        return (
+            ProposalAuthorship.from_model(generator=generator, prompt_version=plan.prompt_version),
+            proposed,
         )
 
     async def _resolve_entities(self, refs: Sequence[str]) -> dict[str, Any]:

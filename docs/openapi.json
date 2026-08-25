@@ -791,6 +791,17 @@
             ],
             "title": "Plan Hash"
           },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
           "rationale": {
             "anyOf": [
               {
@@ -2787,9 +2798,20 @@
             "title": "Action Type",
             "type": "string"
           },
+          "assurance_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assurance Id"
+          },
           "depends_on": {
             "items": {
-              "type": "integer"
+              "type": "string"
             },
             "title": "Depends On",
             "type": "array"

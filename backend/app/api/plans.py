@@ -63,6 +63,12 @@ async def _group_reference(session: AsyncSession, incident: Incident) -> str:
 async def _plan_out(session: AsyncSession, plan, incident_reference: str) -> CandidatePlanOut:
     stmt = select(PlanTask).where(PlanTask.plan_id == plan.id).order_by(PlanTask.task_order)
     tasks = list((await session.execute(stmt)).scalars())
+    # `PlanTask` has no `assurance_id` column: the link lives on `assurance_evaluation`, and a task
+    # may be evaluated more than once. Reuse the incident detail's reader so both surfaces mean the
+    # same thing by "the evaluation that authorised this task" — the latest one.
+    from app.api.incidents import _latest_evaluation_ids
+
+    evaluations = await _latest_evaluation_ids(session, [row.id for row in tasks])
     return CandidatePlanOut(
         id=plan.id,
         incident_reference=incident_reference,
@@ -83,6 +89,7 @@ async def _plan_out(session: AsyncSession, plan, incident_reference: str) -> Can
                 state=str(row.state),
                 target_refs=list(row.target_refs or []),
                 depends_on=[str(dep) for dep in (row.depends_on or [])],
+                assurance_id=evaluations.get(row.id),
             )
             for row in tasks
         ],

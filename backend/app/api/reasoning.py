@@ -76,6 +76,18 @@ async def _actions_summary(session: AsyncSession, incident_id: int) -> list[dict
     ]
 
 
+def _source_of(generator: str) -> str:
+    """`fixture` or `live`, read off the generator the client already recorded.
+
+    Formatting, not derivation: `LLMClient` writes `fixture:<agent>` for a replay and
+    `groq:<model>` for a network call, so this only saves every client from parsing a prefix. A
+    consumer needs it because a fixture artefact and a live one carry different weight in a review,
+    and `llm_mode` alone does not distinguish them — live mode falls back to no output rather than
+    to a fixture, but a reader cannot know that from the mode.
+    """
+    return "fixture" if generator.startswith("fixture:") else "live"
+
+
 @router.get(
     "/incidents/{incident_id}/explanation",
     summary="Natural-language explanation of the recovery (Phase 3 reasoning agent)",
@@ -126,9 +138,13 @@ async def get_explanation(
         "incident_reference": incident.reference,
         "generator": audit.generator,
         "prompt_version": audit.prompt_version,
+        "source": _source_of(audit.generator),
         "llm_mode": settings.llm_mode.value,
         **response.model_dump(mode="json"),
         "audit": audit.model_dump(mode="json"),
+        # On the contract, not in a comment. An explanation of a recovery that already happened
+        # cannot authorise, reverse or modify any part of it.
+        "authorises_no_action": True,
     }
 
 
@@ -203,7 +219,9 @@ async def get_report(
         "reference": reference,
         "generator": audit.generator,
         "prompt_version": audit.prompt_version,
+        "source": _source_of(audit.generator),
         "llm_mode": settings.llm_mode.value,
         **response.model_dump(mode="json"),
         "audit": audit.model_dump(mode="json"),
+        "authorises_no_action": True,
     }

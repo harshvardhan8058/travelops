@@ -504,7 +504,12 @@ export interface ReportResponse {
   reference: string;
   generator: string;
   prompt_version: string | null;
+  /** `fixture` or `live`. A replay and a network call carry different weight in a review, and
+   *  `llm_mode` alone does not distinguish them. */
+  source: string;
   llm_mode: string;
+  /** Stated on the contract: a model artefact cannot authorise, reverse or modify anything. */
+  authorises_no_action: boolean;
   status: string;
   reason: string;
   evidence_refs: string[];
@@ -520,7 +525,11 @@ export interface ExplanationResponse {
   incident_reference: string;
   generator: string;
   prompt_version: string | null;
+  /** `fixture` or `live`. */
+  source: string;
   llm_mode: string;
+  /** Stated on the contract: a model artefact cannot authorise, reverse or modify anything. */
+  authorises_no_action: boolean;
   status: string;
   reason: string;
   evidence_refs: string[];
