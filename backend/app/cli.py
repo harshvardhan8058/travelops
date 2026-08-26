@@ -96,11 +96,22 @@ async def _clear_workflow_records(session: AsyncSession) -> dict[str, int]:
     still references. SQLite does not enforce foreign keys by default so it appears to work
     and leaves orphans; Postgres, which is what the demo runs on, rejects the delete outright.
 
+    The cascade projection's output — `disruption_edge`, `cascade_snapshot`, `passenger_impact`,
+    `hotel_inventory_hold` — is cleared here for the same reason. It is derived from a run
+    rather than seeded, and `disruption_edge.derived_from_action_id` holds a reference to the
+    very `action` rows this function deletes.
+
     The split is deliberate rather than a workaround: each stream clears what it created.
     """
     from sqlalchemy import delete
 
     from app.db.seed import DEMO_DATASET_ID
+    from app.models.cascade import (
+        CascadeSnapshot,
+        DisruptionEdge,
+        HotelInventoryHold,
+        PassengerImpact,
+    )
     from app.models.workflow import (
         Action,
         AssuranceEvaluation,
@@ -108,6 +119,7 @@ async def _clear_workflow_records(session: AsyncSession) -> dict[str, int]:
         HotelReservation,
         HumanDecision,
         Incident,
+        IncidentGroup,
         IncidentOutcome,
         Notification,
         Plan,
@@ -125,6 +137,24 @@ async def _clear_workflow_records(session: AsyncSession) -> dict[str, int]:
     removed: dict[str, int] = {}
     if not incident_ids:
         return removed
+
+    # The cascade projection's own output: edges, rollup snapshots, passenger impact and hotel
+    # holds. Derived from a run, so it is not seed data and `reset_demo_dataset` does not carry
+    # it — it clears `pairing_impact` from this same family and nothing else.
+    #
+    # Scoped by owning group rather than by evidence id. `disruption_edge` names exactly one of
+    # `derived_from_action_id` / `derived_from_prediction_id`, so deleting only the
+    # action-derived rows would leave the root-cause edges to break the `prediction` delete
+    # lower down in this same list — the same bug one table over. Measured on Postgres after a
+    # full cascade journey: 46 edges (38 by action, 8 by prediction), 604 passenger impacts,
+    # 6 hotel holds and 2 snapshots, every one of them carrying the demo group id.
+    group_ids = list(
+        (
+            await session.execute(
+                select(IncidentGroup.id).where(IncidentGroup.demo_dataset_id == DEMO_DATASET_ID)
+            )
+        ).scalars()
+    )
 
     plan_ids = list(
         (await session.execute(select(Plan.id).where(Plan.incident_id.in_(incident_ids)))).scalars()
@@ -186,6 +216,24 @@ async def _clear_workflow_records(session: AsyncSession) -> dict[str, int]:
         (
             "hotel_reservation",
             delete(HotelReservation).where(HotelReservation.action_id.in_(action_ids)),
+        ),
+        # Before `action` because `disruption_edge.derived_from_action_id` points at it, and
+        # before `reset_demo_dataset` deletes `incident_group`, which all four of these name.
+        (
+            "disruption_edge",
+            delete(DisruptionEdge).where(DisruptionEdge.incident_group_id.in_(group_ids)),
+        ),
+        (
+            "passenger_impact",
+            delete(PassengerImpact).where(PassengerImpact.incident_group_id.in_(group_ids)),
+        ),
+        (
+            "hotel_inventory_hold",
+            delete(HotelInventoryHold).where(HotelInventoryHold.incident_group_id.in_(group_ids)),
+        ),
+        (
+            "cascade_snapshot",
+            delete(CascadeSnapshot).where(CascadeSnapshot.incident_group_id.in_(group_ids)),
         ),
         ("action", delete(Action).where(Action.id.in_(action_ids))),
         (
