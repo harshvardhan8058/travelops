@@ -6,12 +6,17 @@ Run against a live stack (after seed + inject --cascade):
     LLM_MODE=fixture python scripts/verify_phase3.py
     LLM_MODE=live    python scripts/verify_phase3.py   # requires GROQ_API_KEY
 
-Checks:
-  off     -- exactly 1 plan variant (playbook only), no planner journal entry
-  fixture -- 2+ plan variants (playbook + planner-agent), explanation + report available
+Covers the whole Phase 3 chain:
+
+    facts -> planner -> reflection -> assurance -> human approval -> execution
+          -> explanation/report -> replay/audit
+
+  off     -- playbook only, no model plan, no artefacts; the Phase 2 path unchanged
+  fixture -- playbook + planner-agent candidate, reflection recorded, artefacts available
   live    -- same as fixture but with a real Groq call
 
-All modes: the full journey still completes (detected -> resolved).
+In every mode: no task advances without its own evaluation, the high-risk action carries an
+attributed human decision, and execution happened through the recorded path.
 
 Exits non-zero on any failure.
 """
@@ -237,6 +242,96 @@ def main() -> int:
             )
     else:
         check(False, f"replay returned {status}")
+
+    # 7. Reflection is recorded, not just applied
+    print("\n--- reflection ---")
+    if mode == "off":
+        check(True, "off mode: no reflection to record (no agent ran)")
+    else:
+        status, replay = get(f"/incidents/{INCIDENT}/replay")
+        agent_frames = [
+            f
+            for f in (replay.get("frames", []) if status == 200 else [])
+            if f.get("event_type") == "PLAN_PROPOSED"
+            and f.get("detail", {}).get("generator") == "planner-agent"
+        ]
+        check(bool(agent_frames), "the agent's PLAN_PROPOSED is on the incident replay")
+        if agent_frames:
+            detail = agent_frames[-1].get("detail", {})
+            reflection = detail.get("reflection") or detail.get("agent") or {}
+            check(
+                bool(reflection),
+                "reflection is recorded on the plan event",
+                f"keys={sorted(reflection.keys())}",
+            )
+            # The committed fixture proposes evaluate_entitlements, which has no registered
+            # service. Reflection must have dropped it and said so.
+            dropped = reflection.get("dropped_actions") or []
+            check(
+                bool(dropped),
+                "reflection named what it dropped",
+                f"dropped={dropped}",
+            )
+            proposed = detail.get("actions") or []
+            check(
+                "evaluate_entitlements" not in proposed,
+                "the action with no registered service is not in the persisted plan",
+                f"persisted={proposed}",
+            )
+
+    # 8. Authorship reached the gate: a model-authored plan is assured under model authorship
+    print("\n--- authorship at the gate ---")
+    status, plans_body = get(f"/incidents/{INCIDENT}/plans")
+    agent_plans = [
+        p for p in (plans_body.get("plans", []) if status == 200 else [])
+        if p.get("generator") == "planner-agent"
+    ]
+    if mode == "off":
+        check(not agent_plans, "off mode: no model-authored plan exists to authorise")
+    else:
+        check(bool(agent_plans), "a model-authored plan exists")
+
+    # Whatever the author, no task may advance without its own evaluation. This is the
+    # one-path-to-execution property, checked over every plan rather than only the driving one.
+    unassured: list[str] = []
+    for plan in plans_body.get("plans", []) if status == 200 else []:
+        for task in plan.get("tasks", []):
+            if task.get("state") not in {"proposed", None} and task.get("assurance_id") is None:
+                unassured.append(f"plan {plan['id']} task {task['id']} ({task['action_type']})")
+    check(
+        not unassured,
+        "no task advanced without its own evaluation",
+        f"offenders={unassured}" if unassured else "",
+    )
+
+    # 9. A person authorised the high-risk work, and it is attributed
+    print("\n--- human approval ---")
+    status, assurance = get(f"/incidents/{INCIDENT}/assurance")
+    evaluations = assurance.get("evaluations", []) if status == 200 else []
+    high_risk = [e for e in evaluations if e.get("risk_tier") == "high"]
+    check(bool(high_risk), f"a high-risk action was evaluated (got {len(high_risk)})")
+    decided = [e for e in high_risk if e.get("human_decision")]
+    check(
+        bool(decided),
+        "the high-risk action carries a human decision",
+        f"actors={[e['human_decision'].get('actor_id') for e in decided]}",
+    )
+    for evaluation in decided:
+        check(
+            bool(evaluation["human_decision"].get("actor_id")),
+            f"eval {evaluation['id']} names the operator who decided it",
+        )
+
+    # 10. Execution happened through the recorded path
+    print("\n--- execution ---")
+    status, detail = get(f"/incidents/{INCIDENT}")
+    plan = detail.get("plan", {}) if status == 200 else {}
+    executed = [t for t in plan.get("tasks", []) if t.get("state") == "succeeded"]
+    check(bool(executed), f"tasks executed (got {len(executed)})")
+    check(
+        detail.get("state") in {"resolved", "executing", "awaiting_approval", "blocked"},
+        f"incident reached a legitimate state ({detail.get('state')})",
+    )
 
     # Summary
     print("\n" + "=" * 70)

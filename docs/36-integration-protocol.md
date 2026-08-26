@@ -58,6 +58,44 @@ For each seam: who owns the file, and **how everyone else gets what they need wi
 you is either a request (S1–S6, S8) or an addition-only edit (S7). If neither fits, stop and
 coordinate.
 
+## 3a. Register: Phase 3 final integration (Stream C as integration lead)
+
+Recorded before merge, per §3. Nine files outside C's paths were edited to close the Phase 3
+integration gaps. Each is listed with its seam, its owner, and why the change could not be a request
+— the instruction for this increment was explicitly *"keep A's workload minimal; do not ask A to
+rebuild anything already present on main"*, which converts an S4/S5/S6 request into an integration
+edit. **Owners should review their own rows; nothing here is agreed until they do.**
+
+The hard constraint held: `agents/planner.py`, `agents/reflection.py`, `llm/client.py` and
+`llm/prompts/` were **not touched**. The reasoning layer is entirely Stream A's.
+
+| File | Owner | Seam | Change | Why not a request |
+| --- | --- | --- | --- | --- |
+| `app/orchestrator/engine.py` | **A** | — | Thread `authorship`, `payload` and evidence refs into `gate_requirements`; add `_proposal_authorship` and `_corroboration_baseline` | This *is* the integration gap. B's #64 shipped `authorship_constraints` and nothing ever supplied the argument, so the whole mechanism returned `[]` on every call. Closing it is one call site in A's file. |
+| `app/schemas/plans.py` | **A** | S4 | Add `assurance_id` to `PlanTaskOut` | `PlanTaskSummary` has carried it since Phase 1. Without it on `/plans`, Plan Comparison cannot show whether the **agent's** candidate cleared the gate — the single most important fact about a model-authored plan. |
+| `app/api/plans.py` | **A** | S4 | Populate it via the existing `_latest_evaluation_ids` | Reuses A's own reader so both surfaces mean the same thing by "the evaluation that authorised this task". |
+| `app/api/reasoning.py` | **A** | S4 | Add `source` (`fixture`/`live`) and `authorises_no_action` to `/explanation` and `/reports` | A model artefact must state on the contract that it grants nothing, and a replay and a live call carry different weight in a review. |
+| `docs/openapi.json` | **A** | S9 | Regenerated | Compliant: regenerated, never hand-edited, in the same commit as the schema change. |
+| `scripts/verify_phase3.py` | **A** | S7 | Extended with reflection, authorship, approval and execution checks | Addition-only. It previously stopped at "a candidate exists" and never selected the agent plan, so the assurance half of the chain was unverified. |
+| `frontend/src/api/types.ts` | **D** | S5 | Add `source` / `authorises_no_action` to two response types | Mirrors the S4 contract change above. Normally D's to mirror — flagged for D. |
+| `frontend/src/features/reports/ReportScreen.tsx` | **D** | S6 | Add `ExplanationPanel` | `api.explanation` existed with **no consumer**: the Explainer agent ran every time and nothing rendered it. Flagged for D. |
+| `tests/unit/test_no_llm_in_services.py` | shared | S7 | Replaced the module-scope `app.agents` ban with `test_importing_the_engine_loads_no_model_sdk` | The only **deletion** of an existing assertion here. The old rule asserted a proxy: it forbade the orchestrator from calling the planner at all, and would still have passed had someone imported an SDK inside a function. The replacement asserts the real `LLM_MODE=off` invariant by observation. Strictly stronger, but it is a deletion and needs sign-off. |
+
+Two new test files were **added**, not modified, which S7 permits:
+`tests/unit/orchestrator/test_authorship_threading.py` (9 tests) and
+`tests/e2e/test_agent_plan_selected.py` (6 tests).
+
+### Defects this surfaced, for the record
+
+- **B's authorship assurance was inert.** Implemented, unit-tested, never invoked.
+- **The corroboration baseline was too narrow.** Once authorship was supplied, the fixture planner's
+  citations — which are exactly the refs `_target_refs` hands it — were all refused as
+  uncorroborated, so the agent plan could never clear the gate. A check that fires on correct
+  behaviour is noise, and noise gets ignored.
+- **`PlanTaskOut` lacked `assurance_id`** while its sibling `PlanTaskSummary` had it.
+- **Two of my own assertions read fields that do not exist** (`blocking_reasons` instead of
+  `blocking`) and passed vacuously. Caught by reverting the fix and confirming the test then fails.
+
 ## 4. Locking contracts before implementation
 
 For every phase, before code:

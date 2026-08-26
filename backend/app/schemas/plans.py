@@ -23,6 +23,14 @@ class PlanTaskOut(BaseModel):
     #: Task ids as strings, matching the stored JSON and `PlanTaskSummary`. Two response models
     #: disagreeing about the type of one field is how a consumer ends up comparing 8 to "8".
     depends_on: list[str] = Field(default_factory=list)
+    #: The evaluation that authorised this task, or `None` when it has not been assured.
+    #:
+    #: `PlanTaskSummary` on the incident detail has carried this since Phase 1; this shape did not,
+    #: which mattered once a plan could be model-authored. Plan Comparison reads `/plans`, so a
+    #: reviewer looking at the agent's candidate could not tell whether its tasks had cleared the
+    #: gate — the single most important thing to know about a model-authored plan. Same field, same
+    #: name, same nullability as the incident detail, so the two cannot drift.
+    assurance_id: int | None = None
 
 
 class CandidatePlanOut(BaseModel):

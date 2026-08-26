@@ -126,11 +126,109 @@ export function ReportScreen() {
             </span>
           )}
           <span>
+            source <MonoValue muted>{report.source}</MonoValue>
+          </span>
+          <span>
             This report is a model-generated artifact. It does not enter assurance, trigger any
             action, or modify any record.
           </span>
         </div>
       </Panel>
+
+      <ExplanationPanel incidentId={incidentId} />
     </div>
+  );
+}
+
+/**
+ * The Explainer agent's account of the same recovery.
+ *
+ * Beside the report because they are one subject read two ways: the report summarises the figures,
+ * the explanation justifies the ordering. The agent was already running and producing this — until
+ * now `api.explanation` had no consumer, so the output existed and nothing showed it.
+ *
+ * Absent is a normal outcome, not an error. `LLM_MODE=off` means no agent ran; a refusal means the
+ * agent returned nothing usable. Both render as a stated absence, because the recorded actions are
+ * complete without either.
+ */
+function ExplanationPanel({ incidentId }: { incidentId: string }) {
+  const query = useQuery({
+    queryKey: ['explanation', incidentId],
+    queryFn: () => api.explanation(incidentId),
+    enabled: incidentId.length > 0,
+    // A 404 here is a state, not a transient failure. Retrying would delay showing it.
+    retry: false,
+  });
+
+  if (query.isLoading) {
+    return (
+      <Panel title="Why this recovery">
+        <div className="h-[140px]">
+          <LoadingState label="Loading explanation" />
+        </div>
+      </Panel>
+    );
+  }
+
+  if (query.error || !query.data) {
+    const error = query.error instanceof ApiError ? query.error : null;
+    const mode = typeof error?.details?.llm_mode === 'string' ? error.details.llm_mode : null;
+    return (
+      <Panel title="Why this recovery">
+        <EmptyState
+          title={mode === 'off' ? 'No explanation was generated' : 'No explanation is available'}
+          description={
+            mode === 'off'
+              ? 'LLM_MODE is off, so no reasoning agent ran. The recorded actions above and in the timeline are the complete account.'
+              : (error?.message ??
+                'The Explainer agent returned nothing usable. The recorded actions are unaffected.')
+          }
+        />
+      </Panel>
+    );
+  }
+
+  const explanation = query.data;
+  return (
+    <Panel
+      title="Why this recovery"
+      actions={
+        <span className="flex items-center gap-3 text-caption text-fg-muted">
+          <span>
+            by <MonoValue muted>{explanation.generator}</MonoValue>
+          </span>
+          <span>
+            source <MonoValue muted>{explanation.source}</MonoValue>
+          </span>
+        </span>
+      }
+    >
+      <div className="px-3 py-2.5">
+        {/* Paragraphs, not one block. The model separates them with a blank line and a wall of
+            text does not get read on a projector. */}
+        {explanation.explanation.split('\n\n').map((paragraph, index) => (
+          <p key={index} className="mb-2 max-w-[86ch] text-body text-fg-secondary last:mb-0">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+
+      {explanation.citation_refs.length > 0 && (
+        <div className="border-t border-border-subtle px-3 py-2">
+          <span className="text-label uppercase text-fg-muted">Cited</span>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {explanation.citation_refs.map((ref) => (
+              <MonoValue key={ref} muted className="text-caption">
+                {ref}
+              </MonoValue>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
+        An account of a recovery that already happened. It authorises nothing and changed nothing.
+      </p>
+    </Panel>
   );
 }
