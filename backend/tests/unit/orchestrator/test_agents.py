@@ -220,9 +220,22 @@ class TestTheToolInvocationBoundary:
         )
         assert offenders == [], f"a second model call path exists: {offenders}"
 
-    def test_prompts_are_files_not_inline_strings(self):
-        """`plan.prompt_version` is meaningless if the prompt lives in a Python literal."""
-        assert (APP / "llm" / "prompts" / "planner.v1.md").is_file()
+    @pytest.mark.parametrize("prompt", ["planner.v1.md", "explainer.v1.md", "report.v1.md"])
+    def test_prompts_are_files_not_inline_strings(self, prompt: str):
+        """`plan.prompt_version` is meaningless if the prompt lives in a Python literal.
+
+        Extended to all three agents. It previously asserted this only for the planner, and the
+        two that were exempt were the two that returned 500 in live mode: their inline prompts
+        showed JSON containing literal `...` and never told the model to omit extra fields or
+        return nothing but JSON, so a real Groq response failed `extra="forbid"`.
+        """
+        assert (APP / "llm" / "prompts" / prompt).is_file()
+
+    def test_no_agent_carries_a_system_prompt_in_a_literal(self):
         for path in (APP / "agents").rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             assert "You are the recovery planner" not in text, path.name
+            assert "SYSTEM_PROMPT = " not in text, (
+                f"{path.name} defines a prompt inline; put it in llm/prompts/ so "
+                "prompt_version identifies something"
+            )

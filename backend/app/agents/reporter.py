@@ -8,6 +8,7 @@ Owner: Stream C.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -18,32 +19,11 @@ from app.llm.client import LLMClient
 log = structlog.get_logger(__name__)
 
 PROMPT_VERSION = "report.v1"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "llm" / "prompts" / "report.v1.md"
 GENERATOR = "report-generator"
 
-SYSTEM_PROMPT = """\
-You are the Executive Report Generator. Given a resolved disruption group with its cascade
-metrics and recovery outcomes, produce a structured executive summary.
-
-Return JSON matching this schema:
-{
-  "status": "success",
-  "reason": "...",
-  "evidence_refs": ["incident:...", "group:..."],
-  "payload_type": "report.v1",
-  "summary": "... one paragraph executive summary ...",
-  "sections": [
-    {"heading": "...", "body": "..."},
-    ...
-  ],
-  "metric_refs": ["rollup:flights_affected:8", ...]
-}
-
-Rules:
-- Every metric must reference the source field it was read from.
-- Structure into 4-6 sections: scope, passenger impact, recovery actions, accommodation, resolution.
-- Write for a C-suite audience: concise, factual, no jargon.
-- Never invent figures — use only what is in the context.
-"""
+#: The largest prose artifact: four to six sections plus a summary. See `explainer.MAX_TOKENS`.
+MAX_TOKENS = 8192
 
 
 def _build_prompt(
@@ -112,11 +92,12 @@ class ReportGeneratorAgent:
         )
         response, audit = await self._client.call(
             prompt=prompt,
-            system=SYSTEM_PROMPT,
+            system=PROMPT_PATH.read_text(encoding="utf-8"),
             response_schema=ReportResponse,
             agent_name="reporter",
             prompt_version=PROMPT_VERSION,
             scenario_key=scenario_key,
+            max_tokens=MAX_TOKENS,
         )
         log.info("report_generator_succeeded", group_reference=group_reference)
         return response, audit

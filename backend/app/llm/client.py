@@ -39,6 +39,41 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 1.5
 
+#: Ceiling for the planner's small, bounded task list. Prose agents override it per call.
+DEFAULT_MAX_TOKENS = 4096
+
+
+def _coerce_self_report(value: Any, *, agent_name: str) -> int | None:
+    """`ModelCallAudit.model_self_report` or nothing, never an exception.
+
+    `ModelCallAudit` types this as an int in 0..100, and the model is told not to send it at
+    all. When one arrives anyway it is diagnostic only — the audit's own docstring says it is
+    "never used for control flow" and `ProposalAuthorship` does not even have the field. So a
+    self-report that does not fit the type is dropped and logged, not raised: failing the whole
+    artifact over an unsolicited diagnostic would be the tail wagging the dog.
+
+    Not coerced numerically. A model that sends `0.92` means 92% on a 0-1 scale, and `int(0.92)`
+    is 0 — a confident model recorded as a diffident one. Guessing the scale would invent a
+    figure, so an out-of-contract value is discarded instead.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        discarded: Any = value
+    elif isinstance(value, int) and 0 <= value <= 100:
+        return value
+    elif isinstance(value, float) and value.is_integer() and 0 <= value <= 100:
+        return int(value)
+    else:
+        discarded = value
+    log.info(
+        "llm_self_report_discarded",
+        agent=agent_name,
+        value_type=type(discarded).__name__,
+        detail=str(discarded)[:80],
+    )
+    return None
+
 
 class LLMUnavailable(Exception):  # noqa: N818 - see below
     """Raised when `LLM_MODE=off` or when the live call exhausts retries.
@@ -68,10 +103,17 @@ class LLMClient:
         agent_name: str,
         prompt_version: str,
         scenario_key: str = "bengaluru_storm",
+        max_tokens: int = DEFAULT_MAX_TOKENS,
     ) -> tuple[T, ModelCallAudit]:
         """Invoke the configured mode and return (validated_response, audit).
 
         Raises `LLMUnavailable` when the model is not reachable or not configured.
+
+        `max_tokens` is per call because the agents are not the same size. The planner returns
+        a handful of small task objects; the reporter is asked for four to six sections of
+        prose. One ceiling for both truncates the long one mid-object, and truncated JSON
+        arrives as `JSONDecodeError` — indistinguishable from a transport fault, so it burns
+        all three retries before failing.
         """
         if self._mode is LLMMode.off:
             raise LLMUnavailable("LLM_MODE=off; falling back to deterministic playbook")
@@ -90,6 +132,7 @@ class LLMClient:
             response_schema=response_schema,
             agent_name=agent_name,
             prompt_version=prompt_version,
+            max_tokens=max_tokens,
         )
 
     def _replay_fixture(
@@ -141,6 +184,7 @@ class LLMClient:
         response_schema: type[T],
         agent_name: str,
         prompt_version: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
     ) -> tuple[T, ModelCallAudit]:
         """Live Groq call with retry on transient failures."""
         import asyncio
@@ -166,7 +210,7 @@ class LLMClient:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=temperature,
-                    max_tokens=4096,
+                    max_tokens=max_tokens,
                     response_format={"type": "json_object"},
                 )
                 latency_ms = int((time.perf_counter() - start) * 1000)
@@ -179,7 +223,9 @@ class LLMClient:
                 audit = ModelCallAudit(
                     generator=f"groq:{model}",
                     prompt_version=prompt_version,
-                    model_self_report=raw.get("model_self_report"),
+                    model_self_report=_coerce_self_report(
+                        raw.get("model_self_report"), agent_name=agent_name
+                    ),
                     input_tokens=usage.prompt_tokens if usage else None,
                     output_tokens=usage.completion_tokens if usage else None,
                     latency_ms=latency_ms,

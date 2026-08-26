@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import LLMMode, get_settings
 from app.db.session import get_session
-from app.errors import EntityNotFound
+from app.errors import EntityNotFound, ProviderUnavailable
 from app.models.enums import ActionStatus
 from app.models.workflow import Action, Incident, IncidentGroup, Plan, PlanTask
 from app.observability.logging import get_logger
@@ -88,6 +88,31 @@ def _source_of(generator: str) -> str:
     return "fixture" if generator.startswith("fixture:") else "live"
 
 
+def _unavailable(exc: Exception, *, artifact: str, mode: str) -> ProviderUnavailable:
+    """Turn a model-provider failure into 503 rather than letting it become a 500.
+
+    `LLMUnavailable` is a plain `Exception`, not a `TravelOpsError`, and `app.main` only installs
+    handlers for `TravelOpsError` and `RequestValidationError`. So before this, every live
+    failure — no API key, a rate limit, a schema mismatch — escaped uncaught and Starlette
+    turned it into a bare 500 with no error code and no mode information.
+
+    Deliberately NOT a fixture fallback. In `live` mode the honest answer to "the model could not
+    be reached" is to say so; replaying a committed fixture would put recorded prose behind a
+    `source: live` label and quietly make the artifact untraceable.
+    """
+    return ProviderUnavailable(
+        f"{artifact} unavailable: the reasoning model could not be reached",
+        details={
+            "llm_mode": mode,
+            "provider_error": str(exc)[:300],
+            "resolution": (
+                "Check GROQ_API_KEY and provider status. "
+                "Set LLM_MODE=fixture to serve the committed artefact instead."
+            ),
+        },
+    )
+
+
 @router.get(
     "/incidents/{incident_id}/explanation",
     summary="Natural-language explanation of the recovery (Phase 3 reasoning agent)",
@@ -127,12 +152,16 @@ async def get_explanation(
         )
 
     from app.agents.explainer import ExplainerAgent
+    from app.llm.client import LLMUnavailable
 
     agent = ExplainerAgent()
-    response, audit = await agent.explain(
-        incident_reference=incident.reference,
-        actions_summary=actions,
-    )
+    try:
+        response, audit = await agent.explain(
+            incident_reference=incident.reference,
+            actions_summary=actions,
+        )
+    except LLMUnavailable as exc:
+        raise _unavailable(exc, artifact="explanation", mode=settings.llm_mode.value) from exc
 
     return {
         "incident_reference": incident.reference,
@@ -201,19 +230,23 @@ async def get_report(
         )
 
     from app.agents.reporter import ReportGeneratorAgent
+    from app.llm.client import LLMUnavailable
 
     agent = ReportGeneratorAgent()
-    response, audit = await agent.generate(
-        group_reference=reference,
-        rollup={
-            "flights_affected": rollup.flights_affected,
-            "passengers_affected": rollup.passengers_affected,
-            "connections_at_risk": rollup.connections_at_risk,
-            "crew_pairings_affected": rollup.crew_pairings_affected,
-            "candidate_hotels": rollup.candidate_hotels,
-        },
-        hotel_summary=hotel,
-    )
+    try:
+        response, audit = await agent.generate(
+            group_reference=reference,
+            rollup={
+                "flights_affected": rollup.flights_affected,
+                "passengers_affected": rollup.passengers_affected,
+                "connections_at_risk": rollup.connections_at_risk,
+                "crew_pairings_affected": rollup.crew_pairings_affected,
+                "candidate_hotels": rollup.candidate_hotels,
+            },
+            hotel_summary=hotel,
+        )
+    except LLMUnavailable as exc:
+        raise _unavailable(exc, artifact="report", mode=settings.llm_mode.value) from exc
 
     return {
         "reference": reference,

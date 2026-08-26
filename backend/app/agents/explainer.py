@@ -22,26 +22,9 @@ PROMPT_VERSION = "explainer.v1"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "llm" / "prompts" / "explainer.v1.md"
 GENERATOR = "explainer-agent"
 
-SYSTEM_PROMPT = """\
-You are the Recovery Explainer. Given a completed recovery plan and its outcomes, produce a
-clear natural-language explanation of what happened, why each action was taken, and what the
-results were. Cite evidence references for every claim.
-
-Return JSON matching this schema:
-{
-  "status": "success",
-  "reason": "...",
-  "evidence_refs": ["action:1", ...],
-  "payload_type": "explanation.v1",
-  "explanation": "... multi-paragraph explanation ...",
-  "citation_refs": ["action:check_connections:1", ...]
-}
-
-Rules:
-- Every factual claim must reference a recorded action or metric.
-- Never invent figures — use only what is provided in the context.
-- Write for an operations manager, not a developer.
-"""
+#: Prose, not a task list. The planner's 4096 truncates a multi-paragraph explanation
+#: mid-object, and truncated JSON is indistinguishable from a transport fault.
+MAX_TOKENS = 8192
 
 
 def _build_prompt(
@@ -90,11 +73,12 @@ class ExplainerAgent:
         )
         response, audit = await self._client.call(
             prompt=prompt,
-            system=SYSTEM_PROMPT,
+            system=PROMPT_PATH.read_text(encoding="utf-8"),
             response_schema=ExplanationResponse,
             agent_name="explainer",
             prompt_version=PROMPT_VERSION,
             scenario_key=scenario_key,
+            max_tokens=MAX_TOKENS,
         )
         log.info("explainer_agent_succeeded", incident_reference=incident_reference)
         return response, audit
