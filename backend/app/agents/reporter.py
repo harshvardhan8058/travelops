@@ -22,9 +22,13 @@ PROMPT_VERSION = "report.v1"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "llm" / "prompts" / "report.v1.md"
 GENERATOR = "report-generator"
 
-#: The largest prose artifact: a summary plus four to six sections, roughly 700-1100 tokens.
-#: 1800 covers it. See `explainer.MAX_TOKENS` for why 8192 could never be served.
-MAX_TOKENS = 1800
+#: The largest prose artifact: a summary plus four to six sections, roughly 700-1100 visible
+#: tokens. `openai/gpt-oss-120b` also spends completion budget on reasoning before it writes that
+#: JSON. The Windows live failure exhausted 1800 tokens (`finish_reason=length`) after 1903
+#: reasoning tokens and returned only 438 characters of the report. 4096 covers that observed
+#: reasoning plus the full artifact while remaining well below the 8000-token Groq ceiling when
+#: combined with the measured 1259-token reporter prompt.
+MAX_TOKENS = 4096
 
 
 def _build_prompt(

@@ -20,10 +20,12 @@ Owner: Stream C.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.agents import explainer, reporter
-from app.agents.contract import ExplanationResponse
+from app.agents.contract import ExplanationResponse, ReportResponse
 from app.config import get_settings
 from app.llm.client import (
     MAX_RETRIES,
@@ -89,6 +91,13 @@ class TestNoAgentCanExceedTheCeiling:
         assert granted >= MIN_OUTPUT_BUDGET, f"{name} has no room to answer"
         assert estimate + granted <= TPM, f"{name} would request {estimate + granted} against {TPM}"
 
+    def test_the_reporter_reserves_for_reasoning_and_the_visible_report(self):
+        """The exact live OpenRouter truncation: hidden reasoning consumed the old reservation."""
+        observed_reasoning_tokens = 1903
+        largest_visible_report_tokens = 1100
+
+        assert observed_reasoning_tokens + largest_visible_report_tokens <= reporter.MAX_TOKENS
+
     def test_the_planner_default_also_fits(self):
         from app.agents import planner
         from app.llm.client import DEFAULT_MAX_TOKENS
@@ -141,6 +150,26 @@ async def _call(client: LLMClient, *, system: str, max_tokens: int):
 
 
 class TestTheRequestActuallySent:
+    async def test_the_reporter_sends_its_reasoning_aware_reservation(self, live, monkeypatch):
+        """The reporter must not regress to the 1800-token ceiling seen truncating on Windows."""
+        report = {
+            "status": "success",
+            "reason": "Executive report for the recorded recovery.",
+            "evidence_refs": [],
+            "payload_type": "report.v1",
+            "summary": "The disruption was resolved through recorded recovery actions.",
+            "sections": [],
+            "metric_refs": [],
+        }
+        stub = RecordingTransport().returns(json.dumps(report)).install(monkeypatch)
+        await reporter.ReportGeneratorAgent().generate(
+            group_reference="GRP-1",
+            rollup={"flights_affected": 8},
+        )
+
+        assert stub.last["json"]["max_tokens"] == reporter.MAX_TOKENS
+        assert ReportResponse.model_validate(report).summary
+
     async def test_the_sent_max_tokens_keeps_the_request_inside_the_ceiling(
         self, live, monkeypatch
     ):
