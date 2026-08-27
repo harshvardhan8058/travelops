@@ -6,7 +6,7 @@ working — and the planner FAIL. Four things differ between the planner and the
 
     contract     PlannerResponse/PlanTask are extra="forbid"; prose are extra="ignore"
     reason cap   planner 2000 characters; prose 20000
-    budget       planner max_tokens 1200; prose 1400 and 1800
+    budget       planner max_tokens 3072; prose 1400 and 4096
     reflection   planner output passes through reflect(); prose has no such stage
 
 Driving the real agents over the real client with one response shape at a time isolated it:

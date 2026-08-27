@@ -54,8 +54,11 @@ _TRANSIENT_STATUS = frozenset({408, 413, 429})
 #: Reserved completion budget for the planner's small, bounded task list. Prose agents override
 #: it per call. These are RESERVATIONS, not observed sizes: Groq bills TPM as
 #: `prompt_tokens + max_tokens`, so an oversized ceiling costs the same as actually generating
-#: that much. Six planner tasks are roughly 400-600 tokens of JSON, so 1200 is ample.
-DEFAULT_MAX_TOKENS = 1200
+#: that much. The Windows live run showed this reasoning model consume 1406 reasoning tokens
+#: before writing the task JSON; the former 1200 ceiling returned `finish_reason=length` and no
+#: candidate. 3072 covers that observed reasoning plus the bounded 400-600-token task list with
+#: margin, while remaining well inside the 8000-token Groq ceiling with the measured prompt.
+DEFAULT_MAX_TOKENS = 3072
 
 #: Held back from the TPM ceiling when clamping, to absorb the difference between the estimate
 #: below and Groq's real tokeniser.

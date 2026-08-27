@@ -36,6 +36,8 @@ INCIDENT = "INC-2026-0820-VOBL-01"
 #: run is different: it can call the planner serially for eight incidents, and each call has up to
 #: three 60-second provider attempts. 30 minutes covers that bounded 24-minute worst case plus
 #: database work without changing any production timeout.
+GET_TIMEOUT_SECONDS = 60
+REPORT_GET_TIMEOUT_SECONDS = 300
 POST_TIMEOUT_SECONDS = 300
 GROUP_RUN_TIMEOUT_SECONDS = 1800
 
@@ -48,7 +50,10 @@ def get(path: str) -> tuple[int, dict]:
     url = f"{API}{path}"
     try:
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        timeout = (
+            REPORT_GET_TIMEOUT_SECONDS if path.startswith("/reports/") else GET_TIMEOUT_SECONDS
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
