@@ -118,9 +118,14 @@ def stage_configuration() -> Any:
     print(RULE)
     print("1. RESOLVED CONFIGURATION")
     print(RULE)
+    from app.config import provider_transport
+
+    transport = provider_transport(settings)
     print(f"  LLM_MODE               {getattr(settings.llm_mode, 'value', settings.llm_mode)}")
-    print(f"  GROQ_MODEL             {settings.groq_model}")
-    print(f"  GROQ_API_KEY           {_mask(settings.groq_api_key)}")
+    print(f"  LLM_PROVIDER           {transport.provider.value}")
+    print(f"  endpoint               {transport.endpoint_url}")
+    print(f"  model                  {transport.model}")
+    print(f"  {transport.key_env_var:22} {_mask(transport.api_key)}")
     print(f"  GROQ_TEMPERATURE       {settings.groq_temperature}")
     print(f"  ALLOW_LLM_DEGRADATION  {settings.allow_llm_degradation}")
 
@@ -131,13 +136,14 @@ def stage_configuration() -> Any:
     from app.agents import explainer, reporter
     from app.llm.client import DEFAULT_MAX_TOKENS
 
+    print(f"  tpm_limit              {transport.tpm_limit}")
     print(f"  max_tokens planner     {DEFAULT_MAX_TOKENS}")
     print(f"  max_tokens explainer   {explainer.MAX_TOKENS}")
     print(f"  max_tokens reporter    {reporter.MAX_TOKENS}")
 
-    if not settings.groq_api_key:
+    if not transport.api_key:
         print()
-        print("  GROQ_API_KEY is empty. Run this inside the API container.")
+        print(f"  {transport.key_env_var} is empty. Run this inside the API container.")
         raise SystemExit(2)
     return settings
 
@@ -226,15 +232,24 @@ async def stage_bisect(settings: Any) -> None:
     `param`. Going direct keeps them, and keeps the comparison honest: every variant below is
     the production request with a single documented difference.
     """
-    from groq import AsyncGroq
+    import httpx
+
+    from app.config import provider_transport
 
     print()
     print(RULE)
-    print("3. PARAMETER BISECTION (raw SDK, one change per request)")
+    print("3. PARAMETER BISECTION (direct HTTP, one change per request)")
     print(RULE)
 
-    client = AsyncGroq(api_key=settings.groq_api_key)
-    model = settings.groq_model
+    transport = provider_transport(settings)
+    url = transport.endpoint_url
+    headers = {
+        "Authorization": f"Bearer {transport.api_key}",
+        "Content-Type": "application/json",
+        **transport.extra_headers,
+    }
+    print(f"  POST {url}")
+    model = transport.model
     system = "You are a JSON API. Reply with JSON only."
     user = 'Return exactly {"ok": true} as JSON.'
     both = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -329,25 +344,34 @@ async def stage_bisect(settings: Any) -> None:
         ),
     ]
 
-    for label, kwargs in variants:
-        try:
-            response = await client.chat.completions.create(**kwargs)
-            content = (response.choices[0].message.content or "")[:60].replace("\n", " ")
-            reasoning = getattr(response.choices[0].message, "reasoning", None)
-            print(f"  PASS  {label}")
-            print(f"        content={content!r}")
-            print(f"        reasoning field present: {reasoning is not None}")
-            if response.usage:
+    async with httpx.AsyncClient(timeout=60.0) as http:
+        for label, kwargs in variants:
+            try:
+                response = await http.post(url, headers=headers, json=kwargs)
+                if response.status_code >= 400:
+                    body = response.json() if response.text.startswith("{") else {}
+                    error = body.get("error") or {}
+                    print(
+                        f"  FAIL  {label}   "
+                        f"[HTTP {response.status_code} {error.get('code') or error.get('type')}]"
+                    )
+                    print(f"        {str(error.get('message') or response.text)[:220]}")
+                    continue
+                payload = response.json()
+                message = payload["choices"][0]["message"]
+                content = (message.get("content") or "")[:60].replace("\n", " ")
+                usage = payload.get("usage") or {}
+                print(f"  PASS  {label}")
+                print(f"        content={content!r}")
+                print(f"        reasoning field present: {message.get('reasoning') is not None}")
                 print(
-                    f"        prompt_tokens={response.usage.prompt_tokens} "
-                    f"completion_tokens={response.usage.completion_tokens}"
+                    f"        prompt_tokens={usage.get('prompt_tokens')} "
+                    f"completion_tokens={usage.get('completion_tokens')}"
                 )
-        except BaseException as exc:
-            info = _describe_exception(exc)
-            status = info.get("status_code")
-            code = info.get("code")
-            print(f"  FAIL  {label}   [HTTP {status} {code}]")
-            print(f"        {str(info.get('message') or info.get('str'))[:220]}")
+            except BaseException as exc:
+                info = _describe_exception(exc)
+                print(f"  FAIL  {label}   [{info.get('exception')}]")
+                print(f"        {str(info.get('message') or info.get('str'))[:220]}")
 
     print()
     print("  Read the first PASS after the failing production request: the single difference")
@@ -358,22 +382,29 @@ async def stage_bisect(settings: Any) -> None:
 
 
 async def stage_models(settings: Any) -> None:
-    from groq import AsyncGroq
+    import httpx
+
+    from app.config import provider_transport
 
     print()
     print(RULE)
     print("4. MODELS THIS KEY CAN SEE")
     print(RULE)
+    transport = provider_transport(settings)
+    models_url = transport.endpoint_url.replace("/chat/completions", "/models")
     try:
-        listing = await AsyncGroq(api_key=settings.groq_api_key).models.list()
-        ids = sorted(m.id for m in listing.data)
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            listing = (
+                await http.get(models_url, headers={"Authorization": f"Bearer {transport.api_key}"})
+            ).json()
+        ids = sorted(m["id"] for m in listing.get("data") or [])
         print(f"  {len(ids)} models")
         for model_id in ids:
-            mark = "  <== configured" if model_id == settings.groq_model else ""
+            mark = "  <== configured" if model_id == transport.model else ""
             print(f"    {model_id}{mark}")
-        if settings.groq_model not in ids:
+        if transport.model not in ids:
             print()
-            print(f"  {settings.groq_model} is NOT in the list this key can serve.")
+            print(f"  {transport.model} is NOT in the list this key can serve.")
     except BaseException as exc:
         _print_error("models", _describe_exception(exc), indent="  ")
 

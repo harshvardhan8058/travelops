@@ -20,9 +20,7 @@ Owner: Stream C.
 
 from __future__ import annotations
 
-import httpx
 import pytest
-from groq import APIStatusError
 
 from app.agents import explainer, reporter
 from app.agents.contract import ExplanationResponse
@@ -36,6 +34,7 @@ from app.llm.client import (
     _estimate_prompt_tokens,
     _output_budget,
 )
+from tests.llm_transport_stub import EXPLANATION_JSON, RecordingTransport
 
 TPM = 8000
 
@@ -113,73 +112,8 @@ class TestNoAgentCanExceedTheCeiling:
 # ------------------------------------------------------------------ the live request itself
 
 
-class _Spy:
-    """Records the kwargs of each call; optionally raises for the first N calls."""
-
-    def __init__(self, error: Exception | None = None, fail_times: int = 0) -> None:
-        self.calls: list[dict] = []
-        self.error = error
-        self.fail_times = fail_times
-
-    def install(self, monkeypatch) -> None:
-        import json as _json
-
-        import groq
-
-        spy = self
-
-        class _Msg:
-            def __init__(self, c):
-                self.content = c
-                self.reasoning = None
-
-        class _Choice:
-            def __init__(self, c):
-                self.message = _Msg(c)
-
-        class _Usage:
-            prompt_tokens = 700
-            completion_tokens = 300
-
-        class _Resp:
-            def __init__(self, c):
-                self.choices = [_Choice(c)]
-                self.usage = _Usage()
-
-        payload = _json.dumps(
-            {
-                "status": "success",
-                "reason": "r",
-                "evidence_refs": ["action:1"],
-                "payload_type": "explanation.v1",
-                "explanation": "Bengaluru storm recovery explained.",
-                "citation_refs": ["action:check_connections:1"],
-            }
-        )
-
-        class _Completions:
-            async def create(self, **kwargs):
-                spy.calls.append(kwargs)
-                if spy.error is not None and len(spy.calls) <= spy.fail_times:
-                    raise spy.error
-                return _Resp(payload)
-
-        class _Chat:
-            completions = _Completions()
-
-        class _Fake:
-            def __init__(self, api_key=None, **_):
-                self.chat = _Chat()
-
-        monkeypatch.setattr(groq, "AsyncGroq", _Fake)
-
-
-def _status_error(status: int, message: str, code: str) -> APIStatusError:
-    body = {"error": {"message": message, "type": "invalid_request_error", "code": code}}
-    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
-    return APIStatusError(
-        message, response=httpx.Response(status, json=body, request=request), body=body
-    )
+def _stub(monkeypatch) -> RecordingTransport:
+    return RecordingTransport().returns(EXPLANATION_JSON).install(monkeypatch)
 
 
 @pytest.fixture
@@ -210,40 +144,35 @@ class TestTheRequestActuallySent:
     async def test_the_sent_max_tokens_keeps_the_request_inside_the_ceiling(
         self, live, monkeypatch
     ):
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         await _call(LLMClient(), system=system, max_tokens=explainer.MAX_TOKENS)
 
-        sent = spy.calls[-1]["max_tokens"]
+        sent = stub.last["json"]["max_tokens"]
         estimate = _estimate_prompt_tokens(system, "explain the recovery")
         assert estimate + sent <= TPM
 
     async def test_an_oversized_reservation_is_clamped_not_forwarded(self, live, monkeypatch):
         """The regression itself: 8192 must never reach the provider on an 8000 account."""
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         await _call(LLMClient(), system=system, max_tokens=8192)
 
-        assert spy.calls[-1]["max_tokens"] < 8192
-        assert (
-            _estimate_prompt_tokens(system, "explain the recovery") + spy.calls[-1]["max_tokens"]
-            <= TPM
-        )
+        sent = stub.last["json"]["max_tokens"]
+        assert sent < 8192
+        assert _estimate_prompt_tokens(system, "explain the recovery") + sent <= TPM
 
     async def test_a_prompt_with_no_room_to_answer_says_so_instead_of_being_sent(
         self, live, monkeypatch
     ):
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
 
         with pytest.raises(LLMUnavailable) as caught:
             await _call(LLMClient(), system="x" * 40000, max_tokens=1400)
 
-        assert spy.calls == [], "an unanswerable request must not reach the provider"
+        assert stub.calls == 0, "an unanswerable request must not reach the provider"
         message = str(caught.value)
         assert "token-per-minute" in message
         assert str(TPM) in message
@@ -251,13 +180,12 @@ class TestTheRequestActuallySent:
     async def test_a_bigger_tier_is_respected(self, live, monkeypatch):
         monkeypatch.setenv("GROQ_TPM_LIMIT", "30000")
         get_settings.cache_clear()
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         await _call(LLMClient(), system=system, max_tokens=8192)
 
-        assert spy.calls[-1]["max_tokens"] == 8192
+        assert stub.last["json"]["max_tokens"] == 8192
 
 
 class TestATpmOverrunIsTransient:
@@ -265,48 +193,56 @@ class TestATpmOverrunIsTransient:
 
     async def test_a_413_is_retried(self, live, monkeypatch):
         monkeypatch.setattr("app.llm.client.RETRY_DELAY_SECONDS", 0)
-        spy = _Spy(
-            error=_status_error(413, "Request too large for TPM", "rate_limit_exceeded"),
-            fail_times=1,
+        stub = (
+            RecordingTransport()
+            .returns(EXPLANATION_JSON)
+            .fails_with_status(
+                413, "Request too large for TPM", code="rate_limit_exceeded", times=1
+            )
+            .install(monkeypatch)
         )
-        spy.install(monkeypatch)
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         response, _audit = await _call(LLMClient(), system=system, max_tokens=1400)
 
-        assert len(spy.calls) == 2, "a 413 must be retried, not failed on the first attempt"
+        assert stub.calls == 2, "a 413 must be retried, not failed on the first attempt"
         assert response.explanation
 
     async def test_a_429_is_still_retried(self, live, monkeypatch):
         monkeypatch.setattr("app.llm.client.RETRY_DELAY_SECONDS", 0)
-        spy = _Spy(error=_status_error(429, "rate limited", "rate_limit_exceeded"), fail_times=1)
-        spy.install(monkeypatch)
+        stub = (
+            RecordingTransport()
+            .returns(EXPLANATION_JSON)
+            .fails_with_status(429, "rate limited", code="rate_limit_exceeded", times=1)
+            .install(monkeypatch)
+        )
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         await _call(LLMClient(), system=system, max_tokens=1400)
-        assert len(spy.calls) == 2
+        assert stub.calls == 2
 
     async def test_a_persistent_413_still_gives_up_after_the_retries(self, live, monkeypatch):
         monkeypatch.setattr("app.llm.client.RETRY_DELAY_SECONDS", 0)
-        spy = _Spy(
-            error=_status_error(413, "Request too large", "rate_limit_exceeded"), fail_times=99
+        stub = (
+            RecordingTransport()
+            .fails_with_status(413, "Request too large", code="rate_limit_exceeded")
+            .install(monkeypatch)
         )
-        spy.install(monkeypatch)
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         with pytest.raises(LLMUnavailable):
             await _call(LLMClient(), system=system, max_tokens=1400)
-        assert len(spy.calls) == MAX_RETRIES + 1
+        assert stub.calls == MAX_RETRIES + 1
 
     async def test_a_decommissioned_model_is_still_not_retried(self, live, monkeypatch):
         """The permanent class must stay permanent."""
-        spy = _Spy(
-            error=_status_error(400, "has been decommissioned", "model_decommissioned"),
-            fail_times=99,
+        stub = (
+            RecordingTransport()
+            .fails_with_status(400, "has been decommissioned", code="model_decommissioned")
+            .install(monkeypatch)
         )
-        spy.install(monkeypatch)
         system = explainer.PROMPT_PATH.read_text(encoding="utf-8")
 
         with pytest.raises(LLMUnavailable):
             await _call(LLMClient(), system=system, max_tokens=1400)
-        assert len(spy.calls) == 1
+        assert stub.calls == 1

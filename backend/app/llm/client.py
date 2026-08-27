@@ -39,6 +39,10 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 1.5
 
+#: Generous enough for a reasoning model, short enough that a hung request does not hold an
+#: incident's run open indefinitely.
+REQUEST_TIMEOUT_SECONDS = 60.0
+
 #: 4xx statuses that are worth trying again. Everything else in the 4xx range is the request
 #: being wrong and cannot be fixed by repeating it.
 #:
@@ -119,6 +123,31 @@ def _coerce_self_report(value: Any, *, agent_name: str) -> int | None:
         detail=str(discarded)[:80],
     )
     return None
+
+
+class _ProviderStatusError(Exception):
+    """A non-2xx chat-completions response, carrying what the retry policy needs.
+
+    Internal. Replaces the vendor SDK's error class so the transient-versus-permanent decision
+    below reads the same for both providers, off one HTTP status.
+    """
+
+    def __init__(self, response: Any) -> None:
+        self.status_code: int = response.status_code
+        self.body: str = (response.text or "")[:800]
+        code: str | None = None
+        try:
+            payload = response.json()
+            error = payload.get("error") if isinstance(payload, dict) else None
+            if isinstance(error, dict):
+                code = error.get("code") or error.get("type")
+                message = error.get("message") or self.body
+            else:
+                message = self.body
+        except Exception:
+            message = self.body
+        self.code = code
+        super().__init__(f"HTTP {self.status_code}{f' {code}' if code else ''}: {message}")
 
 
 class LLMUnavailable(Exception):  # noqa: N818 - see below
@@ -239,14 +268,17 @@ class LLMClient:
         request below, the JSON-mode handling, the schema validation and the retry classes are
         shared rather than forked.
 
-        The installed SDK is used as the HTTP client for both, pointed at a different `base_url`.
-        That is deliberate: hand-rolling a second client over `httpx` would mean re-deriving
-        `APIStatusError` and its status codes, which is exactly what the permanent-versus-transient
-        distinction below depends on. A second client is how two retry policies start to drift.
+        The request is issued with `httpx` against `transport.endpoint_url`, which is the full
+        URL. It previously went through a vendor SDK given a base URL, and that SDK appended its
+        own `/openai/v1/chat/completions`, so OpenRouter received
+        `https://openrouter.ai/api/v1/openai/v1/chat/completions` and answered 404 to every live
+        call. No base URL could have fixed it — the path was being assembled by a library that
+        assumed its own host's layout. Stating the URL is the fix, and `httpx` is already a
+        dependency, so this is still one client and one code path, not a second one.
         """
         import asyncio
 
-        from groq import APIError, APIStatusError, AsyncGroq
+        import httpx
 
         from app.config import provider_transport
 
@@ -257,17 +289,11 @@ class LLMClient:
                 f"{transport.provider.value} in live mode"
             )
 
-        client_kwargs: dict[str, Any] = {"api_key": transport.api_key}
-        if transport.base_url is not None:
-            client_kwargs["base_url"] = transport.base_url
-            # OpenRouter uses these for attribution on the account's activity page. Optional
-            # for it, meaningless to Groq, so only sent when a base_url is in play.
-            client_kwargs["default_headers"] = {
-                "HTTP-Referer": "https://github.com/harshvardhan8058/travelops",
-                "X-Title": "TravelOps AI",
-            }
-
-        client = AsyncGroq(**client_kwargs)
+        headers = {
+            "Authorization": f"Bearer {transport.api_key}",
+            "Content-Type": "application/json",
+            **transport.extra_headers,
+        }
         model = transport.model
         temperature = self._settings.groq_temperature
 
@@ -298,19 +324,28 @@ class LLMClient:
         for attempt in range(MAX_RETRIES + 1):
             start = time.perf_counter()
             try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    response_format={"type": "json_object"},
-                )
+                async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
+                    response = await http.post(
+                        transport.endpoint_url,
+                        headers=headers,
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system},
+                                {"role": "user", "content": prompt},
+                            ],
+                            "temperature": temperature,
+                            "max_tokens": max_tokens,
+                            "response_format": {"type": "json_object"},
+                        },
+                    )
                 latency_ms = int((time.perf_counter() - start) * 1000)
-                content = response.choices[0].message.content or "{}"
-                usage = response.usage
+                if response.status_code >= 400:
+                    raise _ProviderStatusError(response)
+
+                body = response.json()
+                content = (body["choices"][0]["message"].get("content") or "{}").strip()
+                usage = body.get("usage") or {}
 
                 raw = json.loads(content)
                 parsed = response_schema.model_validate(raw)
@@ -321,8 +356,8 @@ class LLMClient:
                     model_self_report=_coerce_self_report(
                         raw.get("model_self_report"), agent_name=agent_name
                     ),
-                    input_tokens=usage.prompt_tokens if usage else None,
-                    output_tokens=usage.completion_tokens if usage else None,
+                    input_tokens=usage.get("prompt_tokens"),
+                    output_tokens=usage.get("completion_tokens"),
                     latency_ms=latency_ms,
                 )
                 log.info(
@@ -353,7 +388,7 @@ class LLMClient:
                     f"{exc.error_count()} validation errors"
                 ) from exc
 
-            except APIStatusError as exc:
+            except _ProviderStatusError as exc:
                 # A 4xx that is not a rate limit is the request itself being wrong — a
                 # decommissioned model, an unknown model id, a rejected parameter. Retrying
                 # cannot change the answer, and retrying it three times is how the real cause
@@ -388,7 +423,13 @@ class LLMClient:
                 if attempt < MAX_RETRIES:
                     await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
 
-            except (APIError, json.JSONDecodeError, TimeoutError) as exc:
+            except (
+                httpx.HTTPError,
+                json.JSONDecodeError,
+                KeyError,
+                IndexError,
+                TimeoutError,
+            ) as exc:
                 last_error = exc
                 log.warning(
                     "llm_call_retrying",

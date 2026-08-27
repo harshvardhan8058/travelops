@@ -16,13 +16,12 @@ Owner: Stream C.
 
 from __future__ import annotations
 
-import httpx
 import pytest
-from groq import APIStatusError
 
 from app.agents.contract import ExplanationResponse
 from app.config import get_settings
 from app.llm.client import MAX_RETRIES, LLMClient, LLMUnavailable
+from tests.llm_transport_stub import RecordingTransport
 
 DECOMMISSIONED_BODY = {
     "error": {
@@ -35,39 +34,6 @@ DECOMMISSIONED_BODY = {
         "code": "model_decommissioned",
     }
 }
-
-
-def _status_error(status: int, message: str, body: dict | None = None) -> APIStatusError:
-    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
-    response = httpx.Response(status, json=body or {"error": {"message": message}}, request=request)
-    return APIStatusError(message, response=response, body=body)
-
-
-class _Recorder:
-    """Counts attempts and raises whatever it was given."""
-
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-        self.calls = 0
-
-    def install(self, monkeypatch) -> None:
-        import groq
-
-        recorder = self
-
-        class _Completions:
-            async def create(self, **_):
-                recorder.calls += 1
-                raise recorder.error
-
-        class _Chat:
-            completions = _Completions()
-
-        class _Fake:
-            def __init__(self, api_key=None, **_):
-                self.chat = _Chat()
-
-        monkeypatch.setattr(groq, "AsyncGroq", _Fake)
 
 
 @pytest.fixture
@@ -95,23 +61,25 @@ async def _call(client: LLMClient):
 class TestAPermanentRefusalIsReportedNotRepeated:
     async def test_a_decommissioned_model_is_not_retried(self, live, monkeypatch):
         """Three attempts against a permanent 400 buys nothing and costs the diagnosis."""
-        recorder = _Recorder(
-            _status_error(400, DECOMMISSIONED_BODY["error"]["message"], DECOMMISSIONED_BODY)
+        stub = (
+            RecordingTransport()
+            .fails_with_status(
+                400, DECOMMISSIONED_BODY["error"]["message"], code="model_decommissioned"
+            )
+            .install(monkeypatch)
         )
-        recorder.install(monkeypatch)
 
         with pytest.raises(LLMUnavailable) as caught:
             await _call(LLMClient())
 
-        assert recorder.calls == 1, f"retried a permanent 400 {recorder.calls} times"
+        assert stub.calls == 1, f"retried a permanent 400 {stub.calls} times"
         assert "decommissioned" in str(caught.value)
 
     async def test_the_message_names_the_model_and_the_status(self, live, monkeypatch):
         """What the operator sees has to be enough to act on without reading the logs."""
-        recorder = _Recorder(
-            _status_error(400, DECOMMISSIONED_BODY["error"]["message"], DECOMMISSIONED_BODY)
-        )
-        recorder.install(monkeypatch)
+        RecordingTransport().fails_with_status(
+            400, DECOMMISSIONED_BODY["error"]["message"], code="model_decommissioned"
+        ).install(monkeypatch)
 
         with pytest.raises(LLMUnavailable) as caught:
             await _call(LLMClient())
@@ -123,13 +91,12 @@ class TestAPermanentRefusalIsReportedNotRepeated:
 
     @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
     async def test_no_four_hundred_class_error_is_retried(self, live, monkeypatch, status: int):
-        recorder = _Recorder(_status_error(status, "refused"))
-        recorder.install(monkeypatch)
+        stub = RecordingTransport().fails_with_status(status, "refused").install(monkeypatch)
 
         with pytest.raises(LLMUnavailable):
             await _call(LLMClient())
 
-        assert recorder.calls == 1
+        assert stub.calls == 1
 
 
 class TestTransientFailuresStillRetry:
@@ -140,23 +107,23 @@ class TestTransientFailuresStillRetry:
         self, live, monkeypatch, status: int
     ):
         monkeypatch.setattr("app.llm.client.RETRY_DELAY_SECONDS", 0)
-        recorder = _Recorder(_status_error(status, "try later"))
-        recorder.install(monkeypatch)
+        stub = RecordingTransport().fails_with_status(status, "try later").install(monkeypatch)
 
         with pytest.raises(LLMUnavailable):
             await _call(LLMClient())
 
-        assert recorder.calls == MAX_RETRIES + 1
+        assert stub.calls == MAX_RETRIES + 1
 
     async def test_a_timeout_still_retries(self, live, monkeypatch):
         monkeypatch.setattr("app.llm.client.RETRY_DELAY_SECONDS", 0)
-        recorder = _Recorder(TimeoutError("connection timed out"))
-        recorder.install(monkeypatch)
+        stub = (
+            RecordingTransport().raises(TimeoutError("connection timed out")).install(monkeypatch)
+        )
 
         with pytest.raises(LLMUnavailable):
             await _call(LLMClient())
 
-        assert recorder.calls == MAX_RETRIES + 1
+        assert stub.calls == MAX_RETRIES + 1
 
 
 class TestTheShippedModelIsOneGroqStillServes:
