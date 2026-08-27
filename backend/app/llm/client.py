@@ -155,9 +155,25 @@ def _coerce_self_report(value: Any, *, agent_name: str) -> int | None:
         "llm_self_report_discarded",
         agent=agent_name,
         value_type=type(discarded).__name__,
-        detail=str(discarded)[:80],
     )
     return None
+
+
+_KNOWN_FINISH_REASONS = frozenset({"stop", "length", "content_filter", "tool_calls", "error"})
+
+
+def _finish_reason_for_log(value: Any) -> str | None:
+    """Allowlist provider metadata before it crosses a logging or API boundary."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value in _KNOWN_FINISH_REASONS:
+        return value
+    return f"unknown_{type(value).__name__}"
+
+
+def _usage_count_for_log(value: Any) -> int | None:
+    """Return a token count only when it is already an integer, never provider text."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _validate_tolerating_decoration[M: BaseModel](
@@ -223,16 +239,80 @@ class _ProviderStatusError(Exception):
         super().__init__(f"HTTP {self.status_code}{f' {code}' if code else ''}: {message}")
 
 
+class _ProviderPayloadError(Exception):
+    """A provider HTTP response that cannot be decoded into assistant JSON."""
+
+    def __init__(
+        self,
+        phase: str,
+        error: BaseException,
+        *,
+        json_error_position: int | None = None,
+    ) -> None:
+        self.phase = phase
+        self.error = error
+        self.json_error_position = json_error_position
+        super().__init__(str(error))
+
+
 class LLMUnavailable(Exception):  # noqa: N818 - see below
-    """Raised when `LLM_MODE=off` or when the live call exhausts retries.
+    """Raised when `LLM_MODE=off` or when the live call cannot produce a valid artifact.
 
-    Deliberately not `LLMUnavailableError`. It is a public symbol the orchestrator imports and
-    catches, and it names a normal operating condition rather than a fault: `LLM_MODE=off` is a
-    supported configuration, not an error. Renaming it would ripple through every caller for a
-    naming convention, so the convention is suppressed here with the reason attached.
-
-    The engine catches this and falls back to the playbook. It is never fatal.
+    `phase` is diagnostic metadata only. Callers still catch this one public type and preserve
+    their existing fallback/503 behavior; the phase lets the HTTP boundary say whether a provider
+    200 failed in its envelope, assistant JSON, response schema, or audit metadata without logging
+    any model content.
     """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        phase: str = "unknown",
+        status_code: int | None = None,
+        finish_reason: str | None = None,
+        content_length: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.phase = phase
+        self.status_code = status_code
+        self.finish_reason = finish_reason
+        self.content_length = content_length
+
+
+def _live_failure(
+    message: str,
+    *,
+    agent_name: str,
+    provider: str,
+    model: str,
+    phase: str,
+    attempt: int = 0,
+    status_code: int | None = None,
+    finish_reason: str | None = None,
+    content_length: int | None = None,
+    error: BaseException | None = None,
+) -> LLMUnavailable:
+    """Log one terminal live-call boundary without secrets, prompts, or model content."""
+    log.error(
+        "llm_call_failed",
+        agent=agent_name,
+        provider=provider,
+        model=model,
+        phase=phase,
+        attempt=attempt,
+        status_code=status_code,
+        finish_reason=finish_reason,
+        content_length=content_length,
+        error=type(error).__name__ if error is not None else None,
+    )
+    return LLMUnavailable(
+        message,
+        phase=phase,
+        status_code=status_code,
+        finish_reason=finish_reason,
+        content_length=content_length,
+    )
 
 
 class LLMClient:
@@ -356,10 +436,15 @@ class LLMClient:
         from app.config import provider_transport
 
         transport = provider_transport(self._settings)
+        model = transport.model
+        provider = transport.provider.value
         if not transport.api_key:
-            raise LLMUnavailable(
-                f"{transport.key_env_var} is not set; cannot call "
-                f"{transport.provider.value} in live mode"
+            raise _live_failure(
+                f"{transport.key_env_var} is not set; cannot call {provider} in live mode",
+                agent_name=agent_name,
+                provider=provider,
+                model=model,
+                phase="preflight_missing_key",
             )
 
         headers = {
@@ -367,7 +452,6 @@ class LLMClient:
             "Content-Type": "application/json",
             **transport.extra_headers,
         }
-        model = transport.model
         temperature = self._settings.groq_temperature
 
         tpm_limit = transport.tpm_limit
@@ -376,11 +460,15 @@ class LLMClient:
             requested=max_tokens, prompt_tokens=prompt_tokens_estimate, tpm_limit=tpm_limit
         )
         if budget < MIN_OUTPUT_BUDGET:
-            raise LLMUnavailable(
+            raise _live_failure(
                 f"the {agent_name} prompt leaves no room to answer within the "
                 f"{tpm_limit} token-per-minute ceiling: prompt is about "
                 f"{prompt_tokens_estimate} tokens, leaving {budget} for the response. "
-                f"Shorten the prompt or raise {transport.provider.value.upper()}_TPM_LIMIT."
+                f"Shorten the prompt or raise {provider.upper()}_TPM_LIMIT.",
+                agent_name=agent_name,
+                provider=provider,
+                model=model,
+                phase="preflight_output_budget",
             )
         if budget < max_tokens:
             log.info(
@@ -394,8 +482,25 @@ class LLMClient:
         max_tokens = budget
 
         last_error: Exception | None = None
+        last_phase = "transport"
+        last_status_code: int | None = None
+        last_finish_reason: str | None = None
+        last_content_length: int | None = None
         for attempt in range(MAX_RETRIES + 1):
+            attempt_number = attempt + 1
+            last_status_code = None
+            last_finish_reason = None
+            last_content_length = None
             start = time.perf_counter()
+            log.info(
+                "llm_call_started",
+                agent=agent_name,
+                provider=provider,
+                model=model,
+                endpoint=transport.endpoint_url,
+                attempt=attempt_number,
+                max_tokens=max_tokens,
+            )
             try:
                 async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
                     response = await http.post(
@@ -413,126 +518,272 @@ class LLMClient:
                         },
                     )
                 latency_ms = int((time.perf_counter() - start) * 1000)
+                response_text = getattr(response, "text", "") or ""
+                last_status_code = response.status_code
+                log.info(
+                    "llm_provider_response_received",
+                    agent=agent_name,
+                    provider=provider,
+                    model=model,
+                    attempt=attempt_number,
+                    status_code=response.status_code,
+                    latency_ms=latency_ms,
+                    body_bytes=len(response_text.encode("utf-8")),
+                )
                 if response.status_code >= 400:
                     raise _ProviderStatusError(response)
 
-                body = response.json()
-                content = (body["choices"][0]["message"].get("content") or "{}").strip()
-                usage = body.get("usage") or {}
+                try:
+                    body = response.json()
+                except (json.JSONDecodeError, ValueError) as exc:
+                    raise _ProviderPayloadError(
+                        "provider_json",
+                        exc,
+                        json_error_position=getattr(exc, "pos", None),
+                    ) from exc
 
-                finish_reason = body["choices"][0].get("finish_reason")
+                try:
+                    if not isinstance(body, dict):
+                        raise TypeError("provider response body is not an object")
+                    choice = body["choices"][0]
+                    if not isinstance(choice, dict):
+                        raise TypeError("provider choice is not an object")
+                    message = choice["message"]
+                    if not isinstance(message, dict):
+                        raise TypeError("provider message is not an object")
+                    returned_content = message.get("content") or "{}"
+                    if not isinstance(returned_content, str):
+                        raise TypeError("provider message content is not text")
+                    content = returned_content.strip()
+                    usage = body.get("usage") or {}
+                    if not isinstance(usage, dict):
+                        raise TypeError("provider usage is not an object")
+                    raw_finish_reason = choice.get("finish_reason")
+                    finish_reason = _finish_reason_for_log(raw_finish_reason)
+                except (KeyError, IndexError, TypeError, AttributeError) as exc:
+                    raise _ProviderPayloadError("provider_envelope", exc) from exc
+
+                content_length = len(content)
+                last_finish_reason = str(finish_reason) if finish_reason is not None else None
+                last_content_length = content_length
+                completion_details = usage.get("completion_tokens_details") or {}
+                if not isinstance(completion_details, dict):
+                    completion_details = {}
+                log.info(
+                    "llm_provider_content_received",
+                    agent=agent_name,
+                    provider=provider,
+                    model=model,
+                    attempt=attempt_number,
+                    status_code=response.status_code,
+                    finish_reason=finish_reason,
+                    content_length=content_length,
+                    input_tokens=_usage_count_for_log(usage.get("prompt_tokens")),
+                    output_tokens=_usage_count_for_log(usage.get("completion_tokens")),
+                    reasoning_tokens=_usage_count_for_log(
+                        completion_details.get("reasoning_tokens")
+                    ),
+                )
                 if finish_reason == "length":
-                    # Reported as truncation rather than as malformed JSON. The two were
-                    # indistinguishable in the log, which is why a planner failure could not be
-                    # told apart from a budget problem without another round of guessing.
-                    raise LLMUnavailable(
-                        f"{transport.provider.value} truncated the {agent_name} response at "
+                    raise _live_failure(
+                        f"{provider} truncated the {agent_name} response at "
                         f"max_tokens={max_tokens} (finish_reason=length); "
-                        f"{len(content)} characters returned"
+                        f"{content_length} characters returned",
+                        agent_name=agent_name,
+                        provider=provider,
+                        model=model,
+                        phase="truncated",
+                        attempt=attempt_number,
+                        status_code=response.status_code,
+                        finish_reason=str(finish_reason),
+                        content_length=content_length,
                     )
 
-                raw = json.loads(content)
-                parsed = _validate_tolerating_decoration(
-                    raw,
-                    response_schema=response_schema,
-                    agent_name=agent_name,
-                )
+                try:
+                    raw = json.loads(content)
+                except json.JSONDecodeError as exc:
+                    raise _ProviderPayloadError(
+                        "content_json", exc, json_error_position=exc.pos
+                    ) from exc
 
-                audit = ModelCallAudit(
-                    generator=transport.generator,
-                    prompt_version=prompt_version,
-                    model_self_report=_coerce_self_report(
-                        raw.get("model_self_report"), agent_name=agent_name
-                    ),
-                    input_tokens=usage.get("prompt_tokens"),
-                    output_tokens=usage.get("completion_tokens"),
-                    latency_ms=latency_ms,
-                )
+                try:
+                    parsed = _validate_tolerating_decoration(
+                        raw,
+                        response_schema=response_schema,
+                        agent_name=agent_name,
+                    )
+                except ValidationError as exc:
+                    # A schema failure is deterministic enough that repeating the same prompt is
+                    # noise. Name the schema, fields and kinds, never their model-supplied values.
+                    fields = _describe_paths([tuple(e["loc"]) for e in exc.errors()])
+                    log.warning(
+                        "llm_schema_validation_failed",
+                        agent=agent_name,
+                        provider=provider,
+                        model=model,
+                        phase="response_schema",
+                        schema=response_schema.__name__,
+                        attempt=attempt_number,
+                        status_code=response.status_code,
+                        finish_reason=finish_reason,
+                        content_length=content_length,
+                        errors=exc.error_count(),
+                        fields=fields,
+                        kinds=sorted({str(e.get("type")) for e in exc.errors()}),
+                    )
+                    raise _live_failure(
+                        f"{provider} returned JSON that does not match "
+                        f"{response_schema.__name__}: {exc.error_count()} validation errors at "
+                        f"{', '.join(fields[:6])}",
+                        agent_name=agent_name,
+                        provider=provider,
+                        model=model,
+                        phase="response_schema",
+                        attempt=attempt_number,
+                        status_code=response.status_code,
+                        finish_reason=(str(finish_reason) if finish_reason is not None else None),
+                        content_length=content_length,
+                        error=exc,
+                    ) from exc
+
+                try:
+                    audit = ModelCallAudit(
+                        generator=transport.generator,
+                        prompt_version=prompt_version,
+                        model_self_report=_coerce_self_report(
+                            raw.get("model_self_report"), agent_name=agent_name
+                        ),
+                        input_tokens=usage.get("prompt_tokens"),
+                        output_tokens=usage.get("completion_tokens"),
+                        latency_ms=latency_ms,
+                    )
+                except ValidationError as exc:
+                    fields = _describe_paths([tuple(e["loc"]) for e in exc.errors()])
+                    log.warning(
+                        "llm_schema_validation_failed",
+                        agent=agent_name,
+                        provider=provider,
+                        model=model,
+                        phase="audit_schema",
+                        schema=ModelCallAudit.__name__,
+                        attempt=attempt_number,
+                        status_code=response.status_code,
+                        finish_reason=finish_reason,
+                        content_length=content_length,
+                        errors=exc.error_count(),
+                        fields=fields,
+                        kinds=sorted({str(e.get("type")) for e in exc.errors()}),
+                    )
+                    raise _live_failure(
+                        f"{provider} returned invalid usage metadata for "
+                        f"{ModelCallAudit.__name__}: {exc.error_count()} validation errors at "
+                        f"{', '.join(fields[:6])}",
+                        agent_name=agent_name,
+                        provider=provider,
+                        model=model,
+                        phase="audit_schema",
+                        attempt=attempt_number,
+                        status_code=response.status_code,
+                        finish_reason=(str(finish_reason) if finish_reason is not None else None),
+                        content_length=content_length,
+                        error=exc,
+                    ) from exc
+
                 log.info(
                     "llm_call_succeeded",
                     agent=agent_name,
-                    provider=transport.provider.value,
+                    provider=provider,
                     model=model,
-                    attempt=attempt + 1,
+                    attempt=attempt_number,
                     latency_ms=latency_ms,
                     input_tokens=audit.input_tokens,
                     output_tokens=audit.output_tokens,
                 )
                 return parsed, audit
 
-            except ValidationError as exc:
-                # Schema failure: the model returned parseable JSON that does not match the
-                # contract. Retrying will likely produce the same shape, so fail immediately.
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                log.warning(
-                    "llm_schema_validation_failed",
-                    agent=agent_name,
-                    attempt=attempt + 1,
-                    errors=exc.error_count(),
-                    # Field paths and error kinds, never values. `errors=N` alone was not enough
-                    # to act on: a planner failure said only that something did not validate.
-                    fields=_describe_paths([tuple(e["loc"]) for e in exc.errors()]),
-                    kinds=sorted({str(e.get("type")) for e in exc.errors()}),
-                )
-                raise LLMUnavailable(
-                    f"{transport.provider.value} returned JSON that does not match "
-                    f"{response_schema.__name__}: {exc.error_count()} validation errors at "
-                    f"{', '.join(_describe_paths([tuple(e['loc']) for e in exc.errors()])[:6])}"
-                ) from exc
-
             except _ProviderStatusError as exc:
-                # A 4xx that is not a rate limit is the request itself being wrong — a
-                # decommissioned model, an unknown model id, a rejected parameter. Retrying
-                # cannot change the answer, and retrying it three times is how the real cause
-                # stayed hidden: a decommissioned model reached the operator as "Groq call
-                # failed after 3 attempts" instead of the provider saying, in the first
-                # sentence of the first response, which model had been retired.
-                #
-                # Same reasoning as the ValidationError branch above: a permanent failure is
-                # reported, not repeated. 429 and 5xx are genuinely transient and still retry.
+                last_phase = "provider_status"
+                last_status_code = exc.status_code
                 if exc.status_code not in _TRANSIENT_STATUS and 400 <= exc.status_code < 500:
                     log.error(
                         "llm_call_refused",
                         agent=agent_name,
-                        provider=transport.provider.value,
+                        provider=provider,
                         model=model,
                         status_code=exc.status_code,
                         detail=str(exc)[:500],
                     )
-                    raise LLMUnavailable(
-                        f"{transport.provider.value} refused the request for model '{model}' "
-                        f"(HTTP {exc.status_code}): {exc}"
+                    raise _live_failure(
+                        f"{provider} refused the request for model '{model}' "
+                        f"(HTTP {exc.status_code}): {exc}",
+                        agent_name=agent_name,
+                        provider=provider,
+                        model=model,
+                        phase=last_phase,
+                        attempt=attempt_number,
+                        status_code=exc.status_code,
+                        error=exc,
                     ) from exc
                 last_error = exc
                 log.warning(
                     "llm_call_retrying",
                     agent=agent_name,
-                    attempt=attempt + 1,
+                    provider=provider,
+                    model=model,
+                    phase=last_phase,
+                    attempt=attempt_number,
                     error=type(exc).__name__,
                     status_code=exc.status_code,
                     detail=str(exc)[:200],
                 )
                 if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                    await asyncio.sleep(RETRY_DELAY_SECONDS * attempt_number)
 
-            except (
-                httpx.HTTPError,
-                json.JSONDecodeError,
-                KeyError,
-                IndexError,
-                TimeoutError,
-            ) as exc:
+            except _ProviderPayloadError as exc:
                 last_error = exc
+                last_phase = exc.phase
                 log.warning(
                     "llm_call_retrying",
                     agent=agent_name,
-                    attempt=attempt + 1,
-                    error=type(exc).__name__,
-                    detail=str(exc)[:200],
+                    provider=provider,
+                    model=model,
+                    phase=exc.phase,
+                    attempt=attempt_number,
+                    status_code=last_status_code,
+                    finish_reason=last_finish_reason,
+                    content_length=last_content_length,
+                    error=type(exc.error).__name__,
+                    json_error_position=exc.json_error_position,
                 )
                 if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+                    await asyncio.sleep(RETRY_DELAY_SECONDS * attempt_number)
 
-        raise LLMUnavailable(
-            f"{transport.provider.value} call failed after {MAX_RETRIES + 1} attempts: {last_error}"
+            except (httpx.HTTPError, TimeoutError) as exc:
+                last_error = exc
+                last_phase = "transport"
+                last_status_code = None
+                log.warning(
+                    "llm_call_retrying",
+                    agent=agent_name,
+                    provider=provider,
+                    model=model,
+                    phase=last_phase,
+                    attempt=attempt_number,
+                    error=type(exc).__name__,
+                    status_code=None,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY_SECONDS * attempt_number)
+
+        raise _live_failure(
+            f"{provider} call failed after {MAX_RETRIES + 1} attempts: {last_error}",
+            agent_name=agent_name,
+            provider=provider,
+            model=model,
+            phase=last_phase,
+            attempt=MAX_RETRIES + 1,
+            status_code=last_status_code,
+            finish_reason=last_finish_reason,
+            content_length=last_content_length,
+            error=last_error,
         ) from last_error

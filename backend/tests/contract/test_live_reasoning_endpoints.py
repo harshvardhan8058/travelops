@@ -24,7 +24,7 @@ import pytest
 from app.config import get_settings
 from app.db.seed import INCIDENT_GROUP_REFERENCE
 from tests.contract.postgres_support import requires_postgres
-from tests.llm_transport_stub import RecordingTransport
+from tests.llm_transport_stub import RecordingTransport, completion
 
 pytestmark = [pytest.mark.anyio, requires_postgres]
 
@@ -242,6 +242,19 @@ async def test_truncated_json_is_reported_not_guessed(client, live):
     live.content = '{"status":"success","reason":"r","payload_type":"report.v1","summary":"Eight'
 
     assert client.get(f"{PREFIX}/reports/{GROUP}").status_code == 503
+
+
+async def test_provider_200_with_invalid_audit_metadata_is_a_diagnosable_503(client, live):
+    """A valid report can still fail after HTTP 200 when provider usage metadata is malformed."""
+    _resolved_incident(client)
+    payload = completion(_report_json())
+    payload["usage"]["completion_tokens"] = "not-an-integer"
+    live.response_payload = payload
+
+    response = client.get(f"{PREFIX}/reports/{GROUP}")
+
+    assert response.status_code == 503, response.text
+    assert "invalid usage metadata" in response.json()["error"]["details"]["provider_error"]
 
 
 # ----------------------------------------------------- the prose agents get their own ceiling

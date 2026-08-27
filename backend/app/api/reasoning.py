@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import LLMMode, get_settings
+from app.config import LLMMode, get_settings, provider_transport
 from app.db.session import get_session
 from app.errors import EntityNotFound, ProviderUnavailable
 from app.models.enums import ActionStatus
@@ -246,6 +246,18 @@ async def get_report(
             hotel_summary=hotel,
         )
     except LLMUnavailable as exc:
+        transport = provider_transport(settings)
+        log.warning(
+            "report_generation_failed",
+            reference=reference,
+            provider=transport.provider.value,
+            model=transport.model,
+            phase=getattr(exc, "phase", "unknown"),
+            status_code=getattr(exc, "status_code", None),
+            finish_reason=getattr(exc, "finish_reason", None),
+            content_length=getattr(exc, "content_length", None),
+            error=type(exc).__name__,
+        )
         raise _unavailable(exc, artifact="report", mode=settings.llm_mode.value) from exc
 
     return {
