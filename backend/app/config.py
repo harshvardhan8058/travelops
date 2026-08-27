@@ -14,7 +14,7 @@ Owner: Stream A. Other streams read settings; they do not add validation here.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -129,6 +129,8 @@ class Settings(BaseSettings):
     #: `max_tokens`, `response_format` and `temperature`, with a 131072-token context.
     openrouter_api_key: str = ""
     openrouter_model: str = "openai/gpt-oss-120b"
+    #: Chat completions live at `<base>/chat/completions`, i.e.
+    #: https://openrouter.ai/api/v1/chat/completions
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     #: No per-minute token ceiling of the Groq kind; this only keeps a single request sane
     #: against the model's context window. Sizing still applies, because reserving more output
@@ -144,6 +146,9 @@ class Settings(BaseSettings):
     #: JSON-mode contract this client relies on is unchanged.
     #: See https://console.groq.com/docs/deprecations
     groq_model: str = "openai/gpt-oss-120b"
+    #: Groq's OpenAI-compatible prefix. Stated here rather than assumed by an SDK, for the same
+    #: reason as `openrouter_base_url`.
+    groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_temperature: float = 0.1
     #: Tokens-per-minute ceiling for the account. Groq charges a request against TPM as
     #: `prompt_tokens + max_tokens` — the RESERVED completion budget, not the tokens actually
@@ -316,10 +321,16 @@ class ProviderTransport:
     One resolution point so `LLMClient` stays a single code path. Adding a provider means adding
     a branch here, not a second client — a second client is how two request shapes, two retry
     policies and two sets of error semantics start drifting apart.
+
+    `endpoint_url` is the FULL chat-completions URL, not a base for something else to complete.
+    The previous version passed a base URL to a vendor SDK, which appended its own
+    `/openai/v1/chat/completions` to it and produced
+    `https://openrouter.ai/api/v1/openai/v1/chat/completions` — a 404 on every live call. The
+    URL is the thing that was wrong, so the URL is now stated in one place and asserted.
     """
 
     provider: LLMProvider
-    base_url: str | None
+    endpoint_url: str
     api_key: str
     model: str
     tpm_limit: int
@@ -327,13 +338,19 @@ class ProviderTransport:
     #: `openrouter:openai/gpt-oss-120b`. Recorded on the plan and returned as `generator`;
     #: `_source_of` reads only the `fixture:` prefix, and assurance never branches on it.
     generator: str
+    extra_headers: dict[str, str] = field(default_factory=dict)
+
+
+def _chat_completions_url(base_url: str) -> str:
+    """`<base>/chat/completions`, tolerant of a trailing slash on the configured base."""
+    return f"{base_url.rstrip('/')}/chat/completions"
 
 
 def provider_transport(settings: Settings) -> ProviderTransport:
     if settings.llm_provider is LLMProvider.groq:
         return ProviderTransport(
             provider=LLMProvider.groq,
-            base_url=None,
+            endpoint_url=_chat_completions_url(settings.groq_base_url),
             api_key=settings.groq_api_key,
             model=settings.groq_model,
             tpm_limit=settings.groq_tpm_limit,
@@ -342,12 +359,18 @@ def provider_transport(settings: Settings) -> ProviderTransport:
         )
     return ProviderTransport(
         provider=LLMProvider.openrouter,
-        base_url=settings.openrouter_base_url,
+        endpoint_url=_chat_completions_url(settings.openrouter_base_url),
         api_key=settings.openrouter_api_key,
         model=settings.openrouter_model,
         tpm_limit=settings.openrouter_tpm_limit,
         key_env_var="OPENROUTER_API_KEY",
         generator=f"openrouter:{settings.openrouter_model}",
+        # Attribution on the account's activity page. OpenRouter-specific, so it lives with the
+        # OpenRouter branch rather than being conditionally bolted on at call time.
+        extra_headers={
+            "HTTP-Referer": "https://github.com/harshvardhan8058/travelops",
+            "X-Title": "TravelOps AI",
+        },
     )
 
 

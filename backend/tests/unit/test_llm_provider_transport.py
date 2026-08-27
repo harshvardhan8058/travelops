@@ -21,6 +21,7 @@ import pytest
 from app.agents.contract import ExplanationResponse
 from app.config import LLMProvider, get_settings, provider_transport
 from app.llm.client import LLMClient, LLMUnavailable
+from tests.llm_transport_stub import RecordingTransport
 
 PAYLOAD = json.dumps(
     {
@@ -34,50 +35,8 @@ PAYLOAD = json.dumps(
 )
 
 
-class _Spy:
-    """Records how the client was constructed and what it was asked to send."""
-
-    def __init__(self) -> None:
-        self.init_kwargs: dict = {}
-        self.calls: list[dict] = []
-
-    def install(self, monkeypatch) -> None:
-        import groq
-
-        spy = self
-
-        class _Msg:
-            def __init__(self, c):
-                self.content = c
-                self.reasoning = None
-
-        class _Choice:
-            def __init__(self, c):
-                self.message = _Msg(c)
-
-        class _Usage:
-            prompt_tokens = 700
-            completion_tokens = 200
-
-        class _Resp:
-            def __init__(self, c):
-                self.choices = [_Choice(c)]
-                self.usage = _Usage()
-
-        class _Completions:
-            async def create(self, **kwargs):
-                spy.calls.append(kwargs)
-                return _Resp(PAYLOAD)
-
-        class _Chat:
-            completions = _Completions()
-
-        class _Fake:
-            def __init__(self, **kwargs):
-                spy.init_kwargs = kwargs
-                self.chat = _Chat()
-
-        monkeypatch.setattr(groq, "AsyncGroq", _Fake)
+def _stub(monkeypatch) -> RecordingTransport:
+    return RecordingTransport().returns(PAYLOAD).install(monkeypatch)
 
 
 async def _call(client: LLMClient):
@@ -121,14 +80,14 @@ class TestTheResolvedTransport:
 
     def test_openrouter_resolves_to_the_openai_compatible_endpoint(self, openrouter):
         transport = provider_transport(get_settings())
-        assert transport.base_url == "https://openrouter.ai/api/v1"
+        assert transport.endpoint_url == "https://openrouter.ai/api/v1/chat/completions"
         assert transport.model == "openai/gpt-oss-120b"
         assert transport.key_env_var == "OPENROUTER_API_KEY"
         assert transport.generator == "openrouter:openai/gpt-oss-120b"
 
     def test_groq_still_resolves_and_keeps_its_own_key(self, groq_provider):
         transport = provider_transport(get_settings())
-        assert transport.base_url is None, "the Groq SDK default host is correct for Groq"
+        assert transport.endpoint_url == "https://api.groq.com/openai/v1/chat/completions"
         assert transport.key_env_var == "GROQ_API_KEY"
         assert transport.generator.startswith("groq:")
 
@@ -145,33 +104,38 @@ class TestTheResolvedTransport:
 
 
 class TestTheRequestGoesToOpenRouter:
-    async def test_the_client_is_pointed_at_the_openrouter_base_url(self, openrouter, monkeypatch):
-        spy = _Spy()
-        spy.install(monkeypatch)
+    async def test_the_request_goes_to_the_exact_openrouter_url(self, openrouter, monkeypatch):
+        """The regression. `/api/v1/openai/v1/chat/completions` was a 404 on every live call."""
+        stub = _stub(monkeypatch)
 
         await _call(LLMClient())
 
-        assert spy.init_kwargs["base_url"] == "https://openrouter.ai/api/v1"
-        assert spy.init_kwargs["api_key"] == "or-test-key"
+        assert stub.last["url"] == "https://openrouter.ai/api/v1/chat/completions"
+        assert "/openai/v1/chat/completions" not in stub.last["url"]
+        assert stub.last["url"].count("/v1") == 1
+
+    async def test_the_key_is_sent_as_a_bearer_token(self, openrouter, monkeypatch):
+        stub = _stub(monkeypatch)
+
+        await _call(LLMClient())
+
+        assert stub.last["headers"]["Authorization"] == "Bearer or-test-key"
 
     async def test_the_openrouter_attribution_headers_are_sent(self, openrouter, monkeypatch):
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
 
         await _call(LLMClient())
 
-        headers = spy.init_kwargs.get("default_headers") or {}
-        assert "HTTP-Referer" in headers
-        assert headers.get("X-Title") == "TravelOps AI"
+        assert "HTTP-Referer" in stub.last["headers"]
+        assert stub.last["headers"]["X-Title"] == "TravelOps AI"
 
     async def test_the_request_shape_is_unchanged(self, openrouter, monkeypatch):
         """The whole point of an OpenAI-compatible endpoint: same body, different host."""
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
 
         await _call(LLMClient())
 
-        sent = spy.calls[-1]
+        sent = stub.last["json"]
         assert sent["model"] == "openai/gpt-oss-120b"
         assert sent["response_format"] == {"type": "json_object"}
         assert [m["role"] for m in sent["messages"]] == ["system", "user"]
@@ -179,24 +143,22 @@ class TestTheRequestGoesToOpenRouter:
         assert "temperature" in sent
 
     async def test_the_audit_records_the_provider_in_the_generator(self, openrouter, monkeypatch):
-        spy = _Spy()
-        spy.install(monkeypatch)
+        _stub(monkeypatch)
 
         _response, audit = await _call(LLMClient())
 
         assert audit.generator == "openrouter:openai/gpt-oss-120b"
         assert audit.prompt_version == "explainer.v1"
 
-    async def test_no_base_url_is_forced_when_the_provider_is_groq(
+    async def test_groq_gets_its_own_url_and_no_openrouter_headers(
         self, groq_provider, monkeypatch
     ):
-        spy = _Spy()
-        spy.install(monkeypatch)
+        stub = _stub(monkeypatch)
 
         await _call(LLMClient())
 
-        assert "base_url" not in spy.init_kwargs
-        assert "default_headers" not in spy.init_kwargs
+        assert stub.last["url"] == "https://api.groq.com/openai/v1/chat/completions"
+        assert "X-Title" not in stub.last["headers"]
 
 
 class TestTheGeneratorStaysReadableToConsumers:
@@ -225,9 +187,11 @@ class TestTheKeyIsProviderSpecific:
         monkeypatch.setenv("OPENROUTER_API_KEY", "")
         monkeypatch.setenv("GROQ_API_KEY", "a-groq-key-that-must-not-be-used")
         get_settings.cache_clear()
+        stub = RecordingTransport().returns(PAYLOAD).install(monkeypatch)
         try:
             with pytest.raises(LLMUnavailable, match="OPENROUTER_API_KEY"):
                 await _call(LLMClient())
+            assert stub.calls == 0, "no request may be attempted without a key"
         finally:
             get_settings.cache_clear()
 
@@ -246,7 +210,7 @@ class TestThereIsStillOneClient:
         modules = sorted(p.name for p in llm_dir.glob("*.py") if p.name != "__init__.py")
         assert modules == ["client.py"], f"unexpected transport modules: {modules}"
 
-    def test_only_the_client_imports_the_sdk(self):
+    def test_only_the_client_imports_a_model_sdk(self):
         """The existing guard, restated here because a new provider is the moment it slips."""
         import ast
         from pathlib import Path

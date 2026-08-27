@@ -24,6 +24,7 @@ import pytest
 from app.config import get_settings
 from app.db.seed import INCIDENT_GROUP_REFERENCE
 from tests.contract.postgres_support import requires_postgres
+from tests.llm_transport_stub import RecordingTransport
 
 pytestmark = [pytest.mark.anyio, requires_postgres]
 
@@ -34,51 +35,12 @@ GROUP = INCIDENT_GROUP_REFERENCE
 # ------------------------------------------------------------------ the Groq SDK stub
 
 
-class _StubTransport:
-    """Returns whatever `content` is set to, or raises `error` if one is set."""
+class _StubTransport(RecordingTransport):
+    """`RecordingTransport` with the field names this module already used."""
 
-    def __init__(self) -> None:
-        self.content: str = "{}"
-        self.error: Exception | None = None
-        self.calls: list[dict[str, Any]] = []
-
-    def install(self, monkeypatch) -> None:
-        import groq
-
-        transport = self
-
-        class _Msg:
-            def __init__(self, content: str) -> None:
-                self.content = content
-
-        class _Choice:
-            def __init__(self, content: str) -> None:
-                self.message = _Msg(content)
-
-        class _Usage:
-            prompt_tokens = 1200
-            completion_tokens = 900
-
-        class _Resp:
-            def __init__(self, content: str) -> None:
-                self.choices = [_Choice(content)]
-                self.usage = _Usage()
-
-        class _Completions:
-            async def create(self, **kwargs: Any):
-                transport.calls.append(kwargs)
-                if transport.error is not None:
-                    raise transport.error
-                return _Resp(transport.content)
-
-        class _Chat:
-            completions = _Completions()
-
-        class _FakeAsyncGroq:
-            def __init__(self, api_key: str | None = None, **_: Any) -> None:
-                self.chat = _Chat()
-
-        monkeypatch.setattr(groq, "AsyncGroq", _FakeAsyncGroq)
+    @property
+    def calls(self) -> list[dict[str, Any]]:  # type: ignore[override]
+        return [r["json"] for r in self.requests]
 
 
 @pytest.fixture
@@ -235,7 +197,7 @@ async def test_a_provider_outage_is_503_and_not_500(client, live):
     So before the fix this was a bare 500 with no error code and no mode information.
     """
     incident = _resolved_incident(client)
-    live.error = TimeoutError("connection timed out")
+    live.raises(TimeoutError("connection timed out"))
 
     response = client.get(f"{PREFIX}/incidents/{incident}/explanation")
 
@@ -266,7 +228,7 @@ async def test_an_outage_never_serves_the_fixture_instead(client, live):
     that says a model wrote it just now, which makes the artifact untraceable.
     """
     _resolved_incident(client)
-    live.error = TimeoutError("connection timed out")
+    live.raises(TimeoutError("connection timed out"))
 
     response = client.get(f"{PREFIX}/reports/{GROUP}")
 
