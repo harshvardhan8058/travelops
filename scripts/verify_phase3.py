@@ -32,6 +32,13 @@ API = os.environ.get("API_BASE", "http://127.0.0.1:8000/api/v1")
 GROUP = "GRP-2026-0820-VOBL"
 INCIDENT = "INC-2026-0820-VOBL-01"
 
+#: Ordinary mutations are deterministic and complete well inside five minutes. A clean live group
+#: run is different: it can call the planner serially for eight incidents, and each call has up to
+#: three 60-second provider attempts. 30 minutes covers that bounded 24-minute worst case plus
+#: database work without changing any production timeout.
+POST_TIMEOUT_SECONDS = 300
+GROUP_RUN_TIMEOUT_SECONDS = 1800
+
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 failures: list[str] = []
@@ -57,7 +64,12 @@ def post(path: str, body: dict | None = None) -> tuple[int, dict]:
     headers = {"Content-Type": "application/json"} if data else {}
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        timeout = (
+            GROUP_RUN_TIMEOUT_SECONDS
+            if path == f"/incident-groups/{GROUP}/run"
+            else POST_TIMEOUT_SECONDS
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
