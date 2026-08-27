@@ -199,6 +199,14 @@ async def stage_agents() -> dict[str, dict[str, Any]]:
             group_reference="GRP-2026-0820-VOBL", rollup=rollup
         )
 
+    print()
+    print("  Watch the API log for these, in order:")
+    print("    llm_extra_keys_dropped        the model decorated the payload; keys named")
+    print("    llm_schema_validation_failed  fields= names the exact rejected paths")
+    print("    llm_call_succeeded            the model answered and validated")
+    print("    planner_candidate_rejected_by_reflection  received but every task dropped")
+    print("    PLANNER_AGENT_UNAVAILABLE     the call itself failed")
+
     results: dict[str, dict[str, Any]] = {}
     for name, call in (
         ("planner", planner),

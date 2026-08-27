@@ -62,5 +62,11 @@ Return a JSON object matching this exact schema:
 
 - Do not invent action types not in the list above.
 - Do not include confidence scores or probabilities.
+- Do not add any field that is not in the schema above, at the top level or inside a task. The
+  schema has exactly four keys per task: `action`, `target_refs`, `inputs`, `depends_on`.
 - Do not include explanations inside the tasks — use `reason` for that.
+- Keep `reason` to one sentence, under 300 characters.
+- Do not wrap the JSON in markdown fences, prose or commentary.
 - Do not return anything other than valid JSON matching the schema.
+- Do not copy the placeholder ids from the schema example. Use the exact `target_refs` given in
+  the instructions.
