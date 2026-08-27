@@ -79,6 +79,45 @@ def check(condition: bool, label: str, detail: str = "") -> None:
             print(f"       {detail}")
 
 
+def check_reflection(mode: str, reflection: dict, proposed: list[str]) -> None:
+    """Verify reflection without requiring a live model to propose invalid work."""
+    dropped = reflection.get("dropped_actions")
+    findings = reflection.get("findings")
+    kept = reflection.get("kept_actions")
+
+    # A non-empty drop is a property of the committed fixture, not of reflection itself. A live
+    # model that proposes only executable actions should pass with no findings; requiring it to
+    # propose something invalid rewards worse model output.
+    if mode == "fixture":
+        check(
+            isinstance(dropped, list) and "evaluate_entitlements" in dropped,
+            "fixture reflection dropped the unimplemented entitlement action",
+            f"dropped={dropped}",
+        )
+    else:
+        check(
+            isinstance(dropped, list) and isinstance(findings, list),
+            "live reflection recorded findings and dropped-action lists",
+            f"dropped={dropped}, findings_type={type(findings).__name__}",
+        )
+        check(
+            reflection.get("rejected") is False,
+            "live planner candidate survived reflection",
+            f"rejected={reflection.get('rejected')}",
+        )
+        check(
+            isinstance(kept, list) and kept == proposed,
+            "live reflection kept-actions match the persisted plan",
+            f"kept={kept}, persisted={proposed}",
+        )
+
+    check(
+        "evaluate_entitlements" not in proposed,
+        "the action with no registered service is not in the persisted plan",
+        f"persisted={proposed}",
+    )
+
+
 def detect_mode() -> str:
     status, body = get("/system/mode")
     if status == 200:
@@ -264,20 +303,8 @@ def main() -> int:
                 "reflection is recorded on the plan event",
                 f"keys={sorted(reflection.keys())}",
             )
-            # The committed fixture proposes evaluate_entitlements, which has no registered
-            # service. Reflection must have dropped it and said so.
-            dropped = reflection.get("dropped_actions") or []
-            check(
-                bool(dropped),
-                "reflection named what it dropped",
-                f"dropped={dropped}",
-            )
             proposed = detail.get("actions") or []
-            check(
-                "evaluate_entitlements" not in proposed,
-                "the action with no registered service is not in the persisted plan",
-                f"persisted={proposed}",
-            )
+            check_reflection(mode, reflection, proposed)
 
     # 8. Authorship reached the gate: a model-authored plan is assured under model authorship
     print("\n--- authorship at the gate ---")
