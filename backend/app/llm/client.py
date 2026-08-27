@@ -93,6 +93,41 @@ def _output_budget(*, requested: int, prompt_tokens: int, tpm_limit: int) -> int
     return max(0, min(requested, headroom))
 
 
+def _extra_key_paths(exc: ValidationError) -> list[tuple[str | int, ...]]:
+    """Locations of `extra_forbidden` errors, or `[]` if any other kind of error is present.
+
+    All-or-nothing on purpose. A payload that is rejected for an undeclared key AND for an
+    invented action type must stay rejected — the invented action is the part that matters.
+    """
+    paths: list[tuple[str | int, ...]] = []
+    for error in exc.errors():
+        if error.get("type") != "extra_forbidden":
+            return []
+        paths.append(tuple(error["loc"]))
+    return paths
+
+
+def _without_paths(raw: Any, paths: list[tuple[str | int, ...]]) -> Any:
+    """Deep copy of `raw` with exactly those locations removed."""
+    import copy
+
+    cleaned = copy.deepcopy(raw)
+    for path in paths:
+        cursor = cleaned
+        try:
+            for step in path[:-1]:
+                cursor = cursor[step]
+            del cursor[path[-1]]
+        except (KeyError, IndexError, TypeError):
+            continue
+    return cleaned
+
+
+def _describe_paths(paths: list[tuple[str | int, ...]]) -> list[str]:
+    """`tasks.0.rationale` — names, never values, so nothing from the model reaches the log."""
+    return [".".join(str(step) for step in path) for path in paths]
+
+
 def _coerce_self_report(value: Any, *, agent_name: str) -> int | None:
     """`ModelCallAudit.model_self_report` or nothing, never an exception.
 
@@ -123,6 +158,44 @@ def _coerce_self_report(value: Any, *, agent_name: str) -> int | None:
         detail=str(discarded)[:80],
     )
     return None
+
+
+def _validate_tolerating_decoration[M: BaseModel](
+    raw: Any, *, response_schema: type[M], agent_name: str
+) -> M:
+    """Validate, dropping keys the model volunteered that the schema does not declare.
+
+    Every substantive rule still applies. The closed `ActionType` enum, `target_refs` being
+    non-empty, `tasks` being non-empty, `payload_type`, `status`, field types and lengths are all
+    unchanged, and a payload that breaks any of them is still refused. Only keys that nothing in
+    the system reads are removed, and their names are logged.
+
+    This is what `contract.py` already asks for in its own docstring: "`confidence` is absent by
+    design. If a model emits one, store it as `ModelCallAudit.model_self_report` and never branch
+    on it." Storing requires surviving validation. `ExplanationResponse` and `ReportResponse` got
+    that treatment when they were 500ing on live traffic; `PlannerResponse` did not, so the same
+    chatty model that both prose agents tolerate cost the planner its entire candidate — which is
+    exactly the asymmetry observed live: prose PASS, planner FAIL.
+
+    Kept as strip-and-record rather than `extra="ignore"` so the contract stays strict, the tests
+    asserting a confidence score cannot enter `PlannerResponse` keep holding, and an attempt to
+    send one is visible rather than silent.
+    """
+    try:
+        return response_schema.model_validate(raw)
+    except ValidationError as exc:
+        paths = _extra_key_paths(exc)
+        if not paths:
+            raise
+        cleaned = _without_paths(raw, paths)
+        parsed = response_schema.model_validate(cleaned)
+        log.info(
+            "llm_extra_keys_dropped",
+            agent=agent_name,
+            schema=response_schema.__name__,
+            keys=_describe_paths(paths),
+        )
+        return parsed
 
 
 class _ProviderStatusError(Exception):
@@ -347,8 +420,23 @@ class LLMClient:
                 content = (body["choices"][0]["message"].get("content") or "{}").strip()
                 usage = body.get("usage") or {}
 
+                finish_reason = body["choices"][0].get("finish_reason")
+                if finish_reason == "length":
+                    # Reported as truncation rather than as malformed JSON. The two were
+                    # indistinguishable in the log, which is why a planner failure could not be
+                    # told apart from a budget problem without another round of guessing.
+                    raise LLMUnavailable(
+                        f"{transport.provider.value} truncated the {agent_name} response at "
+                        f"max_tokens={max_tokens} (finish_reason=length); "
+                        f"{len(content)} characters returned"
+                    )
+
                 raw = json.loads(content)
-                parsed = response_schema.model_validate(raw)
+                parsed = _validate_tolerating_decoration(
+                    raw,
+                    response_schema=response_schema,
+                    agent_name=agent_name,
+                )
 
                 audit = ModelCallAudit(
                     generator=transport.generator,
@@ -381,11 +469,15 @@ class LLMClient:
                     agent=agent_name,
                     attempt=attempt + 1,
                     errors=exc.error_count(),
+                    # Field paths and error kinds, never values. `errors=N` alone was not enough
+                    # to act on: a planner failure said only that something did not validate.
+                    fields=_describe_paths([tuple(e["loc"]) for e in exc.errors()]),
+                    kinds=sorted({str(e.get("type")) for e in exc.errors()}),
                 )
                 raise LLMUnavailable(
                     f"{transport.provider.value} returned JSON that does not match "
-                    f"{response_schema.__name__}: "
-                    f"{exc.error_count()} validation errors"
+                    f"{response_schema.__name__}: {exc.error_count()} validation errors at "
+                    f"{', '.join(_describe_paths([tuple(e['loc']) for e in exc.errors()])[:6])}"
                 ) from exc
 
             except _ProviderStatusError as exc:
