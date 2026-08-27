@@ -69,7 +69,13 @@ class TestSystemMode:
 
     def test_no_secret_leaks(self, client: TestClient):
         raw = client.get(f"{PREFIX}/system/mode").text.lower()
-        for forbidden in ("groq_api_key", "smtp_password", "api_key", "password"):
+        for forbidden in (
+            "groq_api_key",
+            "openrouter_api_key",
+            "smtp_password",
+            "api_key",
+            "password",
+        ):
             assert forbidden not in raw
 
 

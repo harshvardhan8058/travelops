@@ -106,7 +106,7 @@ def _unavailable(exc: Exception, *, artifact: str, mode: str) -> ProviderUnavail
             "llm_mode": mode,
             "provider_error": str(exc)[:300],
             "resolution": (
-                "Check GROQ_API_KEY and provider status. "
+                "Check the provider API key and provider status. "
                 "Set LLM_MODE=fixture to serve the committed artefact instead."
             ),
         },

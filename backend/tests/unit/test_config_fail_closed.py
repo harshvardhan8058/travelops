@@ -25,8 +25,22 @@ def _settings(**overrides) -> Settings:
 
 class TestRefusals:
     def test_live_llm_without_key_is_refused(self):
-        with pytest.raises(ConfigurationError, match="GROQ_API_KEY"):
+        """The default provider is OpenRouter, so its key is the one named."""
+        with pytest.raises(ConfigurationError, match="OPENROUTER_API_KEY"):
             resolve_modes(_settings(llm_mode="live"))
+
+    def test_the_refusal_names_the_selected_providers_key_not_the_other_one(self):
+        """Naming the wrong variable sends an operator to set a key that changes nothing."""
+        with pytest.raises(ConfigurationError, match="GROQ_API_KEY"):
+            resolve_modes(_settings(llm_mode="live", llm_provider="groq"))
+
+    def test_a_key_for_the_other_provider_does_not_satisfy_live_mode(self):
+        with pytest.raises(ConfigurationError, match="OPENROUTER_API_KEY"):
+            resolve_modes(_settings(llm_mode="live", groq_api_key="set-but-wrong-provider"))
+
+    def test_live_is_accepted_once_the_selected_provider_has_its_key(self):
+        modes = resolve_modes(_settings(llm_mode="live", openrouter_api_key="or-key"))
+        assert modes.llm.value == "live"
 
     def test_verified_policy_mode_is_refused(self):
         """No approved primary-source pack exists yet, so verified must be unreachable."""

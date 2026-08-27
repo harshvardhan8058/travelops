@@ -89,7 +89,8 @@ def live(monkeypatch) -> _StubTransport:
     otherwise the live mode leaks into whichever test runs next.
     """
     monkeypatch.setenv("LLM_MODE", "live")
-    monkeypatch.setenv("GROQ_API_KEY", "test-key-network-is-stubbed")
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-network-is-stubbed")
     get_settings.cache_clear()
     transport = _StubTransport()
     transport.install(monkeypatch)
@@ -186,7 +187,7 @@ async def test_a_live_explanation_survives_a_model_that_adds_fields(client, live
     assert body["source"] == "live"
     assert body["authorises_no_action"] is True
     assert body["llm_mode"] == "live"
-    assert body["generator"].startswith("groq:")
+    assert body["generator"].startswith("openrouter:")
     assert body["prompt_version"] == "explainer.v1"
     # The unsolicited keys are dropped rather than echoed back to the caller.
     assert "confidence" not in body
@@ -211,7 +212,7 @@ async def test_a_live_report_survives_an_extra_key_inside_a_section(client, live
     assert len(body["sections"]) == 3
     assert body["source"] == "live"
     assert body["authorises_no_action"] is True
-    assert body["generator"].startswith("groq:")
+    assert body["generator"].startswith("openrouter:")
     assert body["metric_refs"]
 
 
@@ -247,7 +248,8 @@ async def test_a_provider_outage_is_503_and_not_500(client, live):
 async def test_live_mode_without_a_key_is_503_and_not_500(client, monkeypatch):
     incident = _resolved_incident(client)
     monkeypatch.setenv("LLM_MODE", "live")
-    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
     get_settings.cache_clear()
     try:
         response = client.get(f"{PREFIX}/incidents/{incident}/explanation")
@@ -284,17 +286,27 @@ async def test_truncated_json_is_reported_not_guessed(client, live):
 
 
 async def test_the_prose_agents_ask_for_more_tokens_than_the_planner(client, live):
-    """One 4096 ceiling for a task list and a six-section report truncates the report.
+    """One ceiling for a task list and a six-section report truncates the report.
 
     Asserted on the request the client actually sent, because the failure it causes —
     `JSONDecodeError` — is indistinguishable from a transport fault once it has happened.
+
+    Compared against the planner's own constant rather than a literal. This test previously
+    hardcoded 4096, which was the planner default at the time; when the reservations were
+    resized to fit a token-per-minute ceiling the literal went stale and the test failed while
+    the property it cares about still held.
     """
+    from app.agents.reporter import MAX_TOKENS as REPORTER_MAX_TOKENS
+    from app.llm.client import DEFAULT_MAX_TOKENS as PLANNER_MAX_TOKENS
+
     _resolved_incident(client)
     live.content = _report_json()
 
     assert client.get(f"{PREFIX}/reports/{GROUP}").status_code == 200
     assert live.calls, "the stub was never called, so this asserts nothing"
-    assert live.calls[-1]["max_tokens"] > 4096
+    sent = live.calls[-1]["max_tokens"]
+    assert REPORTER_MAX_TOKENS > PLANNER_MAX_TOKENS, "the reporter needs the larger reservation"
+    assert sent > PLANNER_MAX_TOKENS
     assert live.calls[-1]["response_format"] == {"type": "json_object"}
 
 
