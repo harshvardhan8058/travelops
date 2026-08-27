@@ -22,8 +22,9 @@ PROMPT_VERSION = "report.v1"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "llm" / "prompts" / "report.v1.md"
 GENERATOR = "report-generator"
 
-#: The largest prose artifact: four to six sections plus a summary. See `explainer.MAX_TOKENS`.
-MAX_TOKENS = 8192
+#: The largest prose artifact: a summary plus four to six sections, roughly 700-1100 tokens.
+#: 1800 covers it. See `explainer.MAX_TOKENS` for why 8192 could never be served.
+MAX_TOKENS = 1800
 
 
 def _build_prompt(
@@ -58,10 +59,13 @@ def _build_prompt(
     if actions_summary:
         parts.append("")
         parts.append("## Recovery actions across the group")
-        for action in actions_summary[:20]:
+        # Capped at 8 and 60 characters: input counts against the same TPM ceiling as the
+        # answer, and 20 near-identical action lines told the model nothing the first few did
+        # not. The figures it must cite come from the rollup above, not from this list.
+        for action in actions_summary[:8]:
             parts.append(
                 f"- {action.get('action_type', '?')}: {action.get('status', '?')} "
-                f"| {action.get('reason', '')[:100]}"
+                f"| {action.get('reason', '')[:60]}"
             )
 
     parts.append("")

@@ -23,6 +23,7 @@ _REDACTED = "[redacted]"
 _SENSITIVE_KEYS = frozenset(
     {
         "groq_api_key",
+        "openrouter_api_key",
         "api_key",
         "smtp_password",
         "password",

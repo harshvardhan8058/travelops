@@ -3,7 +3,7 @@
 Three modes, one interface:
 
     live     — real Groq API call with retry/backoff, structured JSON output, validated against the
-               response schema before returning. Requires `GROQ_API_KEY`.
+               response schema before returning. Requires the configured provider's API key.
     fixture  — replays a committed JSON response keyed by (agent_name, prompt_version, scenario).
                Deterministic, zero-latency, no network. This is the test oracle.
     off      — raises `LLMUnavailable` immediately. The engine falls back to the deterministic
@@ -39,8 +39,54 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 1.5
 
-#: Ceiling for the planner's small, bounded task list. Prose agents override it per call.
-DEFAULT_MAX_TOKENS = 4096
+#: 4xx statuses that are worth trying again. Everything else in the 4xx range is the request
+#: being wrong and cannot be fixed by repeating it.
+#:
+#: 413 is here because Groq answers a token-per-minute overrun with `413 rate_limit_exceeded`,
+#: not 429. Treating it as permanent — which is what "retry only 429" did — turned a limit that
+#: clears on its own into a hard failure for the whole run.
+_TRANSIENT_STATUS = frozenset({408, 413, 429})
+
+#: Reserved completion budget for the planner's small, bounded task list. Prose agents override
+#: it per call. These are RESERVATIONS, not observed sizes: Groq bills TPM as
+#: `prompt_tokens + max_tokens`, so an oversized ceiling costs the same as actually generating
+#: that much. Six planner tasks are roughly 400-600 tokens of JSON, so 1200 is ample.
+DEFAULT_MAX_TOKENS = 1200
+
+#: Held back from the TPM ceiling when clamping, to absorb the difference between the estimate
+#: below and Groq's real tokeniser.
+TPM_SAFETY_MARGIN = 800
+
+#: Below this a prose artifact cannot be completed, so a truncated answer is worse than a clear
+#: refusal naming the budget.
+MIN_OUTPUT_BUDGET = 512
+
+#: Characters per token, deliberately pessimistic. English prose runs about 4, but these prompts
+#: are markdown containing JSON — braces, quotes and backticks tokenise far worse. Measured
+#: against the two real 413s (prompts of 710 and 1395 tokens) this over-estimates, which is the
+#: safe direction for a ceiling.
+_CHARS_PER_TOKEN = 2.5
+
+
+def _estimate_prompt_tokens(system: str, prompt: str) -> int:
+    """Conservative token estimate for the two messages, used only to clamp the budget.
+
+    Not a billing figure and never reported as one. `tiktoken` is not a dependency here and
+    adding one to guess a number that Groq computes authoritatively would be the wrong trade —
+    the real count comes back in `usage`.
+    """
+    return int((len(system) + len(prompt)) / _CHARS_PER_TOKEN)
+
+
+def _output_budget(*, requested: int, prompt_tokens: int, tpm_limit: int) -> int:
+    """The largest completion reservation that keeps `prompt + budget` inside the TPM ceiling.
+
+    This exists because the ceiling was previously implicit. `max_tokens=8192` against an 8000
+    TPM account is unsatisfiable no matter how short the prompt is, and the failure surfaced as
+    HTTP 413 from the provider rather than as anything checkable locally.
+    """
+    headroom = tpm_limit - prompt_tokens - TPM_SAFETY_MARGIN
+    return max(0, min(requested, headroom))
 
 
 def _coerce_self_report(value: Any, *, agent_name: str) -> int | None:
@@ -126,7 +172,7 @@ class LLMClient:
                 response_schema=response_schema,
             )
 
-        return await self._call_groq(
+        return await self._call_provider(
             prompt=prompt,
             system=system,
             response_schema=response_schema,
@@ -176,7 +222,7 @@ class LLMClient:
         )
         return parsed, audit
 
-    async def _call_groq(
+    async def _call_provider(
         self,
         *,
         prompt: str,
@@ -186,18 +232,67 @@ class LLMClient:
         prompt_version: str,
         max_tokens: int = DEFAULT_MAX_TOKENS,
     ) -> tuple[T, ModelCallAudit]:
-        """Live Groq call with retry on transient failures."""
+        """Live call to the configured provider, with retry on transient failures.
+
+        One transport for both providers. OpenRouter and Groq both serve
+        `openai/gpt-oss-120b` behind the same OpenAI-compatible chat-completions contract, so the
+        request below, the JSON-mode handling, the schema validation and the retry classes are
+        shared rather than forked.
+
+        The installed SDK is used as the HTTP client for both, pointed at a different `base_url`.
+        That is deliberate: hand-rolling a second client over `httpx` would mean re-deriving
+        `APIStatusError` and its status codes, which is exactly what the permanent-versus-transient
+        distinction below depends on. A second client is how two retry policies start to drift.
+        """
         import asyncio
 
         from groq import APIError, APIStatusError, AsyncGroq
 
-        api_key = self._settings.groq_api_key
-        if not api_key:
-            raise LLMUnavailable("GROQ_API_KEY is not set; cannot call Groq in live mode")
+        from app.config import provider_transport
 
-        client = AsyncGroq(api_key=api_key)
-        model = self._settings.groq_model
+        transport = provider_transport(self._settings)
+        if not transport.api_key:
+            raise LLMUnavailable(
+                f"{transport.key_env_var} is not set; cannot call "
+                f"{transport.provider.value} in live mode"
+            )
+
+        client_kwargs: dict[str, Any] = {"api_key": transport.api_key}
+        if transport.base_url is not None:
+            client_kwargs["base_url"] = transport.base_url
+            # OpenRouter uses these for attribution on the account's activity page. Optional
+            # for it, meaningless to Groq, so only sent when a base_url is in play.
+            client_kwargs["default_headers"] = {
+                "HTTP-Referer": "https://github.com/harshvardhan8058/travelops",
+                "X-Title": "TravelOps AI",
+            }
+
+        client = AsyncGroq(**client_kwargs)
+        model = transport.model
         temperature = self._settings.groq_temperature
+
+        tpm_limit = transport.tpm_limit
+        prompt_tokens_estimate = _estimate_prompt_tokens(system, prompt)
+        budget = _output_budget(
+            requested=max_tokens, prompt_tokens=prompt_tokens_estimate, tpm_limit=tpm_limit
+        )
+        if budget < MIN_OUTPUT_BUDGET:
+            raise LLMUnavailable(
+                f"the {agent_name} prompt leaves no room to answer within the "
+                f"{tpm_limit} token-per-minute ceiling: prompt is about "
+                f"{prompt_tokens_estimate} tokens, leaving {budget} for the response. "
+                f"Shorten the prompt or raise {transport.provider.value.upper()}_TPM_LIMIT."
+            )
+        if budget < max_tokens:
+            log.info(
+                "llm_output_budget_clamped",
+                agent=agent_name,
+                requested=max_tokens,
+                granted=budget,
+                prompt_tokens_estimate=prompt_tokens_estimate,
+                tpm_limit=tpm_limit,
+            )
+        max_tokens = budget
 
         last_error: Exception | None = None
         for attempt in range(MAX_RETRIES + 1):
@@ -221,7 +316,7 @@ class LLMClient:
                 parsed = response_schema.model_validate(raw)
 
                 audit = ModelCallAudit(
-                    generator=f"groq:{model}",
+                    generator=transport.generator,
                     prompt_version=prompt_version,
                     model_self_report=_coerce_self_report(
                         raw.get("model_self_report"), agent_name=agent_name
@@ -233,6 +328,7 @@ class LLMClient:
                 log.info(
                     "llm_call_succeeded",
                     agent=agent_name,
+                    provider=transport.provider.value,
                     model=model,
                     attempt=attempt + 1,
                     latency_ms=latency_ms,
@@ -252,7 +348,8 @@ class LLMClient:
                     errors=exc.error_count(),
                 )
                 raise LLMUnavailable(
-                    f"Groq returned JSON that does not match {response_schema.__name__}: "
+                    f"{transport.provider.value} returned JSON that does not match "
+                    f"{response_schema.__name__}: "
                     f"{exc.error_count()} validation errors"
                 ) from exc
 
@@ -266,16 +363,17 @@ class LLMClient:
                 #
                 # Same reasoning as the ValidationError branch above: a permanent failure is
                 # reported, not repeated. 429 and 5xx are genuinely transient and still retry.
-                if exc.status_code != 429 and 400 <= exc.status_code < 500:
+                if exc.status_code not in _TRANSIENT_STATUS and 400 <= exc.status_code < 500:
                     log.error(
                         "llm_call_refused",
                         agent=agent_name,
+                        provider=transport.provider.value,
                         model=model,
                         status_code=exc.status_code,
                         detail=str(exc)[:500],
                     )
                     raise LLMUnavailable(
-                        f"Groq refused the request for model '{model}' "
+                        f"{transport.provider.value} refused the request for model '{model}' "
                         f"(HTTP {exc.status_code}): {exc}"
                     ) from exc
                 last_error = exc
@@ -303,5 +401,5 @@ class LLMClient:
                     await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
 
         raise LLMUnavailable(
-            f"Groq call failed after {MAX_RETRIES + 1} attempts: {last_error}"
+            f"{transport.provider.value} call failed after {MAX_RETRIES + 1} attempts: {last_error}"
         ) from last_error

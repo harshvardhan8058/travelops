@@ -73,6 +73,9 @@ class _Recorder:
 @pytest.fixture
 def live(monkeypatch):
     monkeypatch.setenv("LLM_MODE", "live")
+    # These assert against the Groq model id and its decommissioning message, so the provider
+    # is pinned rather than inherited from the default.
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("GROQ_API_KEY", "stub-key")
     get_settings.cache_clear()
     yield

@@ -14,6 +14,7 @@ Owner: Stream A. Other streams read settings; they do not add validation here.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
@@ -37,6 +38,23 @@ class LLMMode(StrEnum):
     live = "live"
     fixture = "fixture"
     off = "off"
+
+
+class LLMProvider(StrEnum):
+    """Which OpenAI-compatible endpoint `live` mode talks to.
+
+    A transport choice, not an architectural one. Both providers serve the same
+    `openai/gpt-oss-120b` behind the same chat-completions contract, so the agents, prompts,
+    response schemas and the assurance gate are identical either way — only the base URL, the
+    key and the recorded generator differ.
+
+    `openrouter` is the default because Groq's free and developer tiers cap an account at 8000
+    tokens per minute, counted as `prompt_tokens + max_tokens`. That ceiling refused the
+    explainer and reporter outright (HTTP 413 `rate_limit_exceeded`, 8902 and 9587 requested).
+    """
+
+    openrouter = "openrouter"
+    groq = "groq"
 
 
 class WeatherMode(StrEnum):
@@ -104,6 +122,19 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     llm_mode: LLMMode = LLMMode.fixture
+    llm_provider: LLMProvider = LLMProvider.openrouter
+
+    #: OpenRouter, the default live transport. OpenAI-compatible chat-completions, so the
+    #: existing request shape is unchanged: `openai/gpt-oss-120b` there advertises support for
+    #: `max_tokens`, `response_format` and `temperature`, with a 131072-token context.
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-oss-120b"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    #: No per-minute token ceiling of the Groq kind; this only keeps a single request sane
+    #: against the model's context window. Sizing still applies, because reserving more output
+    #: than an artifact needs is paid for whether or not it is used.
+    openrouter_tpm_limit: int = 60000
+
     groq_api_key: str = ""
     #: Groq decommissioned `llama-3.3-70b-versatile` on 2026-08-16 for free and developer tiers
     #: (announced 2026-06-17). Requests to it return HTTP 400 `model_decommissioned`, which is
@@ -114,6 +145,12 @@ class Settings(BaseSettings):
     #: See https://console.groq.com/docs/deprecations
     groq_model: str = "openai/gpt-oss-120b"
     groq_temperature: float = 0.1
+    #: Tokens-per-minute ceiling for the account. Groq charges a request against TPM as
+    #: `prompt_tokens + max_tokens` — the RESERVED completion budget, not the tokens actually
+    #: returned — and answers HTTP 413 `rate_limit_exceeded` when a single request exceeds it.
+    #: Request sizing is derived from this, so an account on a different tier needs only this
+    #: number changed. 8000 is the free/developer tier for openai/gpt-oss-120b.
+    groq_tpm_limit: int = 8000
 
     weather_mode: WeatherMode = WeatherMode.fixture
     weather_poll_seconds: int = 60
@@ -272,20 +309,68 @@ def _read_assurance_config(path: Path) -> tuple[str | None, str | None]:
     return version, digest
 
 
+@dataclass(frozen=True)
+class ProviderTransport:
+    """Everything the live call needs, resolved from the configured provider.
+
+    One resolution point so `LLMClient` stays a single code path. Adding a provider means adding
+    a branch here, not a second client — a second client is how two request shapes, two retry
+    policies and two sets of error semantics start drifting apart.
+    """
+
+    provider: LLMProvider
+    base_url: str | None
+    api_key: str
+    model: str
+    tpm_limit: int
+    key_env_var: str
+    #: `openrouter:openai/gpt-oss-120b`. Recorded on the plan and returned as `generator`;
+    #: `_source_of` reads only the `fixture:` prefix, and assurance never branches on it.
+    generator: str
+
+
+def provider_transport(settings: Settings) -> ProviderTransport:
+    if settings.llm_provider is LLMProvider.groq:
+        return ProviderTransport(
+            provider=LLMProvider.groq,
+            base_url=None,
+            api_key=settings.groq_api_key,
+            model=settings.groq_model,
+            tpm_limit=settings.groq_tpm_limit,
+            key_env_var="GROQ_API_KEY",
+            generator=f"groq:{settings.groq_model}",
+        )
+    return ProviderTransport(
+        provider=LLMProvider.openrouter,
+        base_url=settings.openrouter_base_url,
+        api_key=settings.openrouter_api_key,
+        model=settings.openrouter_model,
+        tpm_limit=settings.openrouter_tpm_limit,
+        key_env_var="OPENROUTER_API_KEY",
+        generator=f"openrouter:{settings.openrouter_model}",
+    )
+
+
 def resolve_modes(settings: Settings) -> ResolvedModes:
     """Resolve effective modes, failing closed on unsafe combinations."""
     degradations: list[str] = []
 
     # ---------------------------------------------------------------- reasoning
     llm = settings.llm_mode
-    if llm is LLMMode.live and not settings.groq_api_key:
+    transport = provider_transport(settings)
+    if llm is LLMMode.live and not transport.api_key:
+        # Names the key for the provider actually selected. Naming GROQ_API_KEY while
+        # LLM_PROVIDER=openrouter would send an operator to set the wrong variable.
         if settings.allow_llm_degradation:
             llm = LLMMode.fixture
-            degradations.append("LLM_MODE=live requested without GROQ_API_KEY; degraded to fixture")
+            degradations.append(
+                f"LLM_MODE=live requested without {transport.key_env_var}; degraded to fixture"
+            )
         else:
             raise ConfigurationError(
-                "LLM_MODE=live requires GROQ_API_KEY. Set the key, choose "
-                "LLM_MODE=fixture, or set ALLOW_LLM_DEGRADATION=true to permit fallback."
+                f"LLM_MODE=live with LLM_PROVIDER={transport.provider.value} requires "
+                f"{transport.key_env_var}. Set the key, choose LLM_MODE=fixture, or set "
+                "ALLOW_LLM_DEGRADATION=true to permit fallback."
             )
 
     # ---------------------------------------------------------------- notifications

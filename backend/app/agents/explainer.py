@@ -22,9 +22,11 @@ PROMPT_VERSION = "explainer.v1"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "llm" / "prompts" / "explainer.v1.md"
 GENERATOR = "explainer-agent"
 
-#: Prose, not a task list. The planner's 4096 truncates a multi-paragraph explanation
-#: mid-object, and truncated JSON is indistinguishable from a transport fault.
-MAX_TOKENS = 8192
+#: Reserved completion budget. Two to four paragraphs plus the envelope is roughly 400-700
+#: tokens, so 1400 leaves room without reserving a minute's worth of an 8000 TPM account.
+#: 8192 here was unsatisfiable: Groq bills `prompt_tokens + max_tokens`, so a 710-token prompt
+#: asked for 8902 against a 8000 ceiling and came back 413 every time.
+MAX_TOKENS = 1400
 
 
 def _build_prompt(
@@ -39,10 +41,12 @@ def _build_prompt(
         "",
         "## Completed actions",
     ]
+    # 80 characters of each recorded reason. The prompt counts against the same TPM ceiling as
+    # the answer, and the explanation cites the action, not the full text of its reason.
     for action in actions_summary:
         parts.append(
             f"- {action.get('action_type', '?')}: {action.get('status', '?')} "
-            f"| {action.get('reason', '')[:120]}"
+            f"| {action.get('reason', '')[:80]}"
         )
     if rollup:
         parts.append("")
