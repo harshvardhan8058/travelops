@@ -61,21 +61,48 @@ class PlannerResponse(AgentEnvelope):
     tasks: list[PlanTask] = Field(min_length=1)
 
 
+# Prose artifacts tolerate keys the model volunteers; the planner does not.
+#
+# `extra="forbid"` is right for `PlannerResponse`: its tasks reach the assurance gate and then
+# execution, so a field nobody declared is a field nobody validated, and rejecting the whole
+# proposal is the safe answer. Applied to a read-only artifact it is the wrong trade. An
+# explanation authorises nothing — `authorises_no_action` is `True` on both endpoints — so a
+# model that helpfully adds `confidence` should have that key dropped, not have the entire
+# explanation replaced by an error.
+#
+# This is what the module docstring above already asks for: "If a model emits one, store it as
+# `ModelCallAudit.model_self_report` and never branch on it." Storing requires the response to
+# survive validation. `LLMClient` reads `raw.get("model_self_report")` off the raw payload for
+# exactly that purpose, which only works if an extra key is not fatal first.
+#
+# `reason` is widened here for the same reason. The envelope's 2000-character cap stops a
+# planner turning a justification field into an essay; for these two the prose *is* the
+# deliverable, and a verbose `reason` is not a contract breach worth a 503.
+_PROSE_ARTIFACT = ConfigDict(extra="ignore")
+_PROSE_REASON = Field(min_length=1, max_length=20000)
+
+
 class ExplanationResponse(AgentEnvelope):
+    model_config = _PROSE_ARTIFACT
+
     payload_type: Literal["explanation.v1"] = "explanation.v1"
+    reason: str = _PROSE_REASON
     explanation: str = Field(min_length=1)
     citation_refs: list[str] = Field(default_factory=list)
 
 
 class ReportSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = _PROSE_ARTIFACT
 
     heading: str
     body: str
 
 
 class ReportResponse(AgentEnvelope):
+    model_config = _PROSE_ARTIFACT
+
     payload_type: Literal["report.v1"] = "report.v1"
+    reason: str = _PROSE_REASON
     summary: str = Field(min_length=1)
     sections: list[ReportSection] = Field(default_factory=list)
     # Metrics must reference recorded values; the reporter never invents a number.
