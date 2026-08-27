@@ -189,7 +189,7 @@ class LLMClient:
         """Live Groq call with retry on transient failures."""
         import asyncio
 
-        from groq import APIError, AsyncGroq, RateLimitError
+        from groq import APIError, APIStatusError, AsyncGroq
 
         api_key = self._settings.groq_api_key
         if not api_key:
@@ -256,7 +256,41 @@ class LLMClient:
                     f"{exc.error_count()} validation errors"
                 ) from exc
 
-            except (RateLimitError, APIError, json.JSONDecodeError, TimeoutError) as exc:
+            except APIStatusError as exc:
+                # A 4xx that is not a rate limit is the request itself being wrong — a
+                # decommissioned model, an unknown model id, a rejected parameter. Retrying
+                # cannot change the answer, and retrying it three times is how the real cause
+                # stayed hidden: a decommissioned model reached the operator as "Groq call
+                # failed after 3 attempts" instead of the provider saying, in the first
+                # sentence of the first response, which model had been retired.
+                #
+                # Same reasoning as the ValidationError branch above: a permanent failure is
+                # reported, not repeated. 429 and 5xx are genuinely transient and still retry.
+                if exc.status_code != 429 and 400 <= exc.status_code < 500:
+                    log.error(
+                        "llm_call_refused",
+                        agent=agent_name,
+                        model=model,
+                        status_code=exc.status_code,
+                        detail=str(exc)[:500],
+                    )
+                    raise LLMUnavailable(
+                        f"Groq refused the request for model '{model}' "
+                        f"(HTTP {exc.status_code}): {exc}"
+                    ) from exc
+                last_error = exc
+                log.warning(
+                    "llm_call_retrying",
+                    agent=agent_name,
+                    attempt=attempt + 1,
+                    error=type(exc).__name__,
+                    status_code=exc.status_code,
+                    detail=str(exc)[:200],
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY_SECONDS * (attempt + 1))
+
+            except (APIError, json.JSONDecodeError, TimeoutError) as exc:
                 last_error = exc
                 log.warning(
                     "llm_call_retrying",

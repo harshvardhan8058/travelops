@@ -131,7 +131,8 @@ Primary user is the **Operations Controller**. Others are secondary surfaces, bu
 
 | Model | Use |
 | --- | --- |
-| `llama-3.3-70b-versatile` | Primary planner |
+| `openai/gpt-oss-120b` | Primary planner (from 2026-08-27) |
+| `llama-3.3-70b-versatile` | Superseded — Groq retired it 2026-08-16 |
 | `qwen3` | Alternate / comparison |
 | `deepseek-r1-distill` | Reasoning-heavy explanation |
 

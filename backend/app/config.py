@@ -105,7 +105,14 @@ class Settings(BaseSettings):
 
     llm_mode: LLMMode = LLMMode.fixture
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    #: Groq decommissioned `llama-3.3-70b-versatile` on 2026-08-16 for free and developer tiers
+    #: (announced 2026-06-17). Requests to it return HTTP 400 `model_decommissioned`, which is
+    #: what took the whole Phase 3 live path down: the planner produced no candidate and both
+    #: prose endpoints failed. `openai/gpt-oss-120b` is Groq's documented replacement.
+    #: Reasoning is returned in a separate `reasoning` field rather than in `content`, so the
+    #: JSON-mode contract this client relies on is unchanged.
+    #: See https://console.groq.com/docs/deprecations
+    groq_model: str = "openai/gpt-oss-120b"
     groq_temperature: float = 0.1
 
     weather_mode: WeatherMode = WeatherMode.fixture

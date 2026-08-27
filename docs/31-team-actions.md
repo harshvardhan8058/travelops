@@ -63,8 +63,15 @@ Stage 2 does not need it: the deterministic path and `LLM_MODE=fixture` cover ev
 ### Exactly what to do
 
 1. Go to <https://console.groq.com/> and sign in.
-2. Confirm **`llama-3.3-70b-versatile`** appears in the models list. If it has been renamed or
-   retired, tell me the current model ID — that is a real change and I need to know.
+2. Confirm **`openai/gpt-oss-120b`** appears in the models list.
+
+   This step already caught one real change. Groq retired `llama-3.3-70b-versatile` on
+   2026-08-16 for free and developer tiers, and requests to it return HTTP 400
+   `model_decommissioned`. If `openai/gpt-oss-120b` is also gone, check
+   [deprecations](https://console.groq.com/docs/deprecations) and tell me the current model ID —
+   that is a real change and I need to know. A retired model takes down the planner candidate,
+   the explanation and the report at once, and no test can see it coming, because every test
+   either replays a fixture or stubs the transport.
 3. Open **API Keys → Create API Key**. Name it `travelops-techcon`.
 4. Copy the key. It is shown once.
 5. Put it in `backend/.env` (create the file with `make env` if it does not exist):
