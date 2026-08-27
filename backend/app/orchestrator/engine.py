@@ -185,6 +185,9 @@ class Orchestrator:
         self._modes = modes
         self._limits = limits or Limits.from_settings(self._settings)
         self._now = now or (lambda: datetime.now(UTC))
+        # Transient diagnostic only. Set after the candidate and PLAN_PROPOSED journal are staged,
+        # then consumed by `advance()` after the transaction commit makes both durable.
+        self._pending_planner_plan_id: int | None = None
 
     @property
     def modes(self) -> ResolvedModes:
@@ -569,6 +572,12 @@ class Orchestrator:
         if self.modes.llm is LLMMode.off:
             return
 
+        phase = "context"
+        log.info(
+            "planner_candidate_started",
+            incident_reference=ctx.incident_reference,
+            llm_mode=self.modes.llm.value,
+        )
         try:
             # Get airport from the group (which carries airport_icao) or from the flight
             incident = await self._session.get(Incident, ctx.incident_id)
@@ -595,6 +604,7 @@ class Orchestrator:
             flight = await self._session.get(Flight, ctx.flight_id) if ctx.flight_id else None
 
             agent = PlannerAgent()
+            phase = "request"
             planner_response, audit = await agent.propose(
                 incident_reference=ctx.incident_reference,
                 flight_id=ctx.flight_id,
@@ -615,6 +625,7 @@ class Orchestrator:
             # anything high risk. What it prevents is a candidate that cannot be run being offered
             # as one: an action with no registered service, a duplicate, a dependency on a task
             # that was dropped, or a target reference the orchestrator never supplied.
+            phase = "reflection"
             reflection = reflect(
                 list(planner_response.tasks),
                 available_actions={
@@ -650,6 +661,7 @@ class Orchestrator:
                 return
 
             # Persist as a second Plan row
+            phase = "plan_insert"
             planner_plan = Plan(
                 incident_id=ctx.incident_id,
                 generated_at=self._now(),
@@ -666,6 +678,7 @@ class Orchestrator:
             await self._session.flush()
 
             # Persist tasks
+            phase = "task_insert"
             planner_rows: dict[str, PlanTaskRow] = {}
             for order, task in enumerate(reflection.tasks, start=1):
                 row = PlanTaskRow(
@@ -682,6 +695,7 @@ class Orchestrator:
             await self._session.flush()
 
             # Resolve dependencies
+            phase = "dependency_resolution"
             for task in reflection.tasks:
                 row = planner_rows[task.action.value]
                 row.depends_on = [
@@ -689,6 +703,7 @@ class Orchestrator:
                 ]
             await self._session.flush()
 
+            phase = "journal"
             await self._journal(
                 ctx,
                 stage=STAGE_PLAN,
@@ -711,10 +726,12 @@ class Orchestrator:
                     "output_tokens": audit.output_tokens,
                 },
             )
+            self._pending_planner_plan_id = planner_plan.id
             log.info(
-                "planner_candidate_created",
+                "planner_candidate_staged",
                 incident_reference=ctx.incident_reference,
                 plan_id=planner_plan.id,
+                phase=phase,
                 tasks=len(reflection.tasks),
                 dropped=reflection.dropped_actions,
                 precedents=len(precedents),
@@ -726,6 +743,11 @@ class Orchestrator:
             log.info(
                 "planner_candidate_skipped",
                 incident_reference=ctx.incident_reference,
+                phase=phase,
+                llm_phase=getattr(exc, "phase", "unknown"),
+                status_code=getattr(exc, "status_code", None),
+                finish_reason=getattr(exc, "finish_reason", None),
+                content_length=getattr(exc, "content_length", None),
                 reason=str(exc)[:200],
             )
             await self._journal(
@@ -737,13 +759,22 @@ class Orchestrator:
                     "The planner agent could not produce a candidate. "
                     "The deterministic playbook plan is unaffected."
                 ),
-                detail={"reason": str(exc)[:300], "llm_mode": self.modes.llm.value},
+                detail={
+                    "reason": str(exc)[:300],
+                    "llm_mode": self.modes.llm.value,
+                    "phase": phase,
+                    "llm_phase": getattr(exc, "phase", "unknown"),
+                    "status_code": getattr(exc, "status_code", None),
+                    "finish_reason": getattr(exc, "finish_reason", None),
+                    "content_length": getattr(exc, "content_length", None),
+                },
             )
         except Exception as exc:
             # Any other failure must not block recovery.
             log.error(
                 "planner_candidate_failed",
                 incident_reference=ctx.incident_reference,
+                phase=phase,
                 error=type(exc).__name__,
                 detail=str(exc)[:200],
             )
@@ -759,6 +790,7 @@ class Orchestrator:
                 detail={
                     "error": type(exc).__name__,
                     "reason": str(exc)[:300],
+                    "phase": phase,
                     "llm_mode": self.modes.llm.value,
                 },
             )
@@ -1423,8 +1455,33 @@ class Orchestrator:
             }[ctx.state]
 
             ctx.steps_taken += 1
+            step_state = ctx.state
+            if step_state is IncidentState.planning:
+                self._pending_planner_plan_id = None
             await handler(ctx)
-            await self._session.commit()
+            try:
+                await self._session.commit()
+            except Exception as exc:
+                if (
+                    step_state is IncidentState.planning
+                    and self._pending_planner_plan_id is not None
+                ):
+                    log.error(
+                        "planner_candidate_persistence_failed",
+                        incident_reference=ctx.incident_reference,
+                        plan_id=self._pending_planner_plan_id,
+                        phase="commit",
+                        error=type(exc).__name__,
+                    )
+                raise
+            if step_state is IncidentState.planning and self._pending_planner_plan_id is not None:
+                log.info(
+                    "planner_candidate_created",
+                    incident_reference=ctx.incident_reference,
+                    plan_id=self._pending_planner_plan_id,
+                    phase="committed",
+                )
+                self._pending_planner_plan_id = None
             return ctx
         finally:
             correlation_id_var.reset(token)

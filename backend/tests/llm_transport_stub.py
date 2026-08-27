@@ -33,11 +33,23 @@ class FakeResponse:
         return _json.loads(self.text)
 
 
-def completion(content: str, *, prompt_tokens: int = 700, completion_tokens: int = 200) -> Any:
+def completion(
+    content: str,
+    *,
+    prompt_tokens: Any = 700,
+    completion_tokens: Any = 200,
+    finish_reason: str = "stop",
+) -> Any:
     """The OpenAI-compatible success envelope both providers return."""
     return {
         "id": "gen-test",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": content}}],
+        "choices": [
+            {
+                "index": 0,
+                "finish_reason": finish_reason,
+                "message": {"role": "assistant", "content": content},
+            }
+        ],
         "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
     }
 
@@ -59,6 +71,8 @@ class RecordingTransport:
         self.requests: list[dict[str, Any]] = []
         #: Set to return a JSON string as the assistant message content.
         self.content: str | None = None
+        #: Set to replace the whole provider response envelope.
+        self.response_payload: Any = None
         #: Set to return a non-2xx response.
         self.status: int | None = None
         self.status_payload: Any = None
@@ -71,6 +85,10 @@ class RecordingTransport:
 
     def returns(self, content: str) -> RecordingTransport:
         self.content = content
+        return self
+
+    def returns_payload(self, payload: Any) -> RecordingTransport:
+        self.response_payload = payload
         return self
 
     def fails_with_status(
@@ -111,6 +129,8 @@ class RecordingTransport:
                     raise stub.error
                 if scripted and stub.status is not None:
                     return FakeResponse(stub.status, stub.status_payload)
+                if stub.response_payload is not None:
+                    return FakeResponse(200, stub.response_payload)
                 return FakeResponse(200, completion(stub.content or "{}"))
 
         monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
