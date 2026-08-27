@@ -24,8 +24,8 @@ import json
 
 import pytest
 
-from app.agents import explainer, reporter
-from app.agents.contract import ExplanationResponse, ReportResponse
+from app.agents import explainer, planner, reporter
+from app.agents.contract import ExplanationResponse, PlannerResponse, ReportResponse
 from app.config import get_settings
 from app.llm.client import (
     MAX_RETRIES,
@@ -98,8 +98,16 @@ class TestNoAgentCanExceedTheCeiling:
 
         assert observed_reasoning_tokens + largest_visible_report_tokens <= reporter.MAX_TOKENS
 
+    def test_the_planner_reserves_for_reasoning_and_the_task_json(self):
+        """The exact live truncation: reasoning alone exceeded the former 1200 ceiling."""
+        from app.llm.client import DEFAULT_MAX_TOKENS
+
+        observed_reasoning_tokens = 1406
+        largest_task_json_tokens = 600
+
+        assert observed_reasoning_tokens + largest_task_json_tokens <= DEFAULT_MAX_TOKENS
+
     def test_the_planner_default_also_fits(self):
-        from app.agents import planner
         from app.llm.client import DEFAULT_MAX_TOKENS
 
         system = planner.PROMPT_PATH.read_text(encoding="utf-8")
@@ -150,6 +158,31 @@ async def _call(client: LLMClient, *, system: str, max_tokens: int):
 
 
 class TestTheRequestActuallySent:
+    async def test_the_planner_sends_its_reasoning_aware_reservation(self, live, monkeypatch):
+        """The planner must not regress to the 1200-token ceiling seen truncating on Windows."""
+        from app.llm.client import DEFAULT_MAX_TOKENS
+
+        plan = {
+            "status": "success",
+            "reason": "Protect recorded connections first.",
+            "evidence_refs": ["incident:INC-1"],
+            "payload_type": "planner.v1",
+            "tasks": [
+                {
+                    "action": "check_connections",
+                    "target_refs": ["incident:INC-1"],
+                    "inputs": {},
+                    "depends_on": [],
+                }
+            ],
+        }
+        stub = RecordingTransport().returns(json.dumps(plan)).install(monkeypatch)
+        response, _audit = await planner.PlannerAgent().propose(incident_reference="INC-1")
+
+        assert stub.last["json"]["max_tokens"] == DEFAULT_MAX_TOKENS
+        assert PlannerResponse.model_validate(plan).tasks
+        assert response.tasks
+
     async def test_the_reporter_sends_its_reasoning_aware_reservation(self, live, monkeypatch):
         """The reporter must not regress to the 1800-token ceiling seen truncating on Windows."""
         report = {
