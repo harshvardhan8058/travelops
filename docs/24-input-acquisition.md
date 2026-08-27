@@ -152,7 +152,11 @@ must be arranged by the team; a video alone is insurance, not the primary demo.
 ### Team action
 
 1. Sign in at [Groq Console](https://console.groq.com/).
-2. Confirm `llama-3.3-70b-versatile` appears under supported models.
+2. Confirm `openai/gpt-oss-120b` appears under supported models. Groq retired
+   `llama-3.3-70b-versatile` on 2026-08-16 for free and developer tiers; requests to it return
+   HTTP 400 `model_decommissioned`. Check [deprecations](https://console.groq.com/docs/deprecations)
+   before a demo — a retired model takes down the planner candidate and both prose endpoints at
+   once, and nothing in the test suite can see it coming.
 3. Open the account rate-limit page and record RPM/RPD/TPM/TPD shown for this exact account/model.
 4. Create a project-scoped API key.
 5. Put it only in local `GROQ_API_KEY`; never send or commit it.

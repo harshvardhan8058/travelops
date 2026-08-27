@@ -203,7 +203,7 @@ REDIS_URL=redis://redis:6379/0
 
 LLM_MODE=fixture                       # live | fixture | off
 GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b         # llama-3.3-70b-versatile retired 2026-08-16
 
 WEATHER_MODE=fixture                   # live | fixture
 WEATHER_POLL_SECONDS=60
