@@ -156,21 +156,46 @@ def _from_result(
     )
 
 
+#: The fictional pack `POLICY_MODE=demo` loads. Fixed here rather than read from
+#: `POLICY_PACK_ID`, deliberately: demo mode must not be pointable at a real authority's pack.
+#: Selecting it by configuration would mean one wrong environment variable puts the charter's
+#: real figures behind a badge that says the numbers are invented.
+DEMO_PACK_ID: Final = "demo-fixture"
+DEMO_PACK_VERSION: Final = "1.0"
+
+
+def active_pack_coordinates(settings: Settings) -> tuple[str, str]:
+    """Which pack id and version the running POLICY_MODE resolves to.
+
+    One authoritative answer, used by every caller that loads the active pack, so demo mode cannot
+    be honoured in one code path and ignored in another.
+    """
+    if settings.policy_mode is PolicyMode.demo:
+        return DEMO_PACK_ID, DEMO_PACK_VERSION
+    return settings.policy_pack_id, settings.policy_pack_version
+
+
 def load_active_pack(settings: Settings | None = None) -> LoadedPack:
     """Load the pack for the configured POLICY_MODE.
+
+    In `demo` mode this resolves to the fictional fixture pack regardless of `POLICY_PACK_ID`.
+    That is not a convenience: the loader already refuses to load a non-fixture pack in demo mode,
+    so honouring the configured id there would simply fail, and honouring it *successfully* would
+    be worse — invented-figure labelling over real figures.
 
     Raises PolicyPackUnavailable or PackNotVerifiedEligible. Both are configuration faults, so
     they surface as errors rather than as a needs_human outcome about a passenger.
     """
     active = settings or get_settings()
+    pack_id, pack_version = active_pack_coordinates(active)
     return load_pack(
         # Resolved against the repo root when relative, exactly as the assurance config is.
         # `POLICY_PACK_DIR=./policy_packs` otherwise means a different directory depending on
         # whether the process started from the repo root, from `backend/`, or in the container,
         # and the symptom is a legal pack "not found" rather than an obvious path error.
         pack_dir=resolve_repo_path(Path(active.policy_pack_dir)),
-        pack_id=active.policy_pack_id,
-        version=active.policy_pack_version,
+        pack_id=pack_id,
+        version=pack_version,
         mode=active.policy_mode,
     )
 

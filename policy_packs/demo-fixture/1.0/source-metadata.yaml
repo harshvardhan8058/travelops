@@ -1,0 +1,33 @@
+title: Demo Fixture Rules — invented figures for engine demonstration only
+publisher: none; this document does not exist
+published: null
+language: en
+
+# THERE IS NO SOURCE DOCUMENT, because there is no source.
+#
+# `archived: false` and an absent `content_sha256` are the truthful values, and they are exactly
+# what `verify_source_document` refuses. That refusal is only applied in verified mode or to a pack
+# claiming `approved`, so this pack loads in demo mode and can never load in verified mode —
+# which is the property demo mode needs.
+#
+# A fictional pack must not carry a hash that looks like provenance. Inventing one would make the
+# integrity check pass on a document nobody can produce, which is the precise failure G3 exists to
+# prevent.
+provided_by: none
+extraction_method: invented_for_demonstration
+
+official_url: null
+local_path: null
+content_sha256: null
+archived: false
+
+self_declared_scope: >-
+  Fictional. This pack states no legal position, describes no real instrument, and must never be
+  presented as guidance, regulation or current law. It exists so the resolver, rule engine and
+  fail-closed gates can be demonstrated without a real authority's figures behind them.
+
+known_or_suspected_supersession: []
+
+redistribution:
+  status: not_applicable
+  note: Nothing to redistribute; no external material is referenced.
