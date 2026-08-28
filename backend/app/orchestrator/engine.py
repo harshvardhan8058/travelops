@@ -26,6 +26,7 @@ Owner: Stream A.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -605,17 +606,42 @@ class Orchestrator:
 
             agent = PlannerAgent()
             phase = "request"
-            planner_response, audit = await agent.propose(
-                incident_reference=ctx.incident_reference,
-                flight_id=ctx.flight_id,
-                flight_number=flight.flight_number if flight else None,
-                route=(f"{flight.origin_icao}->{flight.destination_icao}" if flight else None),
-                delay_minutes=None,  # not stored on the Flight model
-                trigger_type=trigger_type,
-                severity=severity,
-                airport_icao=airport_icao,
-                precedents=[p.to_dict() for p in precedents],
-            )
+            # Bound the model call itself, and nothing else.
+            #
+            # Phase 3's contract is that a model failure never blocks recovery. That was only
+            # half-true: a *failing* call was handled by the `LLMUnavailable` path below, a *slow*
+            # one was not. The client's own budget is 60s per attempt with two retries plus
+            # backoff, so a single hung call can hold an incident open for ~184s. Group runs
+            # advance their members sequentially, so two such incidents are enough to exceed the
+            # caller's request budget and truncate the cascade part-way.
+            #
+            # Only the `await` is wrapped: every DB write in this method happens after it, so a
+            # cancelled call cannot leave the session mid-flush. The timeout is converted into the
+            # one existing skip route rather than a new one — a model that never answers is
+            # unavailable, which is exactly what that path already means.
+            budget = self._settings.planner_candidate_budget_seconds
+            try:
+                planner_response, audit = await asyncio.wait_for(
+                    agent.propose(
+                        incident_reference=ctx.incident_reference,
+                        flight_id=ctx.flight_id,
+                        flight_number=flight.flight_number if flight else None,
+                        route=(
+                            f"{flight.origin_icao}->{flight.destination_icao}" if flight else None
+                        ),
+                        delay_minutes=None,  # not stored on the Flight model
+                        trigger_type=trigger_type,
+                        severity=severity,
+                        airport_icao=airport_icao,
+                        precedents=[p.to_dict() for p in precedents],
+                    ),
+                    timeout=budget,
+                )
+            except TimeoutError as exc:
+                raise LLMUnavailable(
+                    f"The planner agent did not answer within its {budget:g}s budget.",
+                    phase="orchestrator_budget",
+                ) from exc
 
             # Reflect before persisting. The agent proposes; this narrows to what can actually be
             # executed and records every drop with its reason.
