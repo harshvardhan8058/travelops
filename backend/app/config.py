@@ -187,6 +187,22 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173"
     )
 
+    #: Wall-clock ceiling for the optional Planner candidate, per incident.
+    #:
+    #: The candidate is additive: the playbook plan is already persisted and selected before the
+    #: agent is asked, and Phase 3's contract is that a model failure never blocks recovery. That
+    #: contract was only half-enforced — a *failing* model was handled, a *slow* one was not.
+    #:
+    #: `POST /incident-groups/{ref}/run` advances eight member incidents sequentially, so with the
+    #: client's own budget (60s per attempt x 3 attempts + backoff = 184s worst case) two slow
+    #: incidents alone exceed the verifier's 300s request budget. The cascade then times out
+    #: part-way and the union rollups report 13 connections and 5 pairings instead of 22 and 9 —
+    #: not wrong arithmetic, just fewer incidents having finished.
+    #:
+    #: 20s is comfortably above a healthy live planner call (a few seconds) and bounds the whole
+    #: eight-incident cascade to 160s even if every model call hangs.
+    planner_candidate_budget_seconds: float = Field(default=20.0, gt=0, le=180)
+
     #: Plan-level (group-scoped) assurance config. A SEPARATE setting on purpose.
     #:
     #: v1 has no `plan:` section — it predates plan-level assurance — so loading it for the
