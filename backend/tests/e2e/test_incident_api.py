@@ -611,8 +611,17 @@ class TestOpenApiSchemas:
     def test_the_endpoints_not_yet_real_are_still_labelled_fixture(self, client):
         """Honest labelling: an unimplemented endpoint must not look finished."""
         spec = client.get("/openapi.json").json()
-        for path in ("/api/v1/flights", "/api/v1/incidents/{incident_id}/policy"):
+        # `/incidents/{id}/policy` left this list when G4 made it real; `/flights` and `/sources`
+        # are still fixture-backed and must keep saying so.
+        for path in ("/api/v1/flights", "/api/v1/sources"):
             assert "[fixture]" in spec["paths"][path]["get"]["summary"]
+
+    def test_the_policy_endpoint_no_longer_claims_to_be_a_fixture(self, client):
+        spec = client.get("/openapi.json").json()
+        policy = spec["paths"]["/api/v1/incidents/{incident_id}/policy"]["get"]
+        assert "[fixture]" not in policy["summary"]
+        schema = policy["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("PolicyResponse"), "must resolve to a component schema"
 
     def test_mutations_document_the_idempotency_key(self, client):
         spec = client.get("/openapi.json").json()

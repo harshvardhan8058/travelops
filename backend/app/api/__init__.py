@@ -22,7 +22,7 @@ Endpoint status after the Phase 2 increment:
 | `POST /incident-groups/{ref}/open`, `/run`, `/what-if` | real (Stream A + C) |
 | `/incident-groups/{ref}/assurance` + `POST .../assurance/decision` | real (Stream A + B) |
 | `/flights`, `/sources` | fixture — Stream C's providers and loaders |
-| `/incidents/{ref}/policy` | fixture — Stream B's policy evaluation |
+| `/incidents/{ref}/policy` | real (Stream A route, Stream B engine) |
 | `/reports/{id}` | fixture — the Report Generator |
 
 Every real endpoint declares a Pydantic `response_model`. The fixture routes return `Any`,
@@ -40,6 +40,7 @@ from app.api import (
     incident_groups,
     incidents,
     plans,
+    policy,
     reasoning,
     replay,
 )
@@ -52,6 +53,7 @@ router.include_router(incidents.router)
 router.include_router(assurance_router.router)
 router.include_router(incident_groups.router)
 router.include_router(plans.router)
+router.include_router(policy.router)
 router.include_router(replay.router)
 router.include_router(reasoning.router)
 

@@ -51,11 +51,3 @@ async def list_sources() -> Any:
 
 
 # ---------------------------------------------------------------- Stream A
-@router.get("/incidents/{incident_id}/policy", summary="Policy evaluation [fixture]")
-async def get_policy(incident_id: str) -> Any:
-    payload = _load("policy")
-    return {**payload, "incident_id": incident_id}
-
-
-# ---------------------------------------------------------------- Stream D
-# /reports/{id} is now a real endpoint in app/api/reasoning.py (Phase 3).
