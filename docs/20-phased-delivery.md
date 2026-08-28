@@ -56,7 +56,8 @@ precedent retrieval for Planner context. `LLM_MODE` supports live, fixture and o
 Replace the demo fixture with the verified India pack, source-document hashes, deterministic rules and
 citation cards. Add the jurisdiction resolver. A second-jurisdiction structural proof is optional and
 only proceeds after India works end to end. See
-[`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md).
+[`19-jurisdiction-and-policy-packs.md`](19-jurisdiction-and-policy-packs.md) for the design and
+[`38-phase4-verified-policy.md`](38-phase4-verified-policy.md) for the contract and dependency map.
 
 *Gate:* every rupee figure traces to a clause, document and version.
 
