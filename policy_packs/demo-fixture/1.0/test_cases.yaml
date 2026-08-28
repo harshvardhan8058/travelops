@@ -1,0 +1,135 @@
+pack: demo-fixture
+version: "1.0"
+
+# Executable expectations for the fictional pack. They exist so demo mode is held to the same
+# standard as charter mode: the engine's behaviour is asserted, not assumed, and the fail-closed
+# paths are exercised on invented figures.
+
+cases:
+
+  - id: demo_delay_pays_no_cash
+    description: FICTIONAL. Delay gives care and never a payout.
+    facts:
+      event: { type: delay, delay_minutes: 180 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+      passenger: { checked_in_on_time: true }
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [NO_DELAY_COMPENSATION_PROVISION]
+      entitlements: [meals_refreshments]
+      rules_fired:
+        - demo.delay.care.refreshments
+        - demo.delay.no_cash_compensation
+
+  - id: demo_delay_below_threshold_gives_nothing
+    facts:
+      event: { type: delay, delay_minutes: 45 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+      passenger: { checked_in_on_time: true }
+    expect:
+      cash_inr: 0
+      entitlements: []
+
+  - id: demo_cancellation_short_notice_fare_governs
+    description: FICTIONAL. Lesser of the 3,000 cap and fare plus fuel.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+      fare: { one_way_basic_fare_inr: 1800, airline_fuel_charge_inr: 400 }
+    expect:
+      cash_inr: 2200
+      formula_used: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+      rules_fired: [demo.cancellation.compensation.short_notice]
+
+  - id: demo_cancellation_cap_binds
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+      fare: { one_way_basic_fare_inr: 9000, airline_fuel_charge_inr: 500 }
+    expect:
+      cash_inr: 3000
+      rules_fired: [demo.cancellation.compensation.short_notice]
+
+  - id: demo_cancellation_long_notice_choice_only
+    facts:
+      event: { type: cancellation, notice_minutes: 4320 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+    expect:
+      cash_inr: 0
+      entitlements: [passenger_choice]
+      rules_fired: [demo.cancellation.long_notice.choice_only]
+
+  - id: demo_missing_fare_blocks_cash
+    description: FICTIONAL. The band fires but its inputs are absent, so no figure is stated.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+    expect:
+      decision: needs_human
+      missing_facts: ["fare.one_way_basic_fare_inr", "fare.airline_fuel_charge_inr"]
+      cash_inr: null
+
+  - id: demo_asserted_cause_without_decisive_fact_blocks
+    description: >-
+      FICTIONAL. The exemption is claimed and the decisive fact is null, so it must refuse rather
+      than exempt. The same property the real pack is held to.
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+      fare: { one_way_basic_fare_inr: 1800, airline_fuel_charge_inr: 400 }
+      cause_evidence:
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: null
+    expect:
+      decision: needs_human
+      blocking_reasons: [MISSING_REQUIRED_FACT]
+      missing_facts: ["cause_evidence.unavoidable_despite_reasonable_measures"]
+      cash_inr: null
+
+  - id: demo_fully_evidenced_exemption_suppresses_cash
+    facts:
+      event: { type: cancellation, notice_minutes: 600 }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+      fare: { one_way_basic_fare_inr: 1800, airline_fuel_charge_inr: 400 }
+      cause_evidence:
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: true
+        evidence_refs: ["demo:fictional-evidence-1"]
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [DEMO_EXTRAORDINARY_CIRCUMSTANCES]
+      rules_fired: [demo.exemption.extraordinary_circumstances]
+
+  - id: demo_excluded_rule_never_evaluates
+    facts:
+      request: { type: cancellation }
+      itinerary: { origin_country: XX, destination_country: XX }
+      operating_carrier: { id: XX1 }
+    expect:
+      excluded_rules: [demo.booking.withdrawn_provision]
+      surfaced_notice: SUPERSESSION_SUSPECTED
+
+  - id: demo_pack_is_rejected_in_verified_mode
+    description: A fictional pack must never satisfy verified mode.
+    mode: verified
+    expect:
+      load_result: rejected
+      reason_code: PACK_NOT_VERIFIED_ELIGIBLE
+
+  - id: demo_pack_is_rejected_in_charter_mode
+    description: >-
+      Charter mode loads dated official guidance. A fictional pack is not that, and loading it
+      there would put invented figures behind the charter badge.
+    mode: charter
+    expect:
+      load_result: rejected
+      reason_code: POLICY_PACK_UNAVAILABLE

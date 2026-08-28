@@ -39,7 +39,6 @@ authorises.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.assurance.authorship import ProposalAuthorship, authorship_constraints
 from app.assurance.checks import dedupe
 from app.assurance.gate import POLICY_BEARING_ACTIONS
-from app.config import PolicyMode, Settings, get_settings, resolve_repo_path
+from app.config import PolicyMode, Settings, get_settings
 from app.errors import PackNotVerifiedEligible, PolicyPackUnavailable
 from app.models.enums import ApplicabilityStatus
 from app.policy.business_constraints import (
@@ -64,8 +63,8 @@ from app.policy.engine import (
     is_evidence_gated,
     states_cash_amount,
 )
-from app.policy.entitlements import CitedEntitlement, calculate
-from app.policy.loader import LoadedPack, load_pack
+from app.policy.entitlements import CitedEntitlement, calculate, load_active_pack
+from app.policy.loader import LoadedPack
 
 #: Why a fact is demanded. Recorded per fact so nobody has to reverse-engineer the reason.
 ORIGIN_APPLICABILITY: Final = "applicability"
@@ -391,12 +390,9 @@ def gate_requirements(
         )
 
     try:
-        loaded = pack or load_pack(
-            pack_dir=resolve_repo_path(Path(active.policy_pack_dir)),
-            pack_id=active.policy_pack_id,
-            version=active.policy_pack_version,
-            mode=active.policy_mode,
-        )
+        # `load_active_pack` is the single place POLICY_MODE resolves to a pack, so demo mode is
+        # honoured here exactly as it is everywhere else rather than in a second code path.
+        loaded = pack or load_active_pack(active)
     except PackNotVerifiedEligible as exc:
         return _blocking(
             action_type=action_type,

@@ -1,0 +1,129 @@
+pack: demo-fixture
+version: "1.0"
+
+# INVENTED FIGURES. Every number here was chosen to make the engine's behaviour visible, and
+# corresponds to no instrument anywhere.
+#
+# `source_clause_refs` is deliberately EMPTY on every rule. A demo fixture cites nothing, and
+# `LoadedPack.citations_permitted` is False for it, so nothing downstream can render a citation.
+# The loader only requires clause refs on an `approved` pack, so an empty list is valid here and
+# would refuse promotion — which is the correct relationship between the two.
+#
+# The shapes exercised, so demo mode proves the engine rather than a subset:
+#   * a banded cash rule with a cap and a least-of formula
+#   * a zero-cash statement for an event class the instrument does not compensate
+#   * a non-cash duty-of-care entitlement
+#   * an evidence-gated exemption that refuses to fire on an assertion alone
+#   * an excluded rule that must never evaluate
+
+rules:
+
+  # -------------------------------------------------------------- delay: care only, no cash
+  - id: demo.delay.care.refreshments
+    status: draft
+    scope: all
+    source_clause_refs: []
+    interpretation: >-
+      FICTIONAL. A delay of 90 minutes or more entitles a checked-in passenger to refreshments.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+        - { fact: passenger.checked_in_on_time, op: eq, value: true }
+        - { fact: event.delay_minutes, op: gte, value: 90 }
+    entitlement:
+      type: meals_refreshments
+      cash: false
+      scales_with: waiting_time
+
+  - id: demo.delay.no_cash_compensation
+    status: draft
+    scope: all
+    source_clause_refs: []
+    interpretation: >-
+      FICTIONAL. Delay attracts care, never cash. Mirrors the real instrument's structure so the
+      demo exercises the same "no payout for delay" path.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: delay }
+    entitlement:
+      type: cash
+      amount_inr: 0
+      basis: no_delay_compensation_provision_in_source
+      cash: true
+
+  # ---------------------------------------------------------------- cancellation: banded cash
+  - id: demo.cancellation.compensation.short_notice
+    status: draft
+    scope: all
+    source_clause_refs: []
+    interpretation: >-
+      FICTIONAL. A cancellation notified less than 24 hours ahead pays the lesser of INR 3,000 and
+      the booked basic fare plus fuel charge.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: event.notice_minutes, op: lt, value: 1440 }
+    entitlement:
+      type: cash
+      cash: true
+      cap_inr: 3000
+      formula: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+
+  - id: demo.cancellation.long_notice.choice_only
+    status: draft
+    scope: all
+    source_clause_refs: []
+    interpretation: >-
+      FICTIONAL. Notified 24 hours or more ahead, the passenger chooses an alternate flight or a
+      refund, and no cash is payable.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: cancellation }
+        - { fact: event.notice_minutes, op: gte, value: 1440 }
+    entitlement:
+      type: passenger_choice
+      options: [alternate_flight, refund]
+      cash: false
+
+  # ------------------------------------------------------------- evidence-gated exemption
+  - id: demo.exemption.extraordinary_circumstances
+    status: draft
+    scope: all
+    source_clause_refs: []
+    interpretation: >-
+      FICTIONAL. Cash is suppressed where the cause was external to the carrier AND unavoidable
+      despite all reasonable measures. Present so demo mode demonstrates that an asserted cause
+      with a missing decisive fact refuses rather than exempting.
+    requires_facts:
+      - cause_evidence.external_to_carrier
+      - cause_evidence.unavoidable_despite_reasonable_measures
+      - cause_evidence.evidence_refs
+    when:
+      all:
+        - { fact: event.type, op: in, value: [delay, cancellation] }
+        - { fact: cause_evidence.external_to_carrier, op: eq, value: true }
+        - { fact: cause_evidence.unavoidable_despite_reasonable_measures, op: eq, value: true }
+    effect:
+      suppresses_entitlement_types: [cash]
+      preserves_entitlement_types: [meals_refreshments]
+      reason_code: DEMO_EXTRAORDINARY_CIRCUMSTANCES
+    on_missing_required_fact: needs_human
+
+  # ---------------------------------------------------------------------- excluded rule
+  - id: demo.booking.withdrawn_provision
+    status: superseded_suspected
+    scope: all
+    source_clause_refs: []
+    interpretation: >-
+      FICTIONAL. A withdrawn provision, present only so demo mode demonstrates that an excluded
+      rule never evaluates and surfaces a supersession notice instead.
+    supersession_note: >-
+      Fictional withdrawal. Excluded from evaluation permanently.
+    excluded_from_evaluation: true
+    when:
+      all:
+        - { fact: request.type, op: eq, value: cancellation }
+    entitlement:
+      type: fee_prohibition
+      cash: false

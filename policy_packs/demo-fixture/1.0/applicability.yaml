@@ -1,0 +1,28 @@
+pack: demo-fixture
+version: "1.0"
+
+# Same required-fact discipline as a real pack, so demo mode exercises the tri-state resolver
+# rather than a shortcut. A missing fact yields `undetermined`, never `not_applicable`.
+required_facts:
+  - itinerary.origin_country
+  - itinerary.destination_country
+  - operating_carrier.id
+  - event.type
+
+conditionally_required_facts:
+  cancellation_compensation:
+    - event.notice_minutes
+    - fare.one_way_basic_fare_inr
+
+# Applies only to the fictional jurisdiction XX, so it can never match a real itinerary by
+# accident. A demo scenario declares origin_country XX explicitly.
+applies_when:
+  any_of:
+    - itinerary.origin_country: XX
+    - operating_carrier.country: XX
+
+scope_notes:
+  - Fictional jurisdiction. Matching a real itinerary would be a defect, not a feature.
+
+on_missing_required_fact: undetermined
+on_undetermined: needs_human

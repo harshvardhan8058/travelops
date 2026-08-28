@@ -1,0 +1,46 @@
+id: demo-fixture
+version: "1.0"
+
+# ============================================================================
+# THIS PACK IS FICTIONAL. IT IS NOT LAW AND IT CITES NOTHING.
+#
+# `POLICY_MODE=demo` exists to prove the engine — the resolver, the rule DSL, the
+# fail-closed gates, the citation *card* — without putting a real authority's
+# figures behind it. Every number below is invented for that purpose, and the
+# jurisdiction code XX and authority name exist nowhere.
+#
+# The loader enforces this rather than trusting the label:
+#   * `demo_fixture: true` is the ONLY thing POLICY_MODE=demo will load, so demo
+#     mode cannot be pointed at the charter pack or any real pack.
+#   * `LoadedPack.citations_permitted` is False for a demo fixture, so nothing
+#     downstream may render a citation for these figures.
+#   * status `draft` computes nothing outside demo mode, and
+#     `verified_mode_eligible: false` keeps it permanently out of verified.
+# ============================================================================
+jurisdiction: XX
+authority: Fictional Aviation Authority of Atlantis (does not exist)
+document: Demo Fixture Rules — invented figures for engine demonstration only
+document_date: 2026-01-01
+currency: INR
+
+# `draft` is the honest status: nothing here was published by anyone, so it can
+# never be quoted and never computes outside demo mode.
+status: draft
+
+demo_fixture: true
+verified_mode_eligible: false
+ui_label: "DEMO FIXTURE · FICTIONAL FIGURES · NOT LAW · CITES NOTHING"
+
+blocks_verified_mode_until:
+  - never; this pack is fictional by design and must never be promoted
+
+precedence:
+  conflict_rules_defined: false
+  on_conflict: needs_human
+
+required_context:
+  - itinerary
+  - operating_carrier
+  - event
+  - notice
+  - fare_components

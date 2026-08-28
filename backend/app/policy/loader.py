@@ -112,6 +112,14 @@ class LoadedPack(BaseModel):
     ui_label: str
     demo_fixture: bool = False
 
+    #: Source-document integrity, read from source-metadata.yaml. The archived primary document
+    #: and its hash are the legal source; extracted text is not. Recorded on every load so a
+    #: dated pack can report the truth about its source without being refused for it.
+    source_archived: bool = False
+    source_content_sha256: str | None = None
+    source_document_verified: bool = False
+    source_integrity_reason: str | None = None
+
     #: Overlap handling. False means an overlap resolves to needs_human rather than a guess.
     conflict_rules_defined: bool = False
     on_conflict: str = "needs_human"
@@ -148,8 +156,17 @@ class LoadedPack(BaseModel):
 
     @property
     def may_be_called_current_law(self) -> bool:
-        """Only an approved, verified-eligible pack may be described as current law."""
-        return self.status is PolicyPackStatus.approved and self.verified_mode_eligible
+        """Only an approved, verified-eligible pack with a verified source may be current law.
+
+        Source integrity is part of this and not a separate courtesy check. A pack whose primary
+        document is unarchived, missing or hash-mismatched has nothing behind its figures, and
+        "approved" recorded in review.yaml is a statement about a document nobody can produce.
+        """
+        return (
+            self.status is PolicyPackStatus.approved
+            and self.verified_mode_eligible
+            and self.source_document_verified
+        )
 
     @property
     def citations_permitted(self) -> bool:
@@ -197,6 +214,112 @@ def compute_pack_hash(directory: Path) -> str:
         digest.update(path.read_bytes() if path.is_file() else b"")
         digest.update(b"\0")
     return digest.hexdigest()[:16]
+
+
+#: Recorded when a pack's primary document has not been archived and hashed yet. Treated as an
+#: absent hash, never as a valid one.
+PENDING_ARCHIVAL: Final = "PENDING_ARCHIVAL"
+
+#: Reason code for a pack whose source document cannot be shown to be the one that was reviewed.
+#: Carried in `details` rather than added to `app/errors.py`, which Stream A owns.
+REASON_SOURCE_DOCUMENT_UNVERIFIED: Final = "SOURCE_DOCUMENT_UNVERIFIED"
+
+_SHA256_HEX_LENGTH: Final = 64
+
+
+def _hash_file(path: Path) -> str:
+    """SHA-256 of a file, read in chunks so a large PDF does not load into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_source_document(*, directory: Path, source: dict[str, Any]) -> tuple[bool, str | None]:
+    """Check the recorded hash against the archived file. Returns `(verified, reason)`.
+
+    Pure of policy: it answers whether the document on disk is the one the metadata claims, and
+    nothing about whether that entitles the pack to anything. `load_pack` decides what to do with
+    the answer, which differs by mode.
+
+    The existing `content_sha256` field and the existing `local_path` are used as they are. No new
+    hash format, no second algorithm: the recorded value must be lowercase SHA-256 hex, which is
+    what `PENDING_ARCHIVAL` is a placeholder for.
+
+    Every failure is a refusal, never a pass with a warning:
+
+      * `archived: false` — nothing has been archived, so there is nothing to verify
+      * `content_sha256` absent, null or PENDING_ARCHIVAL — a missing value is not a valid one
+      * a recorded hash that is not SHA-256 hex — unverifiable by construction
+      * `local_path` absent or missing on disk — the hash refers to a document nobody holds
+      * digest mismatch — the file is not the document that was reviewed
+    """
+    if not bool(source.get("archived", False)):
+        return False, "source document is not archived (`archived: false`)"
+
+    recorded = source.get("content_sha256")
+    if recorded is None or str(recorded).strip() == "":
+        return False, "`content_sha256` is absent, and a missing hash is not a verified one"
+    recorded = str(recorded).strip()
+
+    if recorded == PENDING_ARCHIVAL:
+        return False, f"`content_sha256` is still {PENDING_ARCHIVAL}"
+
+    normalised = recorded.lower()
+    if len(normalised) != _SHA256_HEX_LENGTH or any(
+        character not in "0123456789abcdef" for character in normalised
+    ):
+        return False, f"`content_sha256` '{recorded}' is not SHA-256 hex"
+
+    local_path = source.get("local_path")
+    if not local_path:
+        return False, "`local_path` is absent, so the recorded hash refers to no document"
+
+    document = directory / str(local_path)
+    if not document.is_file():
+        return False, f"archived document '{local_path}' is not present at {document}"
+
+    actual = _hash_file(document)
+    if actual != normalised:
+        return (
+            False,
+            f"archived document '{local_path}' hashes to {actual}, and the pack records "
+            f"{normalised}; this is not the document that was reviewed",
+        )
+
+    return True, None
+
+
+def _reject_for_source_integrity(
+    *,
+    pack_ref: str,
+    status: PolicyPackStatus,
+    mode: PolicyMode,
+    verified: bool,
+    reason: str | None,
+) -> None:
+    """Refuse a load that would present unverifiable figures as reviewed law.
+
+    Applied where the architecture already expects source integrity to matter: verified mode, and
+    any pack claiming `approved`. A dated pack in charter mode records the truth about its source
+    and continues, which is the whole point of the status ladder — the charter's figures are
+    citable and clearly labelled, and its PDF being unarchived is exactly why it is not verified.
+    """
+    if verified:
+        return
+    if mode is not PolicyMode.verified and status is not PolicyPackStatus.approved:
+        return
+
+    raise PackNotVerifiedEligible(
+        f"{pack_ref} cannot be loaded in {mode.value} mode: {reason}",
+        details={
+            "reason_code": REASON_SOURCE_DOCUMENT_UNVERIFIED,
+            "status": status.value,
+            "mode": mode.value,
+            "detail": reason,
+        },
+    )
 
 
 def _reject_for_mode(
@@ -367,6 +490,15 @@ def load_pack(*, pack_dir: Path, pack_id: str, version: str, mode: PolicyMode) -
 
     _validate_rules(pack_ref=pack_ref, rules=rules, status=status, review=review)
 
+    source_verified, source_reason = verify_source_document(directory=directory, source=source)
+    _reject_for_source_integrity(
+        pack_ref=pack_ref,
+        status=status,
+        mode=mode,
+        verified=source_verified,
+        reason=source_reason,
+    )
+
     precedence = manifest.get("precedence") or {}
     document_date = manifest.get("document_date")
 
@@ -382,6 +514,12 @@ def load_pack(*, pack_dir: Path, pack_id: str, version: str, mode: PolicyMode) -
         verified_mode_eligible=verified_eligible,
         ui_label=str(manifest.get("ui_label", "")),
         demo_fixture=demo_fixture,
+        source_archived=bool(source.get("archived", False)),
+        source_content_sha256=(
+            str(source["content_sha256"]) if source.get("content_sha256") is not None else None
+        ),
+        source_document_verified=source_verified,
+        source_integrity_reason=source_reason,
         conflict_rules_defined=bool(precedence.get("conflict_rules_defined", False)),
         on_conflict=str(precedence.get("on_conflict", "needs_human")),
         required_context=list(manifest.get("required_context") or []),

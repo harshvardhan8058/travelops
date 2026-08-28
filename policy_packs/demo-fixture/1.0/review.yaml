@@ -1,0 +1,20 @@
+pack: demo-fixture
+version: "1.0"
+
+# Deliberately unreviewed and unapprovable. There is nothing to review: no instrument, no
+# authority, no source document. `approval: null` keeps the loader's approved-pack precondition
+# satisfied in the only way that is honest here — by never claiming approval.
+review_status: not_applicable
+reviewer_name: null
+reviewer_role: null
+reviewer_organisation: null
+reviewed_at: null
+approval: null
+
+reviewer_instructions: >-
+  Nothing to review. This pack is fictional and must never be promoted past `draft`. If someone
+  proposes approving it, that is the defect.
+
+open_review_questions: []
+
+rule_signoff: []
