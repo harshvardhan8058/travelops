@@ -11,11 +11,11 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Scale } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { clsx } from 'clsx';
 
 import { api, ApiError } from '@/api/client';
-import type { Entitlement, PolicyResponse } from '@/api/types';
+import type { Entitlement } from '@/api/types';
 import {
   EmptyState,
   ErrorState,
@@ -24,42 +24,10 @@ import {
   Panel,
   StateBadge,
 } from '@/components/ui/primitives';
+import { PackStandingBanner } from './PackStanding';
+import { packStanding, SOURCE_INTEGRITY_COPY, summariseApplicability } from './packStanding';
 
 type CauseView = 'recorded' | 'alternative';
-
-/** The pack badge renders `ui_label` verbatim. There is no manual override, ever. */
-function PackStatusBanner({ policy }: { policy: PolicyResponse }) {
-  const verified = policy.pack.status === 'approved' && policy.pack.verified_mode_eligible;
-  return (
-    <div
-      className={clsx(
-        'flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2',
-        verified ? 'border-state-ok/30 bg-state-ok-bg' : 'border-state-warn/30 bg-state-warn-bg',
-      )}
-    >
-      <Scale
-        size={14}
-        strokeWidth={1.5}
-        className={verified ? 'text-state-ok' : 'text-state-warn'}
-        aria-hidden
-      />
-      {/*
-        No `uppercase`: the pack label carries meaningful case ("MoCA", "CAR") and this badge is a
-        citation, not a heading. A CSS transform here would misquote the regulation's own name.
-      */}
-      <span
-        className={clsx('text-label font-medium', verified ? 'text-state-ok' : 'text-state-warn')}
-      >
-        {policy.pack.ui_label}
-      </span>
-      <span className="text-caption text-fg-muted">
-        pack <MonoValue muted>{policy.pack.id}</MonoValue> {policy.pack.version} · status{' '}
-        <MonoValue muted>{policy.pack.status}</MonoValue> · hash{' '}
-        <MonoValue muted>{policy.pack.pack_hash}</MonoValue>
-      </span>
-    </div>
-  );
-}
 
 function EntitlementRow({ entitlement }: { entitlement: Entitlement }) {
   const notOwed = entitlement.outcome === 'not_owed';
@@ -130,6 +98,21 @@ function EntitlementRow({ entitlement }: { entitlement: Entitlement }) {
   );
 }
 
+/**
+ * A cited value beside its label.
+ *
+ * The label is uppercased; the value never is. A regulation's name, a document title and a hex digest
+ * are quotations, and a CSS transform on any of them misreports what the contract returned.
+ */
+function Cited({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="flex items-baseline gap-1.5">
+      <span className="text-caption uppercase text-fg-muted">{label}</span>
+      {children}
+    </span>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-2">
@@ -175,38 +158,118 @@ export function PolicyScreen() {
   const comparison = policy.cause_comparison;
   const alternative = (comparison?.['alternative'] ?? null) as Record<string, unknown> | null;
   const comparisonEnabled = Boolean(comparison?.['enabled']) && alternative !== null;
-  const missingFacts = policy.applicability.flatMap((entry) => entry.missing_facts ?? []);
+  /*
+   * The pack's standing, derived once from the fields the contract published. Nothing on this screen
+   * recomputes it, and the shell chip renders the same module.
+   */
+  const standing = packStanding(policy.pack);
+  const applicability = summariseApplicability(policy.applicability);
+  const missingFacts = applicability.missingFacts;
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
       <Panel>
-        <PackStatusBanner policy={policy} />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
-          <span className="text-caption uppercase text-fg-muted">
-            mode <MonoValue muted>{policy.policy_mode}</MonoValue>
-          </span>
-          <span className="text-caption uppercase text-fg-muted">
-            authority <span className="text-fg-secondary">{policy.pack.authority}</span>
-          </span>
-          <span className="text-caption uppercase text-fg-muted">
-            document <span className="text-fg-secondary">{policy.pack.document}</span>
-          </span>
-          <span className="text-caption uppercase text-fg-muted">
-            source hash <MonoValue muted>{policy.pack.source_hash}</MonoValue>
-          </span>
+        {/* One standing, one derivation, shared with the shell chip. */}
+        <PackStandingBanner
+          uiLabel={policy.pack.ui_label}
+          standing={standing}
+          packId={policy.pack.id}
+          packVersion={policy.pack.version}
+        />
+        {/*
+          Provenance, rendered through `Cited` so `uppercase` lands on the LABEL and never on the
+          value. It previously sat on the wrapper, which case-transformed everything inside it: the
+          authority's name, the document's title and — worst — the hex `pack_hash`, so the citation on
+          screen did not match the digest that was recorded. Same defect class as rendering "MoCA" as
+          "MOCA", and the reason this row is a component rather than five hand-built spans.
+        */}
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-3 py-2">
+          <Cited label="mode">
+            <MonoValue muted>{policy.policy_mode}</MonoValue>
+          </Cited>
+          <Cited label="authority">
+            <span className="text-caption text-fg-secondary">{policy.pack.authority}</span>
+          </Cited>
+          <Cited label="document">
+            <span className="text-caption text-fg-secondary">{policy.pack.document}</span>
+          </Cited>
+          <Cited label="pack hash">
+            <MonoValue muted>{policy.pack.pack_hash}</MonoValue>
+          </Cited>
+          <Cited label="source hash">
+            <MonoValue muted>{policy.pack.source_hash}</MonoValue>
+          </Cited>
         </div>
+        {/*
+          Source-document integrity, reported from the digest the contract published. The gate that
+          refuses a verified load on a placeholder digest is Stream B's (docs/38 G3); this only states
+          which of the three cases the recorded value falls in, so a reader is not left to recognise
+          `PENDING_ARCHIVAL` on sight.
+        */}
+        <p
+          className={clsx(
+            'flex items-start gap-2 border-t border-border-subtle px-3 py-1.5 text-caption',
+            standing.sourceIntegrity === 'archived' ? 'text-fg-muted' : 'text-state-warn',
+          )}
+        >
+          {standing.sourceIntegrity !== 'archived' && (
+            <AlertTriangle size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
+          )}
+          <span>{SOURCE_INTEGRITY_COPY[standing.sourceIntegrity]}</span>
+        </p>
       </Panel>
 
-      {missingFacts.length > 0 && (
+      {/*
+        The applicability tri-state. `undetermined` is the contract's own third answer and this screen
+        used to drop it, reading only `missing_facts` — so an undetermined row that listed no missing
+        fact rendered as nothing at all. Each state is now counted and named.
+      */}
+      {(applicability.hasOpenQuestion || missingFacts.length > 0) && (
         <Panel>
-          <p className="flex items-start gap-2 px-3 py-2 text-caption text-state-warn">
-            <AlertTriangle size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
-            <span>
-              Required facts are missing, so the result is{' '}
-              <MonoValue className="text-state-warn">needs_human</MonoValue> rather than a guessed
-              number: {missingFacts.map((fact) => fact).join(', ')}
-            </span>
-          </p>
+          <div className="flex flex-col gap-1 px-3 py-2">
+            <p className="flex items-start gap-2 text-caption text-state-warn">
+              <AlertTriangle size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
+              <span>
+                {applicability.hasOpenQuestion ? (
+                  <>
+                    Applicability is not settled for{' '}
+                    <MonoValue className="text-state-warn">
+                      {applicability.undetermined + applicability.unknown}
+                    </MonoValue>{' '}
+                    of <MonoValue muted>{applicability.total}</MonoValue> assessed pack
+                    {applicability.total === 1 ? '' : 's'}, so no authoritative figure follows from
+                    those rows.
+                  </>
+                ) : (
+                  <>
+                    Required facts are missing, so the result is{' '}
+                    <MonoValue className="text-state-warn">needs_human</MonoValue> rather than a
+                    guessed number.
+                  </>
+                )}
+              </span>
+            </p>
+            <dl className="flex flex-wrap gap-x-4 gap-y-1 text-caption">
+              {(
+                [
+                  ['applicable', applicability.applicable],
+                  ['not applicable', applicability.notApplicable],
+                  ['undetermined', applicability.undetermined],
+                  ['status not published', applicability.unknown],
+                ] as const
+              ).map(([label, count]) => (
+                <div key={label} className="flex items-baseline gap-1.5">
+                  <dt className="uppercase text-fg-muted">{label}</dt>
+                  <dd>
+                    <MonoValue muted>{count}</MonoValue>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {missingFacts.length > 0 && (
+              <p className="text-caption text-fg-muted">Missing facts: {missingFacts.join(', ')}</p>
+            )}
+          </div>
         </Panel>
       )}
 

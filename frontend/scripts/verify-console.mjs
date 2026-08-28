@@ -72,7 +72,18 @@ const ROUTES = [
     expectExactCase: ['fallback-playbook'],
   },
   { path: '/what-if/current', name: 'What-If', expect: ['what-if'] },
-  { path: '/policy/INC-2026-0820-VOBL-01', name: 'Policy', expect: [] },
+  {
+    path: '/policy/INC-2026-0820-VOBL-01',
+    name: 'Policy',
+    // This route asserted nothing, so an empty policy card passed. The pack's real ladder rung and
+    // the derived standing beside it now both have to reach the DOM, which is what proves the badge
+    // is read from the contract rather than assumed from the runtime mode.
+    expect: ['official_guidance_dated', 'official but dated', 'PENDING_ARCHIVAL'],
+    // Contract literals that must not be case-transformed: the ladder token a replay compares, the
+    // instrument's own name, and the runtime mode. "MOCA" for "MoCA" is the defect this assertion
+    // exists for, and the provenance row was uppercasing its values the same way.
+    expectExactCase: ['official_guidance_dated', 'MoCA', 'charter'],
+  },
   { path: '/sources', name: 'Provenance ledger', expect: [] },
 ];
 

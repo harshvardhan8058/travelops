@@ -27,6 +27,7 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 import { MonoValue, ProvenanceDot, StateBadge } from './primitives';
+import { PackStandingChip } from '@/features/policy-citation/PackStanding';
 import type { SystemMode } from '@/api/types';
 
 const NAV = [
@@ -103,22 +104,13 @@ function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
       </div>
 
       {/*
-        Renders the pack's real status verbatim. Never upgraded by hand, and never case-transformed:
-        the label is a regulation's name ("MoCA", "CAR"), so `uppercase` would misquote it.
+        The pack label, rendered verbatim through the single standing component.
+        This chip used to colour itself from `mode.policy_mode === 'verified'` — the requested runtime
+        mode, which says nothing about the pack that actually loaded. A verified mode over a draft pack
+        painted it green. `/system/mode` publishes no pack status at all, so this surface now makes no
+        standing claim and points at the one that does.
       */}
-      {mode?.policy_pack?.ui_label && (
-        <span
-          className={clsx(
-            'truncate rounded-sm border px-1.5 py-0.5 text-caption',
-            mode.policy_mode === 'verified'
-              ? 'border-state-ok/30 bg-state-ok-bg text-state-ok'
-              : 'border-state-warn/30 bg-state-warn-bg text-state-warn',
-          )}
-          title={mode.policy_pack.ui_label}
-        >
-          {mode.policy_pack.ui_label}
-        </span>
-      )}
+      <PackStandingChip uiLabel={mode?.policy_pack?.ui_label} />
 
       <div className="ml-auto flex items-center gap-3">
         {mode && (
