@@ -78,7 +78,19 @@ const ROUTES = [
     // This route asserted nothing, so an empty policy card passed. The pack's real ladder rung and
     // the derived standing beside it now both have to reach the DOM, which is what proves the badge
     // is read from the contract rather than assumed from the runtime mode.
-    expect: ['official_guidance_dated', 'official but dated', 'PENDING_ARCHIVAL'],
+    //
+    // These assert the pack's ladder rung, the standing derived from it, and that the source-hash row
+    // is present. They deliberately do NOT pin the source hash's VALUE.
+    //
+    // This route asserted `PENDING_ARCHIVAL` and failed against the real G4 endpoint, which publishes
+    // `source_hash: null` on purpose — `schemas/policy.py` calls that field the SHA-256 of the
+    // archived document, `PENDING_ARCHIVAL` is a sentinel rather than a digest, and
+    // `test_the_source_hash_is_absent_rather_than_a_placeholder` locks the null in place. The token
+    // could therefore never reach the DOM. Pinning it was also wrong in a second way: it is a value
+    // whose entire purpose is to change, so the gate would have broken again the day the document is
+    // archived. The three integrity states are pinned in packStanding.test.ts, where a state machine
+    // belongs; this gate checks the structure that holds in all of them.
+    expect: ['official_guidance_dated', 'official but dated', 'source hash'],
     // Contract literals that must not be case-transformed: the ladder token a replay compares, the
     // instrument's own name, and the runtime mode. "MOCA" for "MoCA" is the defect this assertion
     // exists for, and the provenance row was uppercasing its values the same way.

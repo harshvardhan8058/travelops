@@ -1042,9 +1042,17 @@ export interface PolicyPackInfo {
   /** Rendered verbatim. There is no manual override. */
   ui_label: string;
   authority: string;
-  document: string;
+  /** `null` when the pack records no document title. */
+  document: string | null;
   pack_hash: string;
-  source_hash: string;
+  /**
+   * SHA-256 of the archived source document, or `null` when none has been recorded.
+   *
+   * The real endpoint sends `null` rather than echoing the pack's `PENDING_ARCHIVAL` sentinel, on the
+   * grounds that a sentinel is not a digest. So this is genuinely nullable and the console must render
+   * the absence rather than a blank.
+   */
+  source_hash: string | null;
 }
 
 export interface Entitlement {

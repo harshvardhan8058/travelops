@@ -161,6 +161,26 @@ describe('packStanding — source document integrity', () => {
     expect(packStanding({ status: 'approved', source_hash: null }).sourceHash).toBeNull();
   });
 
+  it('handles the real endpoint shape: a dated pack with no digest published at all', () => {
+    /*
+     * The live contract for the charter pack, verified against the running API:
+     *   status official_guidance_dated · verified_mode_eligible false · source_hash null
+     * The endpoint publishes null rather than echoing the pack's PENDING_ARCHIVAL sentinel, because
+     * that field is documented as a SHA-256 and a sentinel is not one.
+     */
+    const standing = packStanding({
+      status: 'official_guidance_dated',
+      verified_mode_eligible: false,
+      source_hash: null,
+    });
+    expect(standing.kind).toBe('official_dated');
+    expect(standing.sourceIntegrity).toBe('unknown');
+    expect(standing.sourceHash).toBeNull();
+    // Unknown source integrity must not drag the ladder rung down, and must not read as archived.
+    expect(standing.isUnknown).toBe(false);
+    expect(SOURCE_INTEGRITY_COPY[standing.sourceIntegrity]).toMatch(/unknown/i);
+  });
+
   it('keeps source integrity independent of the review ladder', () => {
     // An approved, eligible pack whose source was never archived is still verified on the ladder;
     // the two facts are reported separately, exactly as docs/38 §2 keeps them separate.
@@ -347,6 +367,39 @@ describe('no surface derives policy standing for itself', () => {
   it('keeps the comment that records why the inference was removed', () => {
     // The fix is only durable if the reason survives with it.
     expect(shellRaw).toMatch(/policy_mode === 'verified'/);
+  });
+
+  /**
+   * The browser gate must not pin a value whose purpose is to change.
+   *
+   * `verify-console.mjs` asserted `PENDING_ARCHIVAL` on the Policy route. The real G4 endpoint
+   * publishes `source_hash: null` deliberately — a sentinel is not a SHA-256, and a backend e2e test
+   * locks the null — so the token could never appear. It was doubly wrong: even once published it
+   * would vanish the day the document is archived. Structure is asserted there; the state machine is
+   * asserted here.
+   */
+  it('the browser gate does not pin the transient source-hash sentinel', () => {
+    const verifier = readFileSync(
+      new URL('../../../scripts/verify-console.mjs', import.meta.url),
+      'utf8',
+    );
+    const policyRoute = verifier.slice(
+      verifier.indexOf("name: 'Policy'"),
+      verifier.indexOf("name: 'Provenance ledger'"),
+    );
+    expect(policyRoute).not.toMatch(/expect(ExactCase)?:[^\]]*PENDING_ARCHIVAL/);
+    // The stable assertions are still in place.
+    expect(policyRoute).toMatch(/official_guidance_dated/);
+    expect(policyRoute).toMatch(/source hash/);
+  });
+
+  it('the policy screen names an absent contract value instead of rendering a blank', () => {
+    // `source_hash` is null on the real endpoint, so the raw interpolation left the label over an
+    // empty space. Every nullable pack field now goes through `Recorded`.
+    expect(screen).toMatch(/function Recorded\(/);
+    expect(screen).toMatch(/not recorded/);
+    expect(screen).not.toMatch(/<MonoValue muted>\{policy\.pack\.source_hash\}<\/MonoValue>/);
+    expect(screen).toMatch(/<Recorded\s+value=\{policy\.pack\.source_hash\}/);
   });
 
   it('introduces no fixture path in the policy feature or the shell', () => {

@@ -113,6 +113,39 @@ function Cited({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/**
+ * A contract value, or a named absence when it published none.
+ *
+ * Several fields on the pack contract are nullable, and rendering `null` leaves a label sitting over
+ * nothing — which reads as a broken screen rather than as "the contract did not supply this". Naming
+ * the absence is the same rule `Metric` enforces for every figure.
+ */
+function Recorded({
+  value,
+  mono,
+  absentTitle,
+}: {
+  value: string | null | undefined;
+  mono?: boolean;
+  absentTitle?: string;
+}) {
+  if (value === null || value === undefined || value.trim() === '') {
+    return (
+      <span
+        className="text-caption text-fg-muted"
+        title={absentTitle ?? 'Not published by this endpoint. An absent value, not an empty one.'}
+      >
+        not recorded
+      </span>
+    );
+  }
+  return mono ? (
+    <MonoValue muted>{value}</MonoValue>
+  ) : (
+    <span className="text-caption text-fg-secondary">{value}</span>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-2">
@@ -188,16 +221,26 @@ export function PolicyScreen() {
             <MonoValue muted>{policy.policy_mode}</MonoValue>
           </Cited>
           <Cited label="authority">
-            <span className="text-caption text-fg-secondary">{policy.pack.authority}</span>
+            <Recorded value={policy.pack.authority} />
           </Cited>
           <Cited label="document">
-            <span className="text-caption text-fg-secondary">{policy.pack.document}</span>
+            <Recorded value={policy.pack.document} />
           </Cited>
           <Cited label="pack hash">
-            <MonoValue muted>{policy.pack.pack_hash}</MonoValue>
+            <Recorded value={policy.pack.pack_hash} mono />
           </Cited>
+          {/*
+            `source_hash` is genuinely null on the real endpoint, which publishes no digest rather
+            than echoing the pack's PENDING_ARCHIVAL sentinel. Rendering the raw value left the label
+            standing over an empty space, so an absent digest looked like a rendering fault. It is
+            named instead — the same rule `Metric` applies to every absent figure.
+          */}
           <Cited label="source hash">
-            <MonoValue muted>{policy.pack.source_hash}</MonoValue>
+            <Recorded
+              value={policy.pack.source_hash}
+              mono
+              absentTitle="No archived source digest is published for this pack. An absent value, not an empty one."
+            />
           </Cited>
         </div>
         {/*
