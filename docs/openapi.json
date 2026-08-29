@@ -2957,6 +2957,497 @@
         "title": "PlanTaskSummary",
         "type": "object"
       },
+      "PolicyApplicability": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "additionalProperties": true,
+            "title": "Basis",
+            "type": "object"
+          },
+          "missing_facts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Facts",
+            "type": "array"
+          },
+          "pack_id": {
+            "title": "Pack Id",
+            "type": "string"
+          },
+          "pack_version": {
+            "title": "Pack Version",
+            "type": "string"
+          },
+          "required_facts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Facts",
+            "type": "array"
+          },
+          "resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver Version"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pack_id",
+          "pack_version",
+          "status"
+        ],
+        "title": "PolicyApplicability",
+        "type": "object"
+      },
+      "PolicyCauseAlternative": {
+        "additionalProperties": false,
+        "properties": {
+          "cash_inr": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Inr"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "external_to_carrier": {
+            "title": "External To Carrier",
+            "type": "boolean"
+          },
+          "formula_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula Used"
+          },
+          "missing_facts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Facts",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "operational_cause": {
+            "title": "Operational Cause",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "rules_fired": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules Fired",
+            "type": "array"
+          },
+          "source_clause_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Clause Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event_type",
+          "operational_cause",
+          "external_to_carrier",
+          "outcome",
+          "note"
+        ],
+        "title": "PolicyCauseAlternative",
+        "type": "object"
+      },
+      "PolicyCauseAssessment": {
+        "additionalProperties": false,
+        "description": "What is *recorded* about the cause, not what the trigger implies.\n\nEvery flag is `bool | None`. `None` means no assessment exists, which is a different statement\nfrom `false` \u2014 and the difference decides whether an exemption applies.",
+        "properties": {
+          "clearly_attributable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clearly Attributable"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "external_to_carrier": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External To Carrier"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "operational_cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operational Cause"
+          },
+          "unavoidable_despite_reasonable_measures": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavoidable Despite Reasonable Measures"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "PolicyCauseAssessment",
+        "type": "object"
+      },
+      "PolicyCauseComparison": {
+        "additionalProperties": false,
+        "description": "The same incident re-evaluated under a substituted cause.\n\nA bounded, zero-write re-evaluation of the same pack over altered facts \u2014 the P2-D2 pattern. It\nis not a forecast and not a second ruleset: identical rules, different inputs.",
+        "properties": {
+          "alternative": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyCauseAlternative"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "description"
+        ],
+        "title": "PolicyCauseComparison",
+        "type": "object"
+      },
+      "PolicyEntitlement": {
+        "additionalProperties": false,
+        "description": "One entitlement, with the rules and clauses that produced it.\n\n`outcome` carries the tri-state. `not_owed` is a computed result; `undetermined` means the\nengine could not decide and names what was absent. Neither is rendered as zero.",
+        "properties": {
+          "amount_inr": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Inr"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "formula_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formula Used"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "rules_fired": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules Fired",
+            "type": "array"
+          },
+          "source_clause_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Clause Refs",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "outcome",
+          "explanation"
+        ],
+        "title": "PolicyEntitlement",
+        "type": "object"
+      },
+      "PolicyExcludedRule": {
+        "additionalProperties": false,
+        "description": "A rule the pack itself withholds, with the reason. Shown, never silently dropped.",
+        "properties": {
+          "evaluated": {
+            "const": false,
+            "default": false,
+            "title": "Evaluated",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "rule_key": {
+            "title": "Rule Key",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_key",
+          "status",
+          "reason"
+        ],
+        "title": "PolicyExcludedRule",
+        "type": "object"
+      },
+      "PolicyPackInfo": {
+        "additionalProperties": false,
+        "description": "Pack identity and standing, read from the pack rather than hardcoded.",
+        "properties": {
+          "authority": {
+            "title": "Authority",
+            "type": "string"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "pack_hash": {
+            "title": "Pack Hash",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "ui_label": {
+            "title": "Ui Label",
+            "type": "string"
+          },
+          "verified_mode_eligible": {
+            "title": "Verified Mode Eligible",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "verified_mode_eligible",
+          "ui_label",
+          "authority",
+          "pack_hash"
+        ],
+        "title": "PolicyPackInfo",
+        "type": "object"
+      },
+      "PolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyApplicability"
+            },
+            "title": "Applicability",
+            "type": "array"
+          },
+          "blocking_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "cause_assessment": {
+            "$ref": "#/components/schemas/PolicyCauseAssessment"
+          },
+          "cause_comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyCauseComparison"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "entitlements": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyEntitlement"
+            },
+            "title": "Entitlements",
+            "type": "array"
+          },
+          "event": {
+            "additionalProperties": true,
+            "title": "Event",
+            "type": "object"
+          },
+          "excluded_rules": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyExcludedRule"
+            },
+            "title": "Excluded Rules",
+            "type": "array"
+          },
+          "generated_by": {
+            "title": "Generated By",
+            "type": "string"
+          },
+          "missing_facts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Facts",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "pack": {
+            "$ref": "#/components/schemas/PolicyPackInfo"
+          },
+          "policy_mode": {
+            "title": "Policy Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_by",
+          "note",
+          "policy_mode",
+          "pack",
+          "cause_assessment",
+          "disclaimer"
+        ],
+        "title": "PolicyResponse",
+        "type": "object"
+      },
       "Provenance": {
         "properties": {
           "is_stale": {
@@ -5023,7 +5514,8 @@
     },
     "/api/v1/incidents/{incident_id}/policy": {
       "get": {
-        "operationId": "get_policy_api_v1_incidents__incident_id__policy_get",
+        "description": "Evaluate the active pack against this incident's recorded facts. Read-only.\n\nNothing is persisted: G6 (recording the evaluation and clause text) is Stream C's, and until it\nlands this recomputes from the pack on each request. That keeps one source of truth rather than\na cache that can disagree with it.",
+        "operationId": "get_incident_policy_api_v1_incidents__incident_id__policy_get",
         "parameters": [
           {
             "in": "path",
@@ -5040,7 +5532,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Policy Api V1 Incidents  Incident Id  Policy Get"
+                  "$ref": "#/components/schemas/PolicyResponse"
                 }
               }
             },
@@ -5057,9 +5549,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Policy evaluation [fixture]",
+        "summary": "Cited entitlement evaluation for one incident",
         "tags": [
-          "fixtures"
+          "policy"
         ]
       }
     },

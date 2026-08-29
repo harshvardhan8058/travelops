@@ -12,8 +12,12 @@ Two absences are deliberate and load-bearing:
   that is a legal exemption and inferring one from an operational label is exactly the inference the
   compensation service promises never to make. So the block reports what is *recorded*, and when
   nothing is recorded it says `undetermined`.
-* **`pack.source_hash`** is the archived source-document hash. Nothing in the loader exposes one yet
-  (that is G3, Stream B), so it is `null` here rather than echoed from a literal.
+* **`pack.source_hash`** is the digest the pack records for its primary document, passed through
+  verbatim. It was `null` here while nothing in the loader exposed one; G3 (Stream B) now publishes
+  it as `LoadedPack.source_content_sha256`, so withholding it would hide a fact the pack states.
+  For an unarchived document that value is the `PENDING_ARCHIVAL` sentinel, and `null` is reserved
+  for a pack that records no digest at all — two different states, which the console reports
+  differently.
 
 Owner: Stream A. Every figure originates in Stream B's policy engine.
 """
@@ -39,8 +43,9 @@ class PolicyPackInfo(BaseModel):
     authority: str
     document: str | None = None
     pack_hash: str
-    #: SHA-256 of the archived source document. `null` until G3 records one; never a placeholder
-    #: invented at this layer.
+    #: The digest the pack records for its primary document, verbatim — including the
+    #: `PENDING_ARCHIVAL` sentinel while that document is unarchived. `null` only when the pack
+    #: records no digest at all. Never composed or normalised here.
     source_hash: str | None = None
 
 

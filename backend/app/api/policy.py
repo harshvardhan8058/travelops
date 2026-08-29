@@ -238,8 +238,13 @@ async def get_incident_policy(
             authority=pack.authority,
             document=pack.document,
             pack_hash=pack.pack_hash,
-            # G3 (Stream B) records the archived source hash. Absent, not a placeholder.
-            source_hash=None,
+            # The digest the pack records, verbatim. G3 (Stream B) publishes it on the pack as
+            # `source_content_sha256`, so this no longer has to withhold it: for the charter pack
+            # that value is the `PENDING_ARCHIVAL` sentinel, and reporting it is not inventing
+            # provenance — it is the difference between "no digest recorded at all" and "digest
+            # explicitly pending archival", which the console renders as two different states.
+            # Whether any digest permits verified mode remains Stream B's gate.
+            source_hash=pack.source_content_sha256,
         ),
         applicability=applicability,
         event=dict(facts.get("event") or {}),

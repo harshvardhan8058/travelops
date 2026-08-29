@@ -138,10 +138,37 @@ class TestUnknownStaysUnknown:
             assert rule["evaluated"] is False
             assert rule["reason"]
 
-    def test_the_source_hash_is_absent_rather_than_a_placeholder(self, client, incident):
-        """Nothing exposes an archived source hash yet (G3, Stream B), so it must be null."""
+    def test_the_source_hash_is_the_digest_the_pack_records(self, client, incident):
+        """Passed through verbatim from G3's `source_content_sha256`, sentinel included.
+
+        This assertion previously required `null`, which was correct only while nothing published a
+        source digest. G3 landed and the endpoint kept returning `null`, so the console could not
+        tell "no digest recorded" from "digest pending archival" — it reported the pack's source
+        integrity as `unknown` and the `PENDING_ARCHIVAL` sentinel never reached the DOM.
+        """
+        from app.policy.entitlements import load_active_pack
+        from app.policy.loader import PENDING_ARCHIVAL
+
         body = client.get(f"{PREFIX}/incidents/{incident}/policy").json()
-        assert body["pack"]["source_hash"] is None
+        pack = load_active_pack()
+
+        assert body["pack"]["source_hash"] == pack.source_content_sha256
+        # The charter pack's primary document is not archived, so the recorded digest is the
+        # sentinel. Asserted against the loader's own constant, not a copy of the string.
+        assert body["pack"]["source_hash"] == PENDING_ARCHIVAL
+        assert pack.source_document_verified is False
+
+    def test_the_source_hash_is_not_the_pack_label(self, client, incident):
+        """Two different fields, and conflating them is what made this look like a UI defect.
+
+        `ui_label` ends in "pending CAR verification"; `source_hash` is the document digest. A badge
+        reading the label is not evidence that the digest reached the response.
+        """
+        body = client.get(f"{PREFIX}/incidents/{incident}/policy").json()
+
+        assert body["pack"]["source_hash"] != body["pack"]["ui_label"]
+        assert "pending CAR verification" in body["pack"]["ui_label"]
+        assert "CAR" not in (body["pack"]["source_hash"] or "")
 
 
 class TestTheCauseComparisonIsAReEvaluation:
