@@ -458,12 +458,46 @@ def resolve_modes(settings: Settings) -> ResolvedModes:
     # ---------------------------------------------------------------- policy
     policy = settings.policy_mode
     if policy is PolicyMode.verified:
-        pack_dir = settings.policy_pack_dir / settings.policy_pack_id / settings.policy_pack_version
-        raise ConfigurationError(
-            "POLICY_MODE=verified requires an approved primary-source pack whose "
-            f"verified_mode_eligible is true. {pack_dir} is not eligible "
-            "(PACK_NOT_VERIFIED_ELIGIBLE). Use POLICY_MODE=charter or demo."
-        )
+        # Ask the loader, do not pre-judge.
+        #
+        # This branch used to raise unconditionally, which hardcoded "verified is unreachable"
+        # into the config layer and would have kept refusing even after a genuinely approved,
+        # source-verified pack existed. The loader is the single source of truth for eligibility:
+        # it enforces status=approved, verified_mode_eligible, a named reviewer and approval, a
+        # source_clause_ref on every computational rule, and — in verified mode — a matching
+        # archived source-document hash. Startup consults it so that an eligible pack is admitted
+        # and an ineligible one is refused for the loader's own reason, not a guess made here.
+        #
+        # Failing closed is preserved exactly: with the packs that exist today the loader still
+        # raises PackNotVerifiedEligible (status not approved / not verified_mode_eligible) or
+        # PolicyPackUnavailable, and both are translated into the same fatal ConfigurationError
+        # carrying the loader's reason code. The refusal is no longer fabricated by config; it is
+        # reported from the loader. Nothing is degraded and nothing verified-eligible is invented.
+        #
+        # Imported lazily: `app.policy.loader` imports `PolicyMode` from this module, so a
+        # top-level import would be circular.
+        from app.errors import PackNotVerifiedEligible, PolicyPackUnavailable
+        from app.policy.loader import load_pack
+
+        try:
+            load_pack(
+                pack_dir=resolve_repo_path(Path(settings.policy_pack_dir)),
+                pack_id=settings.policy_pack_id,
+                version=settings.policy_pack_version,
+                mode=PolicyMode.verified,
+            )
+        except (PackNotVerifiedEligible, PolicyPackUnavailable) as exc:
+            # `.code` is the loader's stable reason code (PACK_NOT_VERIFIED_ELIGIBLE or
+            # POLICY_PACK_UNAVAILABLE). Preserving it in the message keeps the refusal machine-
+            # readable and keeps the fail-closed guard test — which matches on the code — honest.
+            pack_ref = (
+                f"{settings.policy_pack_id}@{settings.policy_pack_version} "
+                f"under {resolve_repo_path(Path(settings.policy_pack_dir))}"
+            )
+            raise ConfigurationError(
+                f"POLICY_MODE=verified refused for {pack_ref}: {exc} ({exc.code}). "
+                "Use POLICY_MODE=charter or demo until an approved primary-source pack is in place."
+            ) from exc
 
     return ResolvedModes(
         llm=llm,
