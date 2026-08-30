@@ -24,7 +24,7 @@ import {
   Panel,
   StateBadge,
 } from '@/components/ui/primitives';
-import { PackStandingBanner } from './PackStanding';
+import { PackStandingBanner } from './PackStandingView';
 import { packStanding, SOURCE_INTEGRITY_COPY, summariseApplicability } from './packStanding';
 
 type CauseView = 'recorded' | 'alternative';
