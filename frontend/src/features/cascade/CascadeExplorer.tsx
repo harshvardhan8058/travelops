@@ -27,7 +27,7 @@ import { Metric, MetricTile } from '@/components/ui/Metric';
 import { countDerivation } from '@/components/ui/derivation';
 import { GraphEdge, GraphLegend, GraphNode, GraphSurface } from '@/components/ui/Graph';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
-import { layoutServerGraph } from './layout';
+import { edgeConnectsNode, layoutServerGraph, type CascadeEdge } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
 import { GroupRunControl } from './GroupRunControl';
 import { WhatIfPanel } from './WhatIfPanel';
@@ -136,15 +136,15 @@ export function CascadeExplorer() {
   // Edges belonging to the selected hop or node, for emphasis. Opacity and stroke only.
   // `mechanism` is `string` rather than `PairingMechanism`: the server projection carries
   // connection and accommodation mechanisms alongside the four crew ones.
-  const emphasisFor = (edgeId: string, mechanism: string): 'on' | 'off' | 'neutral' => {
+  const emphasisFor = (edge: CascadeEdge): 'on' | 'off' | 'neutral' => {
     const hopMatch =
       selectedHop === 1
-        ? edgeId.startsWith('event:')
+        ? edge.id.startsWith('event:')
         : selectedHop === 2
-          ? !edgeId.startsWith('event:')
+          ? !edge.id.startsWith('event:')
           : null;
-    const mechanismMatch = selectedMechanism ? mechanism === selectedMechanism : null;
-    const nodeMatch = selectedNode ? edgeId.includes(selectedNode.split(':')[1] ?? '') : null;
+    const mechanismMatch = selectedMechanism ? edge.mechanism === selectedMechanism : null;
+    const nodeMatch = selectedNode ? edgeConnectsNode(edge, selectedNode) : null;
 
     const signals = [hopMatch, mechanismMatch, nodeMatch].filter((s) => s !== null);
     if (signals.length === 0) return 'neutral';
@@ -224,11 +224,7 @@ export function CascadeExplorer() {
                     ariaLabel={`Cascade for ${group.reference}: ${layout.nodes.length} nodes across trigger, flights and crew pairings`}
                   >
                     {layout.edges.map((edge) => (
-                      <GraphEdge
-                        key={edge.id}
-                        edge={edge}
-                        emphasis={emphasisFor(edge.id, edge.mechanism)}
-                      />
+                      <GraphEdge key={edge.id} edge={edge} emphasis={emphasisFor(edge)} />
                     ))}
                     {layout.nodes.map((node, index) => (
                       <GraphNode
