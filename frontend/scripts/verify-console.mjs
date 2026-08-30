@@ -20,11 +20,10 @@
  * Requires `playwright` and a Chromium build. Not part of `npm test`: it needs a running stack, so
  * it is a verification step rather than a unit test.
  *
- * `playwright` is deliberately NOT a declared dependency. It pulls a browser download on install,
- * and making every `npm install` — including the demo machine's, possibly offline — depend on that
- * to build a frontend that does not need it is the wrong trade. It is loaded dynamically instead, so
- * an absent install produces the one-line instruction below rather than an ERR_MODULE_NOT_FOUND
- * stack trace that reads like a broken repository.
+ * `playwright` is pinned as a development dependency so its Chromium revision is reproducible. The
+ * web image installs that matching browser and its Linux runtime dependencies during the image build;
+ * it is loaded dynamically here so installs that intentionally omit development dependencies still
+ * produce the one-line instruction below instead of an ERR_MODULE_NOT_FOUND stack trace.
  *
  * Owner: Stream D.
  */
@@ -44,6 +43,8 @@ try {
 }
 
 const BASE = process.argv[2] ?? 'http://127.0.0.1:5173';
+const BROWSER_API_BASE = process.env.VITE_API_BASE_URL?.replace(/\/$/, '');
+const VERIFY_API_BASE = process.env.VERIFY_API_BASE_URL?.replace(/\/$/, '');
 /** @type {{path: string, name: string, expect: string[], expectExactCase?: string[]}[]} */
 const ROUTES = [
   { path: '/', name: 'Command Center', expect: ['604', '22'] },
@@ -189,6 +190,19 @@ function record(state, name, detail = '') {
 
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+
+// Vite's browser-facing API URL uses host loopback so the normal host browser reaches the published
+// API port. Chromium running inside the web container needs Compose service DNS instead. Rewrite only
+// verifier traffic; the application bundle and its runtime configuration remain unchanged.
+if (BROWSER_API_BASE && VERIFY_API_BASE && BROWSER_API_BASE !== VERIFY_API_BASE) {
+  await context.route(`${BROWSER_API_BASE}/**`, async (route) => {
+    const requestUrl = route.request().url();
+    const response = await route.fetch({
+      url: `${VERIFY_API_BASE}${requestUrl.slice(BROWSER_API_BASE.length)}`,
+    });
+    await route.fulfill({ response });
+  });
+}
 
 for (const route of ROUTES) {
   const page = await context.newPage();
