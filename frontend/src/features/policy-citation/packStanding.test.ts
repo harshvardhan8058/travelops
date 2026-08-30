@@ -352,8 +352,8 @@ describe('no surface derives policy standing for itself', () => {
   });
 
   it('both surfaces render the shared standing component', () => {
-    expect(shell).toMatch(/from '@\/features\/policy-citation\/PackStanding'/);
-    expect(screen).toMatch(/from '\.\/PackStanding'/);
+    expect(shell).toMatch(/from '@\/features\/policy-citation\/PackStandingView'/);
+    expect(screen).toMatch(/from '\.\/PackStandingView'/);
     expect(screen).toMatch(/packStanding\(policy\.pack\)/);
   });
 
@@ -406,7 +406,7 @@ describe('no surface derives policy standing for itself', () => {
     const sources = [
       shellRaw,
       screenRaw,
-      read('./PackStanding.tsx'),
+      read('./PackStandingView.tsx'),
       read('./packStanding.ts'),
     ].map(stripComments);
     for (const source of sources) {

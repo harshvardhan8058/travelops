@@ -27,7 +27,7 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 import { MonoValue, ProvenanceDot, StateBadge } from './primitives';
-import { PackStandingChip } from '@/features/policy-citation/PackStanding';
+import { PackStandingChip } from '@/features/policy-citation/PackStandingView';
 import type { SystemMode } from '@/api/types';
 
 const NAV = [
