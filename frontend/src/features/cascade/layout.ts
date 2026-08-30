@@ -142,6 +142,10 @@ function evidenceRefOf(edge: ServerGraphInput['edges'][number]): string {
   return 'not recorded';
 }
 
+export function edgeConnectsNode(edge: Pick<CascadeEdge, 'from' | 'to'>, nodeId: string): boolean {
+  return edge.from === nodeId || edge.to === nodeId;
+}
+
 /**
  * Lay out the backend's projection.
  *
@@ -191,8 +195,11 @@ export function layoutServerGraph(graph: ServerGraphInput, width = 920): Cascade
     const from = positions.get(edge.source_ref);
     const to = positions.get(edge.target_ref);
     if (!from || !to) continue;
+    const evidenceRef = evidenceRefOf(edge);
     edges.push({
-      id: `${edge.source_ref}->${edge.target_ref}:${edge.edge_kind}`,
+      // Parallel findings may share endpoints, kind and mechanism while citing different recorded
+      // actions. Keep every edge and use its stable provenance row to give React a distinct key.
+      id: `${edge.source_ref}->${edge.target_ref}:${edge.edge_kind}:${edge.mechanism ?? ''}:${evidenceRef}`,
       from: edge.source_ref,
       to: edge.target_ref,
       mechanism: edge.mechanism ?? edge.edge_kind,
@@ -200,7 +207,7 @@ export function layoutServerGraph(graph: ServerGraphInput, width = 920): Cascade
       fromY: from.y,
       toX: to.x,
       toY: to.y,
-      evidenceRef: evidenceRefOf(edge),
+      evidenceRef,
       edgeKind: edge.edge_kind,
       detail: edge.detail ?? null,
     });

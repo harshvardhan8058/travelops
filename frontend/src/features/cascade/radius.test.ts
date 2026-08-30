@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CrewPairingImpact, IncidentGroupDetail } from '@/api/types';
 import { buildRadius } from './radius';
-import { layoutServerGraph, type ServerGraphInput } from './layout';
+import { edgeConnectsNode, layoutServerGraph, type ServerGraphInput } from './layout';
 
 const provenance = { kind: 'fixture' as const, provider: 'fixture', source_ref: 'fixture:test' };
 
@@ -208,6 +208,35 @@ describe('layoutServerGraph', () => {
       'action:57',
       'action:58',
     ]);
+  });
+
+  it('gives parallel edges distinct keys without dropping their evidence', () => {
+    const repeatedFinding = {
+      ...graph.edges[1]!,
+      derived_from_action_id: 59,
+    };
+    const layout = layoutServerGraph({
+      nodes: graph.nodes,
+      edges: [...graph.edges, repeatedFinding],
+    });
+    const connectionEdges = layout.edges.filter(
+      (edge) => edge.from === 'flight:1' && edge.to === 'booking:9',
+    );
+
+    expect(connectionEdges).toHaveLength(2);
+    expect(connectionEdges.map((edge) => edge.evidenceRef)).toEqual(['action:57', 'action:59']);
+    expect(new Set(connectionEdges.map((edge) => edge.id)).size).toBe(connectionEdges.length);
+  });
+
+  it('matches node selection against endpoints, never provenance ids', () => {
+    const connectionEdge = layoutServerGraph(graph).edges.find(
+      (edge) => edge.evidenceRef === 'action:57',
+    );
+
+    expect(connectionEdge).toBeDefined();
+    expect(edgeConnectsNode(connectionEdge!, 'flight:1')).toBe(true);
+    expect(edgeConnectsNode(connectionEdge!, 'booking:9')).toBe(true);
+    expect(edgeConnectsNode(connectionEdge!, 'booking:57')).toBe(false);
   });
 
   it('marks a declared node nothing has assessed rather than hiding it', () => {
