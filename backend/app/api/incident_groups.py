@@ -30,7 +30,7 @@ from app.db.session import get_session
 from app.errors import EntityNotFound
 from app.models.enums import IncidentState
 from app.models.reference import Booking, BookingSegment, Flight
-from app.models.workflow import AssuranceEvaluation, DecisionLog, IncidentGroup
+from app.models.workflow import AssuranceEvaluation, DecisionLog, Incident, IncidentGroup
 from app.observability.logging import correlation_id_var, get_logger
 from app.orchestrator.group import GroupOrchestrator
 from app.orchestrator.plan_approval import PlanApprovalService, approval_payload
@@ -216,12 +216,25 @@ async def list_incident_groups(
 async def current_incident_group(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GroupSummary:
-    """The console's landing query. 404 when nothing is open, never an empty placeholder."""
-    stmt = select(IncidentGroup).order_by(IncidentGroup.opened_at.desc(), IncidentGroup.id.desc())
+    """The console's landing query. 404 when nothing is active, never an empty placeholder."""
+    active = [state.value for state in IncidentState.active()]
+    active_incident_exists = (
+        select(Incident.id)
+        .where(
+            Incident.group_id == IncidentGroup.id,
+            Incident.state.in_(active),
+        )
+        .exists()
+    )
+    stmt = (
+        select(IncidentGroup)
+        .where(active_incident_exists)
+        .order_by(IncidentGroup.opened_at.desc(), IncidentGroup.id.desc())
+    )
     group = (await session.execute(stmt)).scalars().first()
     if group is None:
         raise EntityNotFound(
-            "no disruption group exists",
+            "no active disruption group exists",
             details={"resolution": "seed the demo dataset, then inject the scenario"},
         )
     rollup = await cascade_rollup(session, group_id=group.id)

@@ -247,6 +247,25 @@ async def test_start_opens_existing_workflow_once_and_records_human_attribution(
     assert start_entries[0].detail["actor_id"] == "operator-2"
 
 
+async def test_scenario_becomes_current_only_after_start(client, seeded):
+    created = client.post(f"{PREFIX}/scenarios", json=_scenario_payload()).json()
+    reference = created["scenario_reference"]
+
+    before_start = client.get(f"{PREFIX}/incident-groups/current")
+    assert before_start.status_code == 404
+    assert before_start.json()["error"]["code"] == "ENTITY_NOT_FOUND"
+
+    started = client.post(
+        f"{PREFIX}/scenarios/{reference}/start",
+        json={"actor_id": "operator-2"},
+    )
+    assert started.status_code == 200
+
+    after_start = client.get(f"{PREFIX}/incident-groups/current")
+    assert after_start.status_code == 200
+    assert after_start.json()["reference"] == reference
+
+
 async def test_start_rejects_an_active_incident_owned_by_another_workflow(client, seeded):
     created = client.post(f"{PREFIX}/scenarios", json=_scenario_payload()).json()
     reference = created["scenario_reference"]
