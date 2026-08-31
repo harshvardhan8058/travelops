@@ -62,6 +62,25 @@ class WeatherMode(StrEnum):
     fixture = "fixture"
 
 
+class FlightStatusMode(StrEnum):
+    """Where observed flight state comes from.
+
+    Separate from `WeatherMode` because the two have different failure shapes. The Aviation
+    Weather Center is a public-domain US-government API needing no credential, so `WEATHER_MODE`
+    can be flipped to live with nothing else configured. AviationStack needs a key, so
+    `FLIGHT_STATUS_MODE=live` without one is a misconfiguration that has to be caught at startup
+    rather than discovered as a repeated provider failure inside live incidents.
+
+    `app.providers.flight_status` already reads this by name — it was written
+    forward-compatibly against a setting Stream A had not added yet, and defaults to fixture
+    until it exists. Adding it here is what turns live on; nothing in the provider package
+    changes.
+    """
+
+    live = "live"
+    fixture = "fixture"
+
+
 class NotificationMode(StrEnum):
     console = "console"
     mailtrap = "mailtrap"
@@ -159,6 +178,15 @@ class Settings(BaseSettings):
 
     weather_mode: WeatherMode = WeatherMode.fixture
     weather_poll_seconds: int = 60
+
+    #: Observed flight state: AviationStack in `live`, the committed snapshot in `fixture`.
+    #:
+    #: Fixture is the default for the same reason every other provider defaults to it — a clone
+    #: with no credentials must run the whole demo offline. Live is an explicit act.
+    flight_status_mode: FlightStatusMode = FlightStatusMode.fixture
+    #: NEVER commit a value for this. `.env.example` ships it blank; the real key belongs in
+    #: `.env`, which `.gitignore` excludes.
+    aviationstack_api_key: str = ""
 
     # Deterministic risk index threshold (0-100). NOT a calibrated probability.
     delay_risk_event_threshold: int = Field(default=75, ge=0, le=100)
@@ -265,6 +293,14 @@ class Settings(BaseSettings):
     # Explicit opt-ins for degradation. Default False = fail closed.
     allow_llm_degradation: bool = False
     allow_notification_degradation: bool = True
+    #: Permit `FLIGHT_STATUS_MODE=live` with no key to fall back to the fixture snapshot.
+    #:
+    #: Default False, like the LLM opt-in and unlike the notification one. A degraded notifier
+    #: still tells the operator the truth about what it sent; a flight-status source silently
+    #: swapped for a snapshot would put replayed times behind a live badge and feed them to the
+    #: connection walk as though they were observed. Even when this is enabled the swap is
+    #: recorded in `degradations` and published by `GET /system/mode`, so it is never invisible.
+    allow_flight_status_degradation: bool = False
 
     @field_validator("log_level")
     @classmethod
@@ -298,9 +334,11 @@ class ResolvedModes:
         assurance_config_version: str | None,
         assurance_config_hash: str | None,
         degradations: list[str],
+        flight_status: FlightStatusMode = FlightStatusMode.fixture,
     ) -> None:
         self.llm = llm
         self.weather = weather
+        self.flight_status = flight_status
         self.notification = notification
         self.policy = policy
         self.real_email_enabled = real_email_enabled
@@ -318,6 +356,10 @@ class ResolvedModes:
         return {
             "llm_mode": self.llm.value,
             "weather_mode": self.weather.value,
+            # The effective mode, so a degraded live request reports `fixture` here and names the
+            # reason in `degradations`. Publishing the requested mode instead would make a
+            # fallback invisible at exactly the moment it matters. Never the key.
+            "flight_status_mode": self.flight_status.value,
             "notification_mode": self.notification.value,
             "policy_mode": self.policy.value,
             "real_email_enabled": self.real_email_enabled,
@@ -455,6 +497,27 @@ def resolve_modes(settings: Settings) -> ResolvedModes:
                 "ALLOW_LLM_DEGRADATION=true to permit fallback."
             )
 
+    # ---------------------------------------------------------------- flight status
+    #
+    # Same shape as the reasoning branch above, for the same reason: live without a credential is
+    # a misconfiguration, and the honest moment to say so is startup. Discovering it per incident
+    # instead means every connection check in the run reports an unavailable source, and the
+    # operator has to infer a missing environment variable from a wall of provider errors.
+    flight_status = settings.flight_status_mode
+    if flight_status is FlightStatusMode.live and not settings.aviationstack_api_key:
+        if settings.allow_flight_status_degradation:
+            flight_status = FlightStatusMode.fixture
+            degradations.append(
+                "FLIGHT_STATUS_MODE=live requested without AVIATIONSTACK_API_KEY; "
+                "degraded to the committed fixture snapshot"
+            )
+        else:
+            raise ConfigurationError(
+                "FLIGHT_STATUS_MODE=live requires AVIATIONSTACK_API_KEY. Set the key, choose "
+                "FLIGHT_STATUS_MODE=fixture, or set ALLOW_FLIGHT_STATUS_DEGRADATION=true to "
+                "permit fallback to the committed snapshot."
+            )
+
     # ---------------------------------------------------------------- notifications
     notification = settings.notification_mode
     real_email_enabled = False
@@ -545,6 +608,7 @@ def resolve_modes(settings: Settings) -> ResolvedModes:
     return ResolvedModes(
         llm=llm,
         weather=settings.weather_mode,
+        flight_status=flight_status,
         notification=notification,
         policy=policy,
         real_email_enabled=real_email_enabled,

@@ -40,6 +40,10 @@ from app.models.enums import ActionStatus, ActionType
 from app.models.reference import Airport, Booking, BookingSegment, Flight, Passenger
 from app.observability.logging import get_logger
 from app.orchestrator import dispatch
+from app.orchestrator.flight_status_adapter import (
+    apply_live_flight_status,
+    merge_into_result,
+)
 from app.services.base import ServiceResult
 from app.services.communication import CommunicationService, Recipient
 from app.services.compensation import CompensationService
@@ -104,13 +108,20 @@ async def run_connection(
         )
 
     itineraries, flights = await load_connection_inputs(session, flight_ids)
+    # Observed flight status, when one is configured, contributes the departure delay actually
+    # being reported. It replaces nothing else: the schedule the itineraries were sold against
+    # stays the domain's, and a lookup that fails leaves the derived delay standing and says so.
+    # In fixture mode this is a no-op, so the Phase 1-4 path is byte-for-byte what it was.
+    flights, overlay = await apply_live_flight_status(session, flights)
     constraints = await load_business_constraints(session)
-    return await ConnectionService().execute(
+    result = await ConnectionService().execute(
         itineraries=itineraries,
         flights=flights,
         affected_flight_ids=flight_ids,
         business_constraints=constraints,
     )
+    # Additive only — the service's verdict and counts are returned as it produced them.
+    return merge_into_result(result, overlay)
 
 
 # ----------------------------------------------------------------------------- crew impact
