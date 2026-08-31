@@ -41,13 +41,17 @@ verified_mode_eligible: false
 ui_label: "DGCA CAR 3/M/IV · REV. 4 · EFFECTIVE 15 FEB 2023 · PENDING SME REVIEW"
 
 blocks_verified_mode_until:
-  - source PDF archived at source.pdf with its real SHA-256 recorded in source-metadata.yaml
+  - the Part IV PDF is archived at source.pdf with its real SHA-256, computed with sha256sum over
+    the file's bytes, recorded in source-metadata.yaml and archived set to true. Requested twice
+    and not received either time; see the attempt log in source-metadata.yaml
   - authorised aviation/legal SME review recorded in review.yaml with per-rule sign-off
-  - the eight open review questions in review.yaml answered
-  - CAR Section 3 Series M Part II obtained, because Para 3.3.5 defers ticket refund to it and
-    that instrument was reportedly amended after this revision
-  - confirmation from the DGCA portal that Rev. 4 is still the current revision on the day of
-    promotion
+  - the ten open review questions in review.yaml answered
+  - >-
+    RQ-9 answered — confirmation from the DGCA portal that Rev. 4 is still the current revision of
+    Part IV on the day of promotion, plus a reading of Para 3.3.5's cross-reference given that the
+    archived Part II (Rev. 3, 24 Feb 2026) postdates this Part IV revision
+  # Part II itself is no longer a blocker: it is archived in this directory with a real,
+  # test-verified SHA-256. Only its currentness relative to Part IV is open, under RQ-9.
 
 precedence:
   # No global "most favourable to passenger" rule is assumed. This pack overlaps the charter

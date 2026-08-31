@@ -43,6 +43,20 @@ official_url: https://www.dgca.gov.in/digigov-portal/
 # portal's public page is a JavaScript shell that does not expose the document's
 # attachment id, so the binary could not be retrieved to hash it.
 #
+# ATTEMPT LOG — the binary has been sought twice and obtained neither time.
+#   2026-08-31  First request. Extracted text only. Portal listing is a JS shell;
+#               `digigov-portal/api/dgca/getCarList` returns 404.
+#   2026-08-21  Second request, naming the file `D3M-M4(R4_Jan2023).pdf`. The named
+#               file was not present anywhere in the working environment (full
+#               filesystem scan by name and by %PDF magic bytes found only
+#               source-part-ii.pdf). Direct retrieval was retried against
+#               `/cars/D3M-M4(R4_Jan2023).pdf`, `Upload/<filename>` and
+#               `viewPDF?attachId=<filename>`: all 404. The portal CAR index was
+#               additionally rendered in a headless browser; it returns the generic
+#               DGCA home shell and exposes no Series M Part IV anchor.
+#   => `content_sha256` stays PENDING_ARCHIVAL. No digest has been computed over
+#      anything, and none has been guessed.
+#
 # A SHA-256 can only be computed over bytes. Hashing the extracted text would be
 # worse than leaving this pending: it would produce a value that looks like
 # provenance, would satisfy `verify_source_document`, and would attest to a

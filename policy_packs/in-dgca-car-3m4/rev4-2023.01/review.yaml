@@ -124,5 +124,43 @@ open_review_questions:
       concludes from silence that nothing is owed.
     status: unanswered
 
+  # RQ-9 and RQ-10 are not interpretation questions. They are facts this repository cannot
+  # establish from inside itself, recorded here so they are carried as review items rather than
+  # forgotten or quietly assumed away.
+
+  - id: RQ-9
+    clause: "1.1, 3.3.5"
+    question: >-
+      Is Rev. 4 dated 25 January 2023 still the current revision of Series M Part IV, and has it
+      been amended or superseded since? Related and more pressing: Part IV Rev. 4 (2023) defers
+      ticket refunds to Part II, and the Part II archived in this pack is Rev. 3 dated
+      24 February 2026 — a revision issued AFTER Part IV. A reviewer with portal access must
+      confirm on the day of promotion (a) that no later Part IV revision exists, and (b) that
+      Part IV's cross-reference is to be read as pointing at the 2026 Part II rather than at
+      whichever Part II was current in 2023.
+    why_it_matters: >-
+      This pack could not resolve it. The DGCA portal CAR listing is a JavaScript shell with no
+      server-rendered index and `digigov-portal/api/dgca/getCarList` returns 404, so revisions
+      could not be enumerated to prove currentness. Currentness was therefore NOT assumed: the
+      pack is `official_guidance_dated` and `may_be_called_current_law` is false. If a later
+      revision exists, every figure in rules.yaml is suspect.
+    status: unanswered
+    external_dependency: DGCA portal access on the day of promotion
+
+  - id: RQ-10
+    clause: "1.6"
+    question: >-
+      Confirm that the archived Part IV PDF is byte-identical to the document the reviewer read —
+      once that PDF exists in this directory at all.
+    why_it_matters: >-
+      The Part IV binary has never reached this repository; see the attempt log in
+      source-metadata.yaml. `content_sha256` is PENDING_ARCHIVAL and `archived` is false, so
+      `verify_source_document` refuses a verified load. Part II, by contrast, IS archived with a
+      real digest that this pack's tests re-compute on every run. Until Part IV is archived, the
+      rules carrying `car:3m4:rev4:*` clause references rest on extracted text whose fidelity to
+      the signed original nobody has attested.
+    status: unanswered
+    external_dependency: the exact Part IV PDF, delivered as bytes
+
 # Per-rule sign-off. Reviewer fills status and notes. Empty until reviewed.
 rule_signoff: []
