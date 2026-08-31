@@ -20,6 +20,8 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { actionDerivation } from '@/components/ui/derivation';
+import { Absent, TableFrame, TableHead } from '@/components/ui/composition';
+import { utcClock } from '@/components/ui/format';
 import { refusalFor } from './refusal';
 
 export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
@@ -40,114 +42,110 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
           description="Actions appear here the moment the gate authorises one. An action can never exist without an assurance record."
         />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-body">
-            <thead>
-              <tr className="border-b border-border-subtle bg-inset text-label uppercase text-fg-muted">
-                <th className="px-3 py-1.5 text-left font-medium">Task</th>
-                <th className="px-3 py-1.5 text-left font-medium">Action</th>
-                <th className="px-3 py-1.5 text-left font-medium">Actor</th>
-                <th className="px-3 py-1.5 text-left font-medium">Result</th>
-                <th className="px-3 py-1.5 text-left font-medium">Reason</th>
-                <th className="px-3 py-1.5 text-right font-medium">Cost</th>
-                <th className="px-3 py-1.5 text-left font-medium">Assurance</th>
-                <th className="px-3 py-1.5 text-left font-medium">Idempotency key</th>
-                <th className="px-3 py-1.5 text-right font-medium">Executed</th>
-                <th className="px-3 py-1.5 text-left font-medium">Src</th>
-              </tr>
-            </thead>
-            <tbody>
-              {actions.map((action) => (
-                <tr key={action.id} className="h-row border-b border-border-subtle">
-                  <td className="px-3">
-                    <MonoValue muted>{action.plan_task_id}</MonoValue>
-                  </td>
-                  <td className="px-3">
-                    {/* Present on the real API, absent from the committed fixture. */}
-                    {action.action_type ? (
-                      <MonoValue>{action.action_type}</MonoValue>
-                    ) : (
-                      <span
-                        className="text-caption text-fg-muted"
-                        title="not returned by this endpoint"
-                      >
-                        —
+        <TableFrame caption="Every action executed for this incident, each referencing the assurance evaluation that authorised it. An action cannot exist without one.">
+          <TableHead
+            columns={[
+              { key: 'task', label: 'Task' },
+              { key: 'action', label: 'Action' },
+              { key: 'actor', label: 'Actor' },
+              { key: 'result', label: 'Result' },
+              { key: 'reason', label: 'Reason' },
+              { key: 'cost', label: 'Cost', hint: 'INR', align: 'right' },
+              { key: 'assurance', label: 'Assurance' },
+              { key: 'idem', label: 'Idempotency key' },
+              { key: 'executed', label: 'Executed', hint: 'UTC', align: 'right' },
+              { key: 'src', label: 'Src' },
+            ]}
+          />
+          <tbody>
+            {actions.map((action) => (
+              <tr key={action.id} className="h-row border-b border-border-subtle">
+                <td className="px-3">
+                  <MonoValue muted>{action.plan_task_id}</MonoValue>
+                </td>
+                <td className="px-3">
+                  {/* Present on the real API, absent from the committed fixture. */}
+                  {action.action_type ? (
+                    <MonoValue>{action.action_type}</MonoValue>
+                  ) : (
+                    <Absent
+                      label="not returned"
+                      title="This endpoint does not return an action type for this record."
+                    />
+                  )}
+                </td>
+                <td className="px-3">
+                  <MonoValue>{action.actor}</MonoValue>
+                </td>
+                <td className="px-3">
+                  <WhyPopover derivation={actionDerivation(action, incident)}>
+                    <StateBadge
+                      status={action.status === 'success' ? 'succeeded' : action.status}
+                    />
+                  </WhyPopover>
+                </td>
+                {/*
+                 * A refusal shows designed copy with its stable code beside it; the raw message
+                 * stays available on hover so nothing is hidden.
+                 */}
+                <td className="max-w-[380px] px-3 text-fg-secondary" title={action.reason}>
+                  {refusalFor(action.reason) ? (
+                    <span className="flex items-center gap-1.5">
+                      <MonoValue muted className="text-caption">
+                        {refusalFor(action.reason)?.code}
+                      </MonoValue>
+                      <span className="truncate text-state-warn">
+                        {refusalFor(action.reason)?.headline}
                       </span>
-                    )}
-                  </td>
-                  <td className="px-3">
-                    <MonoValue>{action.actor}</MonoValue>
-                  </td>
-                  <td className="px-3">
-                    <WhyPopover derivation={actionDerivation(action, incident)}>
-                      <StateBadge
-                        status={action.status === 'success' ? 'succeeded' : action.status}
+                    </span>
+                  ) : (
+                    <span className="block truncate">{action.reason}</span>
+                  )}
+                </td>
+                <td className="px-3 text-right">
+                  {action.cost_inr === null ? (
+                    <Absent
+                      label="none"
+                      title="No cost was recorded against this action. Absent, not zero."
+                      className="justify-end"
+                    />
+                  ) : (
+                    <MonoValue>{action.cost_inr}</MonoValue>
+                  )}
+                </td>
+                <td className="px-3">
+                  <MonoValue muted>{action.assurance_id}</MonoValue>
+                </td>
+                <td className="px-3">
+                  <MonoValue muted className="text-caption">
+                    {action.idempotency_key}
+                  </MonoValue>
+                </td>
+                <td className="px-3 text-right">
+                  <MonoValue muted>{utcClock(action.executed_at) ?? '—'}</MonoValue>
+                </td>
+                <td className="px-3">
+                  {(() => {
+                    const kind = asProvenanceKind(action.provenance_kind);
+                    if (kind) {
+                      return <ProvenanceDot kind={kind} provider={action.actor} />;
+                    }
+                    return (
+                      <Absent
+                        label={action.provenance_kind ? 'unrecognised' : 'none'}
+                        title={
+                          action.provenance_kind
+                            ? `unrecognised provenance kind: ${action.provenance_kind}`
+                            : 'no provenance recorded for this action'
+                        }
                       />
-                    </WhyPopover>
-                  </td>
-                  {/*
-                   * A refusal shows designed copy with its stable code beside it; the raw message
-                   * stays available on hover so nothing is hidden.
-                   */}
-                  <td className="max-w-[380px] px-3 text-fg-secondary" title={action.reason}>
-                    {refusalFor(action.reason) ? (
-                      <span className="flex items-center gap-1.5">
-                        <MonoValue muted className="text-caption">
-                          {refusalFor(action.reason)?.code}
-                        </MonoValue>
-                        <span className="truncate text-state-warn">
-                          {refusalFor(action.reason)?.headline}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="block truncate">{action.reason}</span>
-                    )}
-                  </td>
-                  <td className="px-3 text-right">
-                    {action.cost_inr === null ? (
-                      <MonoValue muted>n/a</MonoValue>
-                    ) : (
-                      <MonoValue>INR {action.cost_inr}</MonoValue>
-                    )}
-                  </td>
-                  <td className="px-3">
-                    <MonoValue muted>{action.assurance_id}</MonoValue>
-                  </td>
-                  <td className="px-3">
-                    <MonoValue muted className="text-caption">
-                      {action.idempotency_key}
-                    </MonoValue>
-                  </td>
-                  <td className="px-3 text-right">
-                    <MonoValue muted>
-                      {action.executed_at ? action.executed_at.slice(11, 19) : '—'}
-                    </MonoValue>
-                  </td>
-                  <td className="px-3">
-                    {(() => {
-                      const kind = asProvenanceKind(action.provenance_kind);
-                      if (kind) {
-                        return <ProvenanceDot kind={kind} provider={action.actor} />;
-                      }
-                      return (
-                        <span
-                          className="text-caption text-fg-muted"
-                          title={
-                            action.provenance_kind
-                              ? `unrecognised provenance kind: ${action.provenance_kind}`
-                              : 'no provenance recorded for this action'
-                          }
-                        >
-                          —
-                        </span>
-                      );
-                    })()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    );
+                  })()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
       )}
     </Panel>
   );

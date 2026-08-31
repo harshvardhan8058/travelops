@@ -24,6 +24,7 @@ import {
   Panel,
   StateBadge,
 } from '@/components/ui/primitives';
+import { Absent, DefinitionRow, Labelled, Notice, PageHeader } from '@/components/ui/composition';
 import { PackStandingBanner } from './PackStandingView';
 import { packStanding, SOURCE_INTEGRITY_COPY, summariseApplicability } from './packStanding';
 
@@ -98,20 +99,14 @@ function EntitlementRow({ entitlement }: { entitlement: Entitlement }) {
   );
 }
 
-/**
- * A cited value beside its label.
+/*
+ * `Cited` was this file's copy of `Labelled`, which now lives in `@/components/ui/composition`.
  *
- * The label is uppercased; the value never is. A regulation's name, a document title and a hex digest
- * are quotations, and a CSS transform on any of them misreports what the contract returned.
+ * The rule it enforces is unchanged and is the reason the component exists at all: the label is
+ * uppercased, the value never is. A regulation's name, a document title and a hex digest are
+ * quotations, and a CSS transform on any of them misreports what the contract returned. The browser
+ * gate asserts this route's `pack.status`, `pack.ui_label` and `policy_mode` reach the DOM verbatim.
  */
-function Cited({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-caption uppercase text-fg-muted">{label}</span>
-      {children}
-    </span>
-  );
-}
 
 /**
  * A contract value, or a named absence when it published none.
@@ -131,12 +126,10 @@ function Recorded({
 }) {
   if (value === null || value === undefined || value.trim() === '') {
     return (
-      <span
-        className="text-caption text-fg-muted"
+      <Absent
+        label="not recorded"
         title={absentTitle ?? 'Not published by this endpoint. An absent value, not an empty one.'}
-      >
-        not recorded
-      </span>
+      />
     );
   }
   return mono ? (
@@ -146,12 +139,12 @@ function Recorded({
   );
 }
 
+/* One of five definition-row implementations that existed at three different label widths. */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-2">
-      <dt className="w-[92px] shrink-0 text-caption uppercase text-fg-muted">{label}</dt>
-      <dd className="min-w-0 flex-1">{children}</dd>
-    </div>
+    <DefinitionRow label={label} width="sm">
+      {children}
+    </DefinitionRow>
   );
 }
 
@@ -201,6 +194,36 @@ export function PolicyScreen() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
+      {/*
+       * The pack is the subject of this screen, so its label is the title — rendered VERBATIM and
+       * never CSS-transformed. That is not a preference here: the browser gate reads `pack.ui_label`
+       * out of this route's DOM and asserts its exact casing, because a pack whose real label is
+       * "MoCA Passenger Charter" once rendered as "MOCA PASSENGER CHARTER".
+       *
+       * The standing itself is deliberately NOT restated here. `PackStandingBanner` below is the one
+       * component that derives it, shared with the shell chip, and a second rendering of a legal
+       * standing claim is exactly the kind of duplicate that starts disagreeing with its source.
+       */}
+      <PageHeader
+        eyebrow="Policy & citations"
+        title={policy.pack.ui_label}
+        meta={
+          <>
+            <Labelled label="incident">
+              <MonoValue muted>{incidentId}</MonoValue>
+            </Labelled>
+            <Labelled label="pack">
+              <MonoValue muted>
+                {policy.pack.id}@{policy.pack.version}
+              </MonoValue>
+            </Labelled>
+            <Labelled label="entitlements">
+              <MonoValue>{policy.entitlements.length}</MonoValue>
+            </Labelled>
+          </>
+        }
+      />
+
       <Panel>
         {/* One standing, one derivation, shared with the shell chip. */}
         <PackStandingBanner
@@ -210,25 +233,25 @@ export function PolicyScreen() {
           packVersion={policy.pack.version}
         />
         {/*
-          Provenance, rendered through `Cited` so `uppercase` lands on the LABEL and never on the
+          Provenance, rendered through `Labelled` so `uppercase` lands on the LABEL and never on the
           value. It previously sat on the wrapper, which case-transformed everything inside it: the
           authority's name, the document's title and — worst — the hex `pack_hash`, so the citation on
           screen did not match the digest that was recorded. Same defect class as rendering "MoCA" as
           "MOCA", and the reason this row is a component rather than five hand-built spans.
         */}
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-3 py-2">
-          <Cited label="mode">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1.5 px-3 py-2.5">
+          <Labelled label="mode">
             <MonoValue muted>{policy.policy_mode}</MonoValue>
-          </Cited>
-          <Cited label="authority">
+          </Labelled>
+          <Labelled label="authority">
             <Recorded value={policy.pack.authority} />
-          </Cited>
-          <Cited label="document">
+          </Labelled>
+          <Labelled label="document">
             <Recorded value={policy.pack.document} />
-          </Cited>
-          <Cited label="pack hash">
+          </Labelled>
+          <Labelled label="pack hash">
             <Recorded value={policy.pack.pack_hash} mono />
-          </Cited>
+          </Labelled>
           {/*
             `source_hash` is the digest the pack records, passed through verbatim: for the charter
             pack that is the `PENDING_ARCHIVAL` sentinel, and `null` is reserved for a pack that
@@ -239,13 +262,13 @@ export function PolicyScreen() {
             an absent digest looked like a rendering fault. It is named instead — the same rule
             `Metric` applies to every absent figure.
           */}
-          <Cited label="source hash">
+          <Labelled label="source hash">
             <Recorded
               value={policy.pack.source_hash}
               mono
               absentTitle="No archived source digest is published for this pack. An absent value, not an empty one."
             />
-          </Cited>
+          </Labelled>
         </div>
         {/*
           Source-document integrity, reported from the digest the contract published. The gate that
@@ -255,17 +278,12 @@ export function PolicyScreen() {
           is warn-toned, including a recorded value that cannot be the documented SHA-256 — the state
           that matters in verified mode, where a real digest is what is expected.
         */}
-        <p
-          className={clsx(
-            'flex items-start gap-2 border-t border-border-subtle px-3 py-1.5 text-caption',
-            standing.sourceIntegrity === 'archived' ? 'text-fg-muted' : 'text-state-warn',
-          )}
+        <Notice
+          tone={standing.sourceIntegrity === 'archived' ? 'muted' : 'warn'}
+          icon={standing.sourceIntegrity !== 'archived'}
         >
-          {standing.sourceIntegrity !== 'archived' && (
-            <AlertTriangle size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
-          )}
-          <span>{SOURCE_INTEGRITY_COPY[standing.sourceIntegrity]}</span>
-        </p>
+          {SOURCE_INTEGRITY_COPY[standing.sourceIntegrity]}
+        </Notice>
       </Panel>
 
       {/*

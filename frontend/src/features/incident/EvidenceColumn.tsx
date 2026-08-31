@@ -29,6 +29,8 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { entityCountDerivation, incidentRiskDerivation } from '@/components/ui/derivation';
+import { Absent, PanelSection } from '@/components/ui/composition';
+import { utcStamp } from '@/components/ui/format';
 
 /**
  * Entity kinds the product reports on, from docs/27 ("pax affected, connections at risk, crew
@@ -57,24 +59,24 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="border-b border-border-subtle px-3 py-2 last:border-b-0">
-      <h3 className="mb-1 text-label uppercase text-fg-secondary">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
-/** An absent count. Never 0, and it says why on hover. */
+/*
+ * The local `Section` and `NotComputed` are now `PanelSection` and `Absent` in
+ * `@/components/ui/composition`.
+ *
+ * `NotComputed` rendered a bare em dash with the explanation only in a `title`, which is invisible
+ * on a projector and to anyone not hovering. `Absent` names the absence in words as well — "not
+ * computed" and `0` are different facts about the evidence, and this is the column where that
+ * distinction decides whether a gate had anything to assure.
+ *
+ * `Field` stays local on purpose: its label-left/value-right shape is deliberate in a 300px column
+ * and is not the same component as `DefinitionRow`.
+ */
 function NotComputed() {
   return (
-    <span
-      className="font-mono text-mono-sm text-fg-muted"
+    <Absent
+      label="not computed"
       title="Not computed by this endpoint. An absent value, not zero."
-    >
-      —
-    </span>
+    />
   );
 }
 
@@ -107,7 +109,7 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Section title="Weather observation used">
+        <PanelSection title="Weather observation used">
           {!weather ? (
             <p className="text-caption text-fg-muted">
               No observation is recorded for the origin airport, so the plan was assured without
@@ -120,11 +122,7 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
                 <MonoValue>{weather.airport_icao ?? '—'}</MonoValue>
               </Field>
               <Field label="observed">
-                <MonoValue muted>
-                  {weather.observed_at
-                    ? `${weather.observed_at.slice(0, 10)} ${weather.observed_at.slice(11, 19)}Z`
-                    : 'not recorded'}
-                </MonoValue>
+                <MonoValue muted>{utcStamp(weather.observed_at) ?? 'not recorded'}</MonoValue>
               </Field>
               <Field label="wind">
                 {weather.wind_speed_kt === null || weather.wind_speed_kt === undefined ? (
@@ -181,9 +179,9 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
               </Field>
             </>
           )}
-        </Section>
+        </PanelSection>
 
-        <Section title="Delay risk">
+        <PanelSection title="Delay risk">
           {!risk ? (
             <p className="text-caption text-fg-muted">
               No risk index has been recorded for this incident. The Delay Risk service writes a
@@ -267,9 +265,9 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
               {risk.note && <p className="mt-1.5 text-caption text-fg-muted">{risk.note}</p>}
             </>
           )}
-        </Section>
+        </PanelSection>
 
-        <Section title="Affected entities">
+        <PanelSection title="Affected entities">
           {entityRows.map((label) => {
             const value = counts[label];
             return (
@@ -291,9 +289,9 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
               rather than zero.
             </p>
           )}
-        </Section>
+        </PanelSection>
 
-        <Section title="Retrieved precedent">
+        <PanelSection title="Retrieved precedent">
           {precedent ? (
             <>
               <Field label="incident">
@@ -330,7 +328,7 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
               No precedent was retrieved for this incident, so the plan was built without one.
             </p>
           )}
-        </Section>
+        </PanelSection>
       </div>
     </Panel>
   );

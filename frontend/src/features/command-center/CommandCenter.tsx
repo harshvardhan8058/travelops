@@ -8,6 +8,17 @@
  * Information hierarchy per §0.3 of the Phase 2 plan: T1 situational across the top (network,
  * groups, health), T2 diagnostic in the flight board, T3 forensic behind popovers and `/sources`.
  *
+ * The screen now opens with a `PageHeader` rather than a panel of 12px labels. That is not
+ * decoration: the route previously had no `h1` and no element larger than its own panel titles, so
+ * the network the controller is looking at was rendered at exactly the same weight as the word
+ * "provenance ledger" beside it. Dependency health and the live/fixture flag moved into that
+ * header, because they qualify the whole screen rather than the airport strip they used to sit on.
+ *
+ * Two states that were previously silent are now rendered. `groupsQuery` and `readyQuery` had no
+ * error branch at all — both degraded to `?? []`, so a failed groups call was indistinguishable
+ * from a calm network with nothing open. On a disruption-recovery console those two things are
+ * opposites, so a failure now says so and an absence of cascades says that instead.
+ *
  * Owner: Stream D.
  */
 
@@ -18,6 +29,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '@/api/client';
 import type { FlightRow, IncidentGroupSummary } from '@/api/types';
 import {
+  EmptyState,
   ErrorState,
   LoadingState,
   MonoValue,
@@ -25,8 +37,9 @@ import {
   ProvenanceDot,
   StateBadge,
 } from '@/components/ui/primitives';
-import { FilterChips, MetricTile } from '@/components/ui/Metric';
+import { CountBar, FilterChips, MetricTile } from '@/components/ui/Metric';
 import { countDerivation } from '@/components/ui/derivation';
+import { Labelled, Notice, PageHeader, StatStrip, Toolbar } from '@/components/ui/composition';
 import { FlightBoard, NetworkStrip } from './zones';
 
 type FlightFilter = 'all' | 'at_risk' | 'disrupted' | 'in_recovery' | 'resolved';
@@ -47,6 +60,53 @@ function matchesFilter(flight: FlightRow, filter: FlightFilter): boolean {
     default:
       return true;
   }
+}
+
+/**
+ * The board's own composition, as a partition of the rows actually returned.
+ *
+ * A count, never a trend: there is no time-series endpoint, so a sparkline here would be drawn
+ * from nothing. `CountBar` is the same primitive the provenance ledger uses to partition source
+ * kinds, and for the same reason — it states how many of each, and claims nothing else.
+ */
+function statusSegments(flights: FlightRow[]) {
+  const tally = new Map<string, number>();
+  for (const flight of flights) tally.set(flight.status, (tally.get(flight.status) ?? 0) + 1);
+
+  const tone = (status: string) =>
+    status === 'cancelled'
+      ? ('crit' as const)
+      : status === 'delayed'
+        ? ('warn' as const)
+        : status === 'resolved' || status === 'on_time'
+          ? ('ok' as const)
+          : ('info' as const);
+
+  return [...tally.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([status, count]) => ({
+      label: status.replace(/_/g, ' '),
+      count,
+      tone: tone(status),
+    }));
+}
+
+/** Mirrors the real layout, so the screen does not jump when the data lands. */
+function BoardSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <Panel title="Network">
+        <div className="h-[120px]">
+          <LoadingState label="Loading network" />
+        </div>
+      </Panel>
+      <Panel title="Flight board">
+        <div className="h-[420px]">
+          <LoadingState label="Loading flights" />
+        </div>
+      </Panel>
+    </div>
+  );
 }
 
 export function CommandCenter() {
@@ -84,17 +144,23 @@ export function CommandCenter() {
     });
   }, [flights, filter]);
 
-  if (flightsQuery.isLoading) return <LoadingState label="Loading network" />;
+  const segments = useMemo(() => statusSegments(flights), [flights]);
+
+  if (flightsQuery.isLoading) return <BoardSkeleton />;
 
   if (flightsQuery.error) {
     const error = flightsQuery.error instanceof ApiError ? flightsQuery.error : null;
     return (
-      <ErrorState
-        code={error?.code ?? 'INTERNAL_ERROR'}
-        message={error?.message ?? 'Could not load the network. The Decision Timeline still works.'}
-        correlationId={error?.correlationId ?? null}
-        onRetry={() => void flightsQuery.refetch()}
-      />
+      <Panel title="Network">
+        <ErrorState
+          code={error?.code ?? 'INTERNAL_ERROR'}
+          message={
+            error?.message ?? 'Could not load the network. The Decision Timeline still works.'
+          }
+          correlationId={error?.correlationId ?? null}
+          onRetry={() => void flightsQuery.refetch()}
+        />
+      </Panel>
     );
   }
 
@@ -102,12 +168,37 @@ export function CommandCenter() {
 
   return (
     <div className="flex flex-col gap-3">
-      <Panel
+      <PageHeader
+        eyebrow="Command centre"
         title="Network"
+        meta={
+          <>
+            <Labelled label="flights">
+              <MonoValue>{flights.length}</MonoValue>
+            </Labelled>
+            <Labelled label="airports">
+              <MonoValue>{network.length}</MonoValue>
+            </Labelled>
+            <Labelled label="cascades">
+              <MonoValue>{groups.length}</MonoValue>
+            </Labelled>
+            <Labelled label="source">
+              <MonoValue muted>{api.usingFixtures ? 'fixture data' : 'live API'}</MonoValue>
+            </Labelled>
+          </>
+        }
         actions={
-          <span className="flex items-center gap-2 text-caption text-fg-muted">
+          <Toolbar>
+            {/*
+             * Dependency health belongs to the whole console, not to the airport strip it used to
+             * decorate. A dependency that is down is shown as down: `ProvenanceDot` carries an
+             * sr-only description, so this is not a bare colour.
+             */}
             {dependencies.map(([name, dependency]) => (
-              <span key={name} className="flex items-center gap-1">
+              <span
+                key={name}
+                className="inline-flex items-center gap-1 text-caption text-fg-muted"
+              >
                 <ProvenanceDot
                   kind={dependency.status === 'up' ? 'real' : 'unavailable'}
                   provider={name}
@@ -117,30 +208,83 @@ export function CommandCenter() {
             ))}
             <Link
               to="/sources"
-              className="rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              className="rounded-sm text-caption text-fg-secondary underline decoration-dotted underline-offset-2 transition-colors duration-hover ease-out hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               provenance ledger
             </Link>
-          </span>
+          </Toolbar>
+        }
+      />
+
+      {readyQuery.error && (
+        <Notice tone="warn" divider="none" alert className="rounded border">
+          Dependency health could not be read, so the indicators above are omitted rather than
+          guessed. The flight board below is unaffected.
+        </Notice>
+      )}
+
+      {/*
+       * "Airport conditions", not "Network": the screen itself is now titled Network, and a panel
+       * repeating its parent's name tells the reader nothing. This panel holds observations per
+       * airport, so it says that.
+       */}
+      <Panel
+        title="Airport conditions"
+        actions={
+          <MonoValue muted className="text-caption">
+            {network.length}
+          </MonoValue>
         }
       >
         <NetworkStrip network={network} />
       </Panel>
 
-      {groups.length > 0 && (
-        <Panel title="Active cascades">
+      <Panel
+        title="Active cascades"
+        actions={
+          <MonoValue muted className="text-caption">
+            {groups.length}
+          </MonoValue>
+        }
+      >
+        {/*
+         * A failed groups call and a network with nothing open used to render identically. They are
+         * opposite facts, so each now says which one it is.
+         */}
+        {groupsQuery.error ? (
+          <ErrorState
+            code={groupsQuery.error instanceof ApiError ? groupsQuery.error.code : 'INTERNAL_ERROR'}
+            message={
+              groupsQuery.error instanceof ApiError
+                ? groupsQuery.error.message
+                : 'Could not read the disruption groups. This is not the same as no cascade being open.'
+            }
+            correlationId={
+              groupsQuery.error instanceof ApiError ? groupsQuery.error.correlationId : null
+            }
+            onRetry={() => void groupsQuery.refetch()}
+          />
+        ) : groups.length === 0 ? (
+          <div className="px-3 py-6 text-center">
+            <p className="text-body text-fg">No cascade is open</p>
+            <p className="mt-1 text-caption text-fg-muted">
+              Every declared flight is operating inside its own plan. A cascade appears here the
+              moment one disruption reaches a second flight.
+            </p>
+          </div>
+        ) : (
           <ul className="flex flex-col divide-y divide-border-subtle">
             {groups.map((group) => (
               <GroupCard key={group.reference} group={group} />
             ))}
           </ul>
-        </Panel>
-      )}
+        )}
+      </Panel>
 
       <Panel
         title="Flight board"
         actions={
-          <div className="flex items-center gap-3">
+          <Toolbar>
             <FilterChips
               label="Flight filter"
               value={filter}
@@ -169,13 +313,33 @@ export function CommandCenter() {
                 },
               ]}
             />
-            <span className="text-caption text-fg-muted">
-              {api.usingFixtures ? 'fixture data' : 'live API'}
-            </span>
-          </div>
+            <MonoValue muted className="text-caption">
+              {sorted.length} of {flights.length}
+            </MonoValue>
+          </Toolbar>
         }
       >
-        <FlightBoard flights={sorted} network={network} />
+        {/*
+         * "Nothing loaded" and "nothing matches the filter" were one empty state, whose copy told
+         * the operator to run `make seed` even when the real answer was that they had filtered the
+         * board down to nothing. They are separated here: the board owns the filter case, this owns
+         * the genuinely empty dataset.
+         */}
+        {flights.length === 0 ? (
+          <EmptyState
+            title="No flights loaded"
+            description="Seed the fixed-seed dataset, then inject the bengaluru_storm scenario. Until then the network has nothing to show."
+          />
+        ) : (
+          <>
+            {segments.length > 0 && (
+              <div className="border-b border-border-subtle px-3 py-2">
+                <CountBar segments={segments} total={flights.length} />
+              </div>
+            )}
+            <FlightBoard flights={sorted} network={network} />
+          </>
+        )}
       </Panel>
     </div>
   );
@@ -190,22 +354,20 @@ function GroupCard({ group }: { group: IncidentGroupSummary }) {
   ] as const;
 
   return (
-    <li className="flex flex-col gap-2 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <li className="flex flex-col gap-2.5 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {/*
+         * The reference is the subject of the row, so it leads at subtitle size. It was previously
+         * the same size as the words "cause" and "airport" that qualify it.
+         */}
         <Link
           to={`/cascade/${group.reference}`}
-          className="rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          className="rounded-sm transition-colors duration-hover ease-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          <MonoValue className="text-accent">{group.reference}</MonoValue>
+          <MonoValue className="text-subtitle text-accent">{group.reference}</MonoValue>
         </Link>
         <StateBadge status={group.state} />
         <StateBadge status={group.severity} label={`severity ${group.severity}`} />
-        <span className="text-caption uppercase text-fg-muted">
-          cause <MonoValue muted>{group.root_cause}</MonoValue>
-        </span>
-        <span className="text-caption uppercase text-fg-muted">
-          airport <MonoValue muted>{group.airport_icao}</MonoValue>
-        </span>
         {group.awaiting_approval_count > 0 && (
           <StateBadge
             status="needs_human"
@@ -218,7 +380,17 @@ function GroupCard({ group }: { group: IncidentGroupSummary }) {
           sourceRef={group.provenance.source_ref}
         />
       </div>
-      <div className="flex flex-wrap gap-2">
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Labelled label="cause">
+          <MonoValue muted>{group.root_cause}</MonoValue>
+        </Labelled>
+        <Labelled label="airport">
+          <MonoValue muted>{group.airport_icao}</MonoValue>
+        </Labelled>
+      </div>
+
+      <StatStrip>
         {tiles.map((tile) => {
           const value = group.rollups?.[tile.field];
           return (
@@ -234,7 +406,7 @@ function GroupCard({ group }: { group: IncidentGroupSummary }) {
             />
           );
         })}
-      </div>
+      </StatStrip>
     </li>
   );
 }

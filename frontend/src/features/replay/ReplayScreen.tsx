@@ -12,7 +12,6 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { User } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
 import type { ReplayFrame } from '@/api/types';
@@ -26,6 +25,16 @@ import {
   StateRail,
 } from '@/components/ui/primitives';
 import { FilterChips } from '@/components/ui/Metric';
+import { ActorChip } from '@/features/agent/ActorChip';
+import {
+  DefinitionList,
+  DefinitionRow,
+  Labelled,
+  PageHeader,
+  rowSelectionClass,
+  Toolbar,
+} from '@/components/ui/composition';
+import { utcClock } from '@/components/ui/format';
 import { useKeyboardList } from '@/hooks/useKeyboardList';
 import {
   applyFrameFilters,
@@ -36,13 +45,18 @@ import {
   type FrameFilters,
 } from './replayState';
 
-const ACTOR_TONE: Record<string, string> = {
-  orchestrator: 'text-accent border-accent-border',
-  agent: 'text-state-info border-state-info/30',
-  service: 'text-fg-secondary border-border',
-  human: 'text-fg bg-raised border-border-strong font-medium',
-  provider: 'text-fg-muted border-border-subtle',
-};
+/*
+ * The local `ACTOR_TONE` map is gone: attribution renders through `ActorChip`.
+ *
+ * This was the third copy of the same palette — `ActorChip.tsx`, `DecisionTimeline.tsx` and here —
+ * and all three carried the identical `human` class string. Two of the three also painted `agent`
+ * with `text-state-info`, which is the defect `ActorChip`'s own header warns about: identity
+ * borrowing a colour from the operational state ramp. On this screen a reviewer is scrubbing a log
+ * to find what a *person* did, so "who acted" must never be readable as "what state it is in".
+ *
+ * `ActorChip` keeps the one thing that mattered here: a human act is the highest-contrast, most
+ * solid chip in the list, and it is the only one carrying a glyph.
+ */
 
 export function ReplayScreen() {
   const { incidentId = '' } = useParams();
@@ -121,23 +135,44 @@ export function ReplayScreen() {
   ].sort();
 
   return (
-    <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-3">
-      <Panel
-        title="Replay"
-        className="flex min-h-0 flex-col overflow-hidden"
+    <div className="flex min-h-0 flex-col gap-3">
+      {/*
+       * The record being replayed is the subject, so its reference is the title — and it changes
+       * with the scope, because a group replay is a different record from one incident's.
+       *
+       * `note` is the server's own sentence about what this endpoint does and does not do. It was
+       * fetched and never rendered anywhere on the screen; a read-only guarantee that the console
+       * declines to repeat is a guarantee the reviewer has to take on trust.
+       */}
+      <PageHeader
+        eyebrow="Replay"
+        title={
+          <span className="font-mono tabular-nums">
+            {scope === 'group' && groupRef ? groupRef : incidentId}
+          </span>
+        }
+        status={
+          replayQuery.data?.is_read_only ? (
+            <StateBadge status="skipped" label="read-only" />
+          ) : undefined
+        }
+        meta={
+          <>
+            <Labelled label="scope">
+              <MonoValue muted>{scope === 'group' ? 'whole group' : 'this incident'}</MonoValue>
+            </Labelled>
+            <Labelled label="frames">
+              <MonoValue>{all.length}</MonoValue>
+            </Labelled>
+            <Labelled label="at cursor">
+              <MonoValue muted>
+                {visible.length === 0 ? '0/0' : `${clampedCursor + 1}/${visible.length}`}
+              </MonoValue>
+            </Labelled>
+          </>
+        }
         actions={
-          <div className="flex items-center gap-2">
-            <MonoValue muted className="text-caption">
-              {visible.length} of {all.length} frames
-            </MonoValue>
-            {replayQuery.data?.is_read_only && (
-              <span
-                className="text-caption text-fg-muted"
-                title="The server states this endpoint writes nothing."
-              >
-                read-only
-              </span>
-            )}
+          <Toolbar>
             <FilterChips
               label="Replay scope"
               value={scope}
@@ -152,277 +187,292 @@ export function ReplayScreen() {
                 ...(groupRef ? [{ value: 'group', label: 'Whole group' }] : []),
               ]}
             />
-          </div>
+          </Toolbar>
         }
-      >
-        <div className="flex flex-col gap-2 border-b border-border-subtle px-3 py-2">
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 text-caption uppercase text-fg-muted" aria-hidden>
-              position
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={lastIndex}
-              value={clampedCursor}
-              disabled={visible.length === 0}
-              onChange={(event) => setCursor(Number(event.target.value))}
-              aria-label="Replay position by record index"
-              aria-valuetext={
-                visible[clampedCursor]
-                  ? `record ${clampedCursor + 1} of ${visible.length}: ${visible[clampedCursor]?.summary}`
-                  : 'no records'
-              }
-              className="h-1 w-full accent-accent"
-            />
-            <MonoValue muted className="shrink-0">
-              {visible.length === 0 ? '0/0' : `${clampedCursor + 1}/${visible.length}`}
-            </MonoValue>
-            <button
-              type="button"
-              onClick={() => setCursor(null)}
-              disabled={atLatest}
-              className={clsx(
-                'shrink-0 rounded-sm border px-2 py-0.5 text-label uppercase',
-                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-                /*
-                 * The unavailable state is carried by the border, not by dimming the label.
-                 * `opacity-50` over --fg-muted measured 2.22:1, and a projector is the worst
-                 * place to discover that a control's text has become unreadable.
-                 */
-                atLatest
-                  ? 'border-border-subtle text-fg-muted'
-                  : 'border-border-strong text-fg-secondary hover:text-fg',
-              )}
-            >
-              Latest
-            </button>
-          </div>
+        footer={
+          replayQuery.data?.note ? (
+            <p className="text-caption text-fg-muted">{replayQuery.data.note}</p>
+          ) : undefined
+        }
+      />
 
-          <div className="flex flex-wrap items-center gap-2">
-            <FilterChips
-              label="Actor kind"
-              value={[...filters.actorKinds][0] ?? 'all'}
-              onChange={(next) =>
-                setFilters((current) => ({
-                  ...current,
-                  actorKinds: next === 'all' ? new Set() : new Set([next]),
-                }))
-              }
-              options={[
-                { value: 'all', label: 'All actors' },
-                ...actorKinds.map((kind) => ({
-                  value: kind,
-                  label: kind,
-                  count: all.filter((entry) => entry.actor_kind === kind).length,
-                })),
-              ]}
-            />
-          </div>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 2xl:grid-cols-[minmax(0,1fr)_440px]">
+        <Panel
+          title="Records"
+          className="flex min-h-0 flex-col overflow-hidden"
+          actions={
+            <div className="flex items-center gap-2">
+              <MonoValue muted className="text-caption">
+                {visible.length} of {all.length} frames
+              </MonoValue>
+            </div>
+          }
+        >
+          <div className="flex flex-col gap-2.5 border-b border-border-subtle px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-caption uppercase text-fg-muted" aria-hidden>
+                position
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={lastIndex}
+                value={clampedCursor}
+                disabled={visible.length === 0}
+                onChange={(event) => setCursor(Number(event.target.value))}
+                aria-label="Replay position by record index"
+                aria-valuetext={
+                  visible[clampedCursor]
+                    ? `record ${clampedCursor + 1} of ${visible.length}: ${visible[clampedCursor]?.summary}`
+                    : 'no records'
+                }
+                className="h-1 w-full accent-accent"
+              />
+              <MonoValue muted className="shrink-0">
+                {visible.length === 0 ? '0/0' : `${clampedCursor + 1}/${visible.length}`}
+              </MonoValue>
+              <button
+                type="button"
+                onClick={() => setCursor(null)}
+                disabled={atLatest}
+                className={clsx(
+                  'shrink-0 rounded-sm border px-2 py-0.5 text-label uppercase',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                  /*
+                   * The unavailable state is carried by the border, not by dimming the label.
+                   * `opacity-50` over --fg-muted measured 2.22:1, and a projector is the worst
+                   * place to discover that a control's text has become unreadable.
+                   */
+                  atLatest
+                    ? 'border-border-subtle text-fg-muted'
+                    : 'border-border-strong text-fg-secondary hover:text-fg',
+                )}
+              >
+                Latest
+              </button>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {scope === 'group' && memberRefs.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2">
               <FilterChips
-                label="Member incident"
-                value={[...filters.incidentReferences][0] ?? 'all'}
+                label="Actor kind"
+                value={[...filters.actorKinds][0] ?? 'all'}
                 onChange={(next) =>
                   setFilters((current) => ({
                     ...current,
-                    incidentReferences: next === 'all' ? new Set() : new Set([next]),
+                    actorKinds: next === 'all' ? new Set() : new Set([next]),
                   }))
                 }
                 options={[
-                  { value: 'all', label: 'All members', count: all.length },
-                  ...memberRefs.map((ref) => ({
-                    value: ref,
-                    label: ref.replace(/^INC-\d{4}-\d{4}-/, ''),
-                    count: all.filter((frame) => frame.incident_reference === ref).length,
+                  { value: 'all', label: 'All actors' },
+                  ...actorKinds.map((kind) => ({
+                    value: kind,
+                    label: kind,
+                    count: all.filter((entry) => entry.actor_kind === kind).length,
                   })),
                 ]}
               />
-            )}
-            <FilterChips
-              label="Stage"
-              value={[...filters.stages][0] ?? 'all'}
-              onChange={(next) =>
-                setFilters((current) => ({
-                  ...current,
-                  stages: next === 'all' ? new Set() : new Set([next]),
-                }))
-              }
-              options={[
-                { value: 'all', label: 'All stages' },
-                ...stages.map((stage) => ({ value: stage, label: stage })),
-              ]}
-            />
-            <button
-              type="button"
-              role="switch"
-              aria-checked={filters.onlyDecisions}
-              onClick={() =>
-                setFilters((current) => ({ ...current, onlyDecisions: !current.onlyDecisions }))
-              }
-              className={clsx(
-                'rounded-sm border px-2 py-0.5 text-label uppercase',
-                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-                filters.onlyDecisions
-                  ? 'border-accent-border bg-accent-subtle text-accent'
-                  : 'border-border-subtle text-fg-muted',
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {scope === 'group' && memberRefs.length > 1 && (
+                <FilterChips
+                  label="Member incident"
+                  value={[...filters.incidentReferences][0] ?? 'all'}
+                  onChange={(next) =>
+                    setFilters((current) => ({
+                      ...current,
+                      incidentReferences: next === 'all' ? new Set() : new Set([next]),
+                    }))
+                  }
+                  options={[
+                    { value: 'all', label: 'All members', count: all.length },
+                    ...memberRefs.map((ref) => ({
+                      value: ref,
+                      label: ref.replace(/^INC-\d{4}-\d{4}-/, ''),
+                      count: all.filter((frame) => frame.incident_reference === ref).length,
+                    })),
+                  ]}
+                />
               )}
-            >
-              Only decisions
-            </button>
-            {hiddenBookkeeping > 0 && (
+              <FilterChips
+                label="Stage"
+                value={[...filters.stages][0] ?? 'all'}
+                onChange={(next) =>
+                  setFilters((current) => ({
+                    ...current,
+                    stages: next === 'all' ? new Set() : new Set([next]),
+                  }))
+                }
+                options={[
+                  { value: 'all', label: 'All stages' },
+                  ...stages.map((stage) => ({ value: stage, label: stage })),
+                ]}
+              />
               <button
                 type="button"
                 role="switch"
-                aria-checked={filters.includeBookkeeping}
+                aria-checked={filters.onlyDecisions}
                 onClick={() =>
-                  setFilters((current) => ({
-                    ...current,
-                    includeBookkeeping: !current.includeBookkeeping,
-                  }))
+                  setFilters((current) => ({ ...current, onlyDecisions: !current.onlyDecisions }))
                 }
-                className="rounded-sm border border-border-subtle px-2 py-0.5 text-label uppercase text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                className={clsx(
+                  'rounded-sm border px-2 py-0.5 text-label uppercase',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                  filters.onlyDecisions
+                    ? 'border-accent-border bg-accent-subtle text-accent'
+                    : 'border-border-subtle text-fg-muted',
+                )}
               >
-                {filters.includeBookkeeping ? 'Hide' : 'Show'} {hiddenBookkeeping} bookkeeping
+                Only decisions
               </button>
-            )}
-          </div>
-        </div>
-
-        {visible.length === 0 ? (
-          <EmptyState
-            title="No records match"
-            description="Every record was filtered out. Clear a filter to see the incident's history."
-          />
-        ) : (
-          <ol
-            ref={keyboard.containerRef as React.RefObject<HTMLOListElement>}
-            className="min-h-0 flex-1 overflow-y-auto"
-            onKeyDown={keyboard.onKeyDown}
-            aria-label="Recorded events"
-          >
-            {visible.map((frame, index) => (
-              <ReplayEntry
-                key={`${frame.incident_reference ?? 'group'}-${frame.sequence}`}
-                frame={frame}
-                showIncident={scope === 'group'}
-                past={index <= clampedCursor}
-                current={index === clampedCursor}
-                onSelect={() => setCursor(index)}
-                itemProps={keyboard.itemProps(index)}
-              />
-            ))}
-          </ol>
-        )}
-      </Panel>
-
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-        <Panel
-          title="State at cursor"
-          actions={
-            <MonoValue muted className="text-caption">
-              {visible.length === 0 ? 'no records' : `records 1–${clampedCursor + 1} folded`}
-            </MonoValue>
-          }
-        >
-          <div className="flex flex-col gap-2 px-3 py-2">
-            <div className="flex items-center gap-2">
-              <span className="text-caption uppercase text-fg-muted">state</span>
-              {state.state ? (
-                <StateBadge status={state.state} />
-              ) : (
-                <span className="text-caption text-fg-muted">no transition recorded yet</span>
+              {hiddenBookkeeping > 0 && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={filters.includeBookkeeping}
+                  onClick={() =>
+                    setFilters((current) => ({
+                      ...current,
+                      includeBookkeeping: !current.includeBookkeeping,
+                    }))
+                  }
+                  className="rounded-sm border border-border-subtle px-2 py-0.5 text-label uppercase text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  {filters.includeBookkeeping ? 'Hide' : 'Show'} {hiddenBookkeeping} bookkeeping
+                </button>
               )}
             </div>
-            <div className="flex items-center gap-2 text-caption uppercase text-fg-muted">
-              at{' '}
-              <MonoValue muted>
-                {state.cursorAt ? state.cursorAt.slice(11, 19) + 'Z' : '—'}
+          </div>
+
+          {visible.length === 0 ? (
+            <EmptyState
+              title="No records match"
+              description="Every record was filtered out. Clear a filter to see the incident's history."
+            />
+          ) : (
+            <ol
+              ref={keyboard.containerRef as React.RefObject<HTMLOListElement>}
+              className="min-h-0 flex-1 overflow-y-auto"
+              onKeyDown={keyboard.onKeyDown}
+              aria-label="Recorded events"
+            >
+              {visible.map((frame, index) => (
+                <ReplayEntry
+                  key={`${frame.incident_reference ?? 'group'}-${frame.sequence}`}
+                  frame={frame}
+                  showIncident={scope === 'group'}
+                  past={index <= clampedCursor}
+                  current={index === clampedCursor}
+                  onSelect={() => setCursor(index)}
+                  itemProps={keyboard.itemProps(index)}
+                />
+              ))}
+            </ol>
+          )}
+        </Panel>
+
+        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+          <Panel
+            title="State at cursor"
+            actions={
+              <MonoValue muted className="text-caption">
+                {visible.length === 0 ? 'no records' : `records 1–${clampedCursor + 1} folded`}
               </MonoValue>
-            </div>
-            <dl className="mt-1 flex flex-col gap-1">
-              <Row label="evaluations" value={state.evaluationsSeen} />
-              <Row label="actions" value={state.actionsCompleted} />
-              <Row label="decisions" value={state.decisions.length} />
-              <Row label="transitions" value={state.statesReached.length} />
-            </dl>
+            }
+          >
+            <div className="flex flex-col gap-2 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="text-caption uppercase text-fg-muted">state</span>
+                {state.state ? (
+                  <StateBadge status={state.state} />
+                ) : (
+                  <span className="text-caption text-fg-muted">no transition recorded yet</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-caption uppercase text-fg-muted">
+                at{' '}
+                <MonoValue muted>
+                  {state.cursorAt ? `${utcClock(state.cursorAt) ?? '—'}Z` : '—'}
+                </MonoValue>
+              </div>
+              <dl className="mt-1.5 flex flex-col gap-1">
+                <Row label="evaluations" value={state.evaluationsSeen} />
+                <Row label="actions" value={state.actionsCompleted} />
+                <Row label="decisions" value={state.decisions.length} />
+                <Row label="transitions" value={state.statesReached.length} />
+              </dl>
 
-            {state.decisions.length > 0 && (
-              <ul className="mt-1 flex flex-col gap-1">
-                {state.decisions.map((decision, i) => (
-                  <li key={i} className="flex flex-wrap items-center gap-1.5 text-caption">
-                    {/* A person's act reads as a person's, and its SCOPE is stated: a plan-wide
+              {state.decisions.length > 0 && (
+                <ul className="mt-1 flex flex-col gap-1">
+                  {state.decisions.map((decision, i) => (
+                    <li key={i} className="flex flex-wrap items-center gap-1.5 text-caption">
+                      {/* A person's act reads as a person's, and its SCOPE is stated: a plan-wide
                         signature and a per-action one are different commitments. */}
-                    <span className="rounded-sm border border-border-strong bg-raised px-1 py-0.5 font-medium text-fg">
-                      <User
-                        size={10}
-                        strokeWidth={1.5}
-                        className="mr-1 inline align-[-1px]"
-                        aria-hidden
-                      />
-                      {decision.actor}
-                    </span>
-                    {decision.scope && (
-                      <span className="text-fg-secondary">
-                        {decision.scope === 'plan' ? 'plan-scoped' : 'action-scoped'}
-                      </span>
-                    )}
-                    {decision.assuranceId !== null && (
-                      <MonoValue muted>evaluation {decision.assuranceId}</MonoValue>
-                    )}
-                    {decision.planApprovalId !== null && (
-                      <MonoValue muted>approval {decision.planApprovalId}</MonoValue>
-                    )}
-                    {decision.incidentReference && scope === 'group' && (
-                      <MonoValue muted>{decision.incidentReference}</MonoValue>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {scope === 'group' && state.incidentsTouched.length > 0 && (
-              <p className="mt-1 text-caption text-fg-muted">
-                covers <MonoValue muted>{state.incidentsTouched.length}</MonoValue> member incident
-                {state.incidentsTouched.length === 1 ? '' : 's'} — the group's state is the last
-                transition anywhere in it, not one member's
-              </p>
-            )}
-
-            {state.evidenceRefs.length > 0 && (
-              <details className="mt-1">
-                <summary className="cursor-pointer text-caption text-fg-muted">
-                  {state.evidenceRefs.length} evidence reference
-                  {state.evidenceRefs.length === 1 ? '' : 's'} up to here
-                </summary>
-                <ul className="mt-1 flex flex-wrap gap-1">
-                  {state.evidenceRefs.map((ref) => (
-                    <li key={ref}>
-                      <MonoValue muted className="text-caption">
-                        {ref}
-                      </MonoValue>
+                      <ActorChip actorKind="human" actor={decision.actor} />
+                      {decision.scope && (
+                        <span className="text-fg-secondary">
+                          {decision.scope === 'plan' ? 'plan-scoped' : 'action-scoped'}
+                        </span>
+                      )}
+                      {decision.assuranceId !== null && (
+                        <MonoValue muted>evaluation {decision.assuranceId}</MonoValue>
+                      )}
+                      {decision.planApprovalId !== null && (
+                        <MonoValue muted>approval {decision.planApprovalId}</MonoValue>
+                      )}
+                      {decision.incidentReference && scope === 'group' && (
+                        <MonoValue muted>{decision.incidentReference}</MonoValue>
+                      )}
                     </li>
                   ))}
                 </ul>
-              </details>
-            )}
+              )}
 
-            <p className="mt-1 text-caption text-fg-muted">
-              Folded from each frame's own <MonoValue muted>state_after</MonoValue>. The state is
-              read, not inferred, and nothing is interpolated between frames.
-            </p>
-          </div>
-        </Panel>
+              {scope === 'group' && state.incidentsTouched.length > 0 && (
+                <p className="mt-1 text-caption text-fg-muted">
+                  covers <MonoValue muted>{state.incidentsTouched.length}</MonoValue> member
+                  incident
+                  {state.incidentsTouched.length === 1 ? '' : 's'} — the group's state is the last
+                  transition anywhere in it, not one member's
+                </p>
+              )}
 
-        {incidentQuery.data && (
-          <Panel title="Recorded rail">
-            <div className="px-3 py-2">
-              <StateRail rail={incidentQuery.data.state_rail} current={incidentQuery.data.state} />
+              {state.evidenceRefs.length > 0 && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-caption text-fg-muted">
+                    {state.evidenceRefs.length} evidence reference
+                    {state.evidenceRefs.length === 1 ? '' : 's'} up to here
+                  </summary>
+                  <ul className="mt-1 flex flex-wrap gap-1">
+                    {state.evidenceRefs.map((ref) => (
+                      <li key={ref}>
+                        <MonoValue muted className="text-caption">
+                          {ref}
+                        </MonoValue>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              <p className="mt-1 text-caption text-fg-muted">
+                Folded from each frame's own <MonoValue muted>state_after</MonoValue>. The state is
+                read, not inferred, and nothing is interpolated between frames.
+              </p>
             </div>
           </Panel>
-        )}
+
+          {incidentQuery.data && (
+            <Panel title="Recorded rail">
+              <div className="px-3 py-2.5">
+                <StateRail
+                  rail={incidentQuery.data.state_rail}
+                  current={incidentQuery.data.state}
+                />
+              </div>
+            </Panel>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -459,13 +509,7 @@ function ReplayEntry({
   const [expanded, setExpanded] = useState(false);
   const isHuman = frame.actor_kind === 'human' || frame.human_decision_id !== null;
   return (
-    <li
-      className={clsx(
-        'border-b border-l-2 border-border-subtle',
-        current ? 'border-l-accent bg-raised' : 'border-l-transparent',
-        !past && 'opacity-45',
-      )}
-    >
+    <li className={clsx(rowSelectionClass(current), !past && 'opacity-45')}>
       <div className="flex items-center gap-2 px-2 py-1.5">
         <button
           type="button"
@@ -480,17 +524,12 @@ function ReplayEntry({
           <MonoValue muted className="shrink-0">
             {frame.occurred_at.slice(11, 19)}
           </MonoValue>
-          <span
-            className={clsx(
-              'shrink-0 rounded-sm border px-1 py-0.5 text-caption uppercase',
-              ACTOR_TONE[frame.actor_kind] ?? 'text-fg-muted border-border-subtle',
-            )}
-          >
-            {isHuman && (
-              <User size={10} strokeWidth={1.5} className="mr-1 inline align-[-1px]" aria-hidden />
-            )}
-            {frame.actor_kind}
-          </span>
+          {/*
+           * `human_decision_id` is as much a mark of a person as `actor_kind` is: a frame recorded
+           * against a service can still be the record of somebody's signature. So the chip is told
+           * `human` when either says so, rather than trusting one field.
+           */}
+          <ActorChip actorKind={isHuman ? 'human' : frame.actor_kind} className="shrink-0" />
           {showIncident && frame.incident_reference && (
             <MonoValue muted className="shrink-0 text-caption">
               {frame.incident_reference.replace(/^INC-\d{4}-\d{4}-/, '')}
@@ -520,7 +559,7 @@ function ReplayEntry({
       </div>
       {expanded && (
         <div className="border-t border-border-subtle bg-inset px-3 py-2">
-          <dl className="flex flex-col gap-1">
+          <DefinitionList width="sm">
             <Detail label="stage" value={frame.stage} />
             <Detail label="actor" value={frame.actor} />
             {frame.incident_reference && (
@@ -543,7 +582,7 @@ function ReplayEntry({
             {frame.plan_approval_id !== null && (
               <Detail label="approval" value={String(frame.plan_approval_id)} />
             )}
-          </dl>
+          </DefinitionList>
           {frame.evidence_refs.length > 0 && (
             <div className="mt-1.5">
               <span className="text-caption uppercase text-fg-muted">evidence</span>
@@ -569,16 +608,17 @@ function ReplayEntry({
   );
 }
 
+/*
+ * One of five definition-row implementations that existed at three different label widths, which is
+ * why two panels in the same column had their values starting at different x positions.
+ */
 function Detail({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <div className="flex gap-2">
-      <dt className="w-[92px] shrink-0 text-caption uppercase text-fg-muted">{label}</dt>
-      <dd className="min-w-0">
-        <MonoValue muted className="break-all">
-          {value}
-        </MonoValue>
-        {note && <span className="ml-1.5 text-caption text-fg-muted">{note}</span>}
-      </dd>
-    </div>
+    <DefinitionRow label={label} width="sm">
+      <MonoValue muted className="break-all">
+        {value}
+      </MonoValue>
+      {note && <span className="ml-1.5 text-caption text-fg-muted">{note}</span>}
+    </DefinitionRow>
   );
 }

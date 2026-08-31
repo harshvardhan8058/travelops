@@ -795,6 +795,13 @@ export function AgeIndicator({ minutes, limit = 60 }: { minutes: number; limit?:
  *
  * States and their timestamps come from `state_rail` as returned. The rail never assumes the
  * canonical six: if the API returns a different sequence, that sequence is what renders.
+ *
+ * The connector between steps is `bg-border`, not `bg-border-default`. `tailwind.config.ts` maps
+ * the mid-weight border to the `DEFAULT` key, and Tailwind emits a `DEFAULT` key as the bare class
+ * name — so `bg-border-default` was never generated and the connectors rendered with no background
+ * at all. A rail of disconnected chips is not a rail, and the failure was invisible to every gate:
+ * a missing background breaks no type, no lint rule, no colour check, and no contrast probe.
+ * `StepRail` below had the same typo.
  */
 export function StateRail({
   rail,
@@ -812,7 +819,7 @@ export function StateRail({
 
         return (
           <li key={step.state} className="flex items-center gap-1">
-            {index > 0 && <span className="h-px w-3 bg-border-default" aria-hidden />}
+            {index > 0 && <span className="h-px w-3 bg-border" aria-hidden />}
             <span
               {...(isCurrent ? { 'aria-current': 'step' as const } : {})}
               className={clsx(
@@ -907,7 +914,7 @@ export function StepRail({
 
         return (
           <li key={step.id} className="flex items-center gap-1">
-            {index > 0 && <span className="h-px w-3 bg-border-default" aria-hidden />}
+            {index > 0 && <span className="h-px w-3 bg-border" aria-hidden />}
             {onSelect ? (
               <button
                 type="button"

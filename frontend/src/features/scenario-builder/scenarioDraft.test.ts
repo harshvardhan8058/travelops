@@ -581,7 +581,25 @@ describe('no Phase 5 surface case-transforms a contract value', () => {
   });
 
   it.each(SCREENS)('%s routes labelled values through the shared helper', (_name, source) => {
-    expect(source).toContain('function Labelled(');
+    /*
+     * The rule this guard protects is that a label/value pair goes through ONE component rather than
+     * being hand-written inline at each call site — that is what keeps `uppercase` on the label and
+     * off the value.
+     *
+     * `Labelled` now lives in `components/ui/composition.tsx`. It previously had to be defined
+     * locally because there was nowhere shared to put it, and three screens each carried a
+     * byte-identical copy with its own copy of the comment explaining this defect. Asserting on a
+     * local `function Labelled(` therefore asserted the duplication rather than the rule, and would
+     * have made consolidating it impossible.
+     *
+     * Both shapes are accepted; what is asserted is that the screen has a single definition it
+     * routes through and actually uses it. The load-bearing check in this describe block is the
+     * scanner above, which reads the real JSX and is unaffected by where the helper lives.
+     */
+    const definesLocally = source.includes('function Labelled(');
+    const importsShared =
+      /import\s*\{[^}]*\bLabelled\b[^}]*\}\s*from\s*'@\/components\/ui\/composition'/.test(source);
+    expect(definesLocally || importsShared).toBe(true);
     expect(source).toContain('<Labelled label=');
   });
 });

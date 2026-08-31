@@ -39,6 +39,20 @@ import {
   Panel,
   StateBadge,
 } from '@/components/ui/primitives';
+import {
+  Absent,
+  Button,
+  Labelled,
+  Notice,
+  NotYetAvailable,
+  PageHeader,
+  PanelBody,
+  ReasonField,
+  SectionHeading,
+  StatStrip,
+  TableFrame,
+  TableHead,
+} from '@/components/ui/composition';
 
 /** Copy for the reasons the server can return. Never composed from prose. */
 const REFUSAL_COPY: Record<string, string> = {
@@ -57,14 +71,14 @@ function refusalLabel(code: string): string {
 
 function ExcludedList({ items }: { items: ExcludedEvaluation[] }) {
   if (items.length === 0) {
-    return <p className="px-3 py-2 text-body text-fg-muted">Nothing excluded.</p>;
+    return <p className="px-2.5 py-2 text-body text-fg-muted">Nothing excluded.</p>;
   }
   const byReason = new Map<string, ExcludedEvaluation[]>();
   for (const item of items) {
     byReason.set(item.reason_code, [...(byReason.get(item.reason_code) ?? []), item]);
   }
   return (
-    <div className="flex flex-col gap-3 px-3 py-2">
+    <div className="flex flex-col gap-2.5 px-2.5 py-2">
       {[...byReason.entries()].map(([code, group]) => (
         <div key={code} className="flex flex-col gap-1">
           <h4 className="text-label uppercase text-state-warn">
@@ -248,16 +262,7 @@ export function GroupApprovalQueue() {
 
     if (unavailable) {
       return (
-        <EmptyState
-          title="Plan assurance is not available yet"
-          description={unavailable.resolution}
-          action={
-            <span className="flex flex-wrap items-center justify-center gap-2">
-              <StateBadge status="pending" label={unavailable.code} />
-              <span className="text-caption text-fg-muted">{unavailable.message}</span>
-            </span>
-          }
-        />
+        <NotYetAvailable title="Plan assurance is not available yet" unavailable={unavailable} />
       );
     }
 
@@ -299,105 +304,134 @@ export function GroupApprovalQueue() {
 
   return (
     <div className="flex flex-col gap-3">
-      <Panel title={`Plan assurance · ${data.group_reference}`}>
-        <div className="flex flex-wrap items-center gap-4 px-3 py-2">
-          <span className="flex items-baseline gap-2">
-            <span className="text-label uppercase text-fg-muted">Gate</span>
-            <StateBadge status={data.requires_human ? 'awaiting_approval' : 'executing'} />
-            <MonoValue>{data.decision.replace(/_/g, ' ')}</MonoValue>
-          </span>
-          <span className="flex items-baseline gap-2">
-            <span className="text-label uppercase text-fg-muted">Plan risk tier</span>
-            <MonoValue>{data.plan_risk_tier}</MonoValue>
-          </span>
-          <span className="flex items-baseline gap-2">
-            <span className="text-label uppercase text-fg-muted">Tasks</span>
-            <Metric
-              value={totalTasks}
-              derivation={planTotalDerivation({
-                label: 'Tasks',
-                field: 'task_count',
-                contributions: taskContributions,
-                configVersion: data.config_version,
-                configHash: data.config_hash,
-              })}
-            />
-          </span>
-          <span className="flex items-baseline gap-2">
-            {/* "Tasks", not "incidents": the shell's blocked badge counts incidents awaiting a
-                person, and two differently-scoped figures under one word is how a reviewer
-                concludes the console contradicts itself. */}
-            <span className="text-label uppercase text-fg-muted">Tasks awaiting a person</span>
-            <Metric
-              value={awaiting}
-              derivation={planTotalDerivation({
-                label: 'Tasks awaiting a person',
-                field: 'awaiting_approval_count',
-                contributions: awaitingContributions,
-                configVersion: data.config_version,
-                configHash: data.config_hash,
-              })}
-            />
-          </span>
-        </div>
+      {/*
+       * The disruption group is the subject, so the reference is the title — it was previously
+       * interpolated into a 12px uppercase panel label, which is also what the browser gate reads to
+       * prove this route rendered. It stays verbatim: `GRP-2026-0820-VOBL` is a contract value.
+       *
+       * The two figures move into tiles rather than sitting inline as `label value` pairs, because
+       * "how many tasks" and "how many are waiting on me" are the numbers this screen exists to put
+       * in front of a person. Both still carry their `planTotalDerivation`, so every summand remains
+       * auditable through the popover.
+       */}
+      <PageHeader
+        eyebrow="Group approval queue"
+        title={<span className="font-mono tabular-nums">{data.group_reference}</span>}
+        status={<StateBadge status={data.requires_human ? 'awaiting_approval' : 'executing'} />}
+        meta={
+          <>
+            <Labelled label="gate">
+              <MonoValue>{data.decision.replace(/_/g, ' ')}</MonoValue>
+            </Labelled>
+            <Labelled label="plan risk tier">
+              <MonoValue>{data.plan_risk_tier}</MonoValue>
+            </Labelled>
+            <Labelled label="config">
+              <MonoValue muted>{data.config_version}</MonoValue>
+            </Labelled>
+            <Labelled label="config hash">
+              <MonoValue muted>{data.config_hash.slice(0, 12)}</MonoValue>
+            </Labelled>
+            <Labelled label="plan hash">
+              <MonoValue muted>{data.plan_hash.slice(0, 12)}</MonoValue>
+            </Labelled>
+          </>
+        }
+        actions={
+          <StatStrip>
+            <div className="flex min-w-[132px] flex-col gap-1 rounded border border-border-subtle bg-inset px-2.5 py-2">
+              <span className="text-caption uppercase text-fg-muted">Tasks</span>
+              <span className="text-subtitle">
+                <Metric
+                  value={totalTasks}
+                  derivation={planTotalDerivation({
+                    label: 'Tasks',
+                    field: 'task_count',
+                    contributions: taskContributions,
+                    configVersion: data.config_version,
+                    configHash: data.config_hash,
+                  })}
+                />
+              </span>
+            </div>
+            <div
+              className={clsx(
+                'flex min-w-[132px] flex-col gap-1 rounded border px-2.5 py-2',
+                awaiting > 0
+                  ? 'border-state-warn/30 bg-state-warn-bg'
+                  : 'border-border-subtle bg-inset',
+              )}
+            >
+              {/* "Tasks", not "incidents": the shell's blocked badge counts incidents awaiting a
+                  person, and two differently-scoped figures under one word is how a reviewer
+                  concludes the console contradicts itself. */}
+              <span
+                className={clsx(
+                  'text-caption uppercase',
+                  awaiting > 0 ? 'text-state-warn' : 'text-fg-muted',
+                )}
+              >
+                Awaiting a person
+              </span>
+              <span className="text-subtitle">
+                <Metric
+                  value={awaiting}
+                  derivation={planTotalDerivation({
+                    label: 'Tasks awaiting a person',
+                    field: 'awaiting_approval_count',
+                    contributions: awaitingContributions,
+                    configVersion: data.config_version,
+                    configHash: data.config_hash,
+                  })}
+                />
+              </span>
+            </div>
+          </StatStrip>
+        }
+        footer={
+          <p className="text-body text-fg-secondary">
+            This summary authorises nothing. Every action still passes its own gate at execution
+            time.
+          </p>
+        }
+      />
 
-        {/* Always visible: a replay must be able to prove which semantics applied. */}
-        <div className="flex flex-wrap items-center gap-3 border-t border-border-subtle px-3 py-1.5 text-label text-fg-muted">
-          <span>
-            <span className="uppercase">config</span> <MonoValue>{data.config_version}</MonoValue>
-          </span>
-          <span>
-            <span className="uppercase">hash</span>{' '}
-            <MonoValue>{data.config_hash.slice(0, 12)}</MonoValue>
-          </span>
-          <span>
-            <span className="uppercase">plan</span>{' '}
-            <MonoValue>{data.plan_hash.slice(0, 12)}</MonoValue>
-          </span>
-          {!data.config_hash_uniform && (
-            <span className="text-state-warn">members judged under more than one config hash</span>
-          )}
-        </div>
-
-        <p className="border-t border-border-subtle px-3 py-1.5 text-body text-fg-secondary">
-          This summary authorises nothing. Every action still passes its own gate at execution time.
-        </p>
-      </Panel>
+      {/* Always visible: a replay must be able to prove which semantics applied. */}
+      {!data.config_hash_uniform && (
+        <Notice tone="warn" alert divider="none" className="rounded border">
+          Members were judged under more than one config hash, so the figures above span two sets of
+          gate semantics.
+        </Notice>
+      )}
 
       <Panel title="The six plan checks">
         <ChecksRow checks={data.checks} />
         {data.blocking.length > 0 && (
-          <p className="border-t border-border-subtle px-3 py-1.5 text-body text-state-warn">
+          <Notice tone="warn">
             Blocking: {data.blocking.map((name) => name.replace(/_/g, ' ')).join(', ')}
-          </p>
+          </Notice>
         )}
         <ExposureRow exposure={data.exposure} />
       </Panel>
 
-      <Panel title="Per incident">
-        <table className="w-full border-collapse text-body">
-          <caption className="sr-only">
-            Each member incident in the group, with its plan and how many tasks await a person.
-          </caption>
-          <thead>
-            <tr className="border-b border-border-subtle">
-              <th scope="col" className="px-3 py-1.5 text-left text-label uppercase text-fg-muted">
-                Incident
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left text-label uppercase text-fg-muted">
-                Variant
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left text-label uppercase text-fg-muted">
-                Tasks
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left text-label uppercase text-fg-muted">
-                Awaiting
-              </th>
-              <th scope="col" className="px-3 py-1.5 text-left text-label uppercase text-fg-muted">
-                Decisions
-              </th>
-            </tr>
-          </thead>
+      <Panel
+        title="Per incident"
+        actions={
+          <MonoValue muted className="text-caption">
+            {data.incidents.length}
+          </MonoValue>
+        }
+      >
+        <TableFrame caption="Each member incident in the group, with its plan and how many tasks await a person.">
+          <TableHead
+            columns={[
+              { key: 'incident', label: 'Incident' },
+              { key: 'variant', label: 'Variant' },
+              { key: 'tasks', label: 'Tasks', align: 'right' },
+              { key: 'awaiting', label: 'Awaiting', hint: 'a person', align: 'right' },
+              { key: 'decisions', label: 'Decisions', hint: 'gate outcome per task' },
+            ]}
+          />
           <tbody>
             {data.incidents.map((incident) => {
               const segments = [
@@ -416,11 +450,13 @@ export function GroupApprovalQueue() {
                   <th scope="row" className="px-3 py-1.5 text-left font-normal">
                     <MonoValue>{incident.incident_reference}</MonoValue>
                   </th>
-                  <td className="px-3 py-1.5 text-fg-secondary">{incident.variant_key ?? '—'}</td>
-                  <td className="px-3 py-1.5">
+                  <td className="px-3 py-1.5 text-fg-secondary">
+                    {incident.variant_key ?? <Absent label="no variant" />}
+                  </td>
+                  <td className="px-3 py-1.5 text-right">
                     <MonoValue>{incident.task_count}</MonoValue>
                   </td>
-                  <td className="px-3 py-1.5">
+                  <td className="px-3 py-1.5 text-right">
                     <MonoValue
                       className={clsx(incident.awaiting_approval_count > 0 && 'text-state-warn')}
                     >
@@ -434,105 +470,131 @@ export function GroupApprovalQueue() {
               );
             })}
           </tbody>
-        </table>
+        </TableFrame>
       </Panel>
 
       <Panel title="Plan approval">
-        <div className="flex flex-col gap-3 px-3 py-3">
+        <PanelBody gap="loose">
           <p className="text-body text-fg-secondary">
-            A plan approval covers <strong>low and medium risk</strong> actions only. High risk
-            always requires its own action-level approval, and no approval ever covers a failed
-            check — an operator may accept exposure, but may not assert a fact the evidence does not
-            support.
+            A plan approval covers <strong className="text-fg">low and medium risk</strong> actions
+            only. High risk always requires its own action-level approval, and no approval ever
+            covers a failed check — an operator may accept exposure, but may not assert a fact the
+            evidence does not support.
           </p>
 
+          {/*
+           * The two halves of the partition, side by side and visually separated.
+           *
+           * The excluded half is the important one, and it previously read as an afterthought: both
+           * columns were a bare `h3` over a list with no boundary between them, so "seven covered"
+           * and "one that still needs you by name" blended into a single column of text. Each half is
+           * now a bordered well tinted to its own verdict, which is what makes the eighth item
+           * visible — the entire argument this screen exists to make.
+           */}
           <div className="grid gap-3 lg:grid-cols-2">
-            <section aria-label="Would be covered">
-              <h3 className="px-1 pb-1 text-label uppercase text-state-ok">
-                Would be covered · {preview?.covered_count ?? 0}
-              </h3>
+            <section
+              aria-label="Would be covered"
+              className="rounded border border-state-ok/30 bg-state-ok-bg"
+            >
+              <div className="border-b border-state-ok/30 px-2.5 py-1.5">
+                <SectionHeading tone="ok" count={preview?.covered_count ?? 0}>
+                  Would be covered
+                </SectionHeading>
+              </div>
               {preview && preview.covered.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 px-1">
+                <ul className="flex flex-col gap-1 px-2.5 py-2">
                   {preview.covered.map((item) => (
                     <li key={item.evaluation_id} className="flex flex-wrap items-baseline gap-2">
                       <MonoValue>{item.incident_reference}</MonoValue>
-                      <span className="text-fg-primary">{item.action_type}</span>
+                      <span className="text-body text-fg">{item.action_type}</span>
                       <span className="text-label uppercase text-fg-muted">{item.risk_tier}</span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="px-1 text-body text-fg-muted">
+                <p className="px-2.5 py-2 text-body text-fg-muted">
                   Nothing in this group can be covered by a single plan approval.
                 </p>
               )}
             </section>
 
-            <section aria-label="Cannot be covered">
-              <h3 className="px-1 pb-1 text-label uppercase text-state-warn">
-                Cannot be covered · {preview?.excluded_count ?? 0}
-              </h3>
+            <section
+              aria-label="Cannot be covered"
+              className="rounded border border-state-warn/30 bg-state-warn-bg"
+            >
+              <div className="border-b border-state-warn/30 px-2.5 py-1.5">
+                <SectionHeading tone="warn" count={preview?.excluded_count ?? 0}>
+                  Cannot be covered
+                </SectionHeading>
+              </div>
               <ExcludedList items={preview?.excluded ?? []} />
             </section>
           </div>
 
           {preview?.refusal && (
-            <p className="text-body text-state-warn">
+            <Notice tone="warn" divider="none" className="rounded border">
               {refusalLabel(preview.refusal)}
               {preview.refusal_reason ? ` — ${preview.refusal_reason}` : ''}
-            </p>
+            </Notice>
           )}
 
-          <label className="flex flex-col gap-1">
-            <span className="text-label uppercase text-fg-muted">Reason (required)</span>
-            <input
-              type="text"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              maxLength={2000}
-              aria-invalid={reason.trim().length === 0}
-              className="rounded border border-border-subtle bg-inset px-2 py-1.5 text-body text-fg-primary"
-              placeholder="Written to every decision this approval records"
-            />
-          </label>
+          <ReasonField
+            id="group-approval-reason"
+            value={reason}
+            onChange={setReason}
+            disabled={!api.canWrite}
+            placeholder="Written to every decision this approval records"
+            hint="One reason is recorded against every decision this approval creates. It cannot be edited afterwards."
+          />
 
           {failure && (
-            <p role="alert" className="text-body text-state-crit">
+            <Notice tone="crit" alert divider="none" className="rounded border">
               {failure}
-            </p>
+            </Notice>
           )}
           {outcome && (
-            <p role="status" className="text-body text-fg-primary">
+            <Notice tone="ok" divider="none" className="rounded border" alert>
               {outcome}
-            </p>
+            </Notice>
           )}
 
           {/*
            * Absent rather than disabled when there is nothing to cover: a disabled control invites
            * the operator to work out why, and the excluded list above already says why.
+           *
+           * When there IS something to cover, the button states the count in its label so the
+           * operator commits to a specific number of actions rather than to the word "approve".
            */}
           {(preview?.covered_count ?? 0) > 0 && (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="md"
+              className="self-start"
               disabled={!canApprove || approve.isPending}
+              disabledReason={
+                !api.canWrite
+                  ? 'Fixtures are being served. Point the console at the live API to record an approval.'
+                  : reason.trim().length === 0
+                    ? 'Give a reason first: it is written to every decision this approval records.'
+                    : undefined
+              }
               onClick={() => approve.mutate(reason.trim())}
-              className="self-start rounded border border-accent px-3 py-1.5 text-body text-accent disabled:border-border-subtle disabled:text-fg-muted"
             >
               {approve.isPending
                 ? 'Recording…'
                 : `Approve ${preview?.covered_count} low/medium action${
                     preview?.covered_count === 1 ? '' : 's'
                   }`}
-            </button>
+            </Button>
           )}
+        </PanelBody>
 
-          {!api.canWrite && (
-            <p className="text-body text-fg-muted">
-              Fixture mode: write affordances are disabled, because a synthesised response would put
-              a state change on screen that never happened.
-            </p>
-          )}
-        </div>
+        {!api.canWrite && (
+          <Notice tone="muted">
+            Fixture mode: write affordances are disabled, because a synthesised response would put a
+            state change on screen that never happened.
+          </Notice>
+        )}
       </Panel>
     </div>
   );
