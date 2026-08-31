@@ -82,12 +82,7 @@ async def system_mode() -> dict[str, Any]:
     modes = get_modes()
     payload = modes.to_dict()
     payload["app_env"] = settings.app_env.value
-    payload["policy_pack"] = {
-        "id": settings.policy_pack_id,
-        "version": settings.policy_pack_version,
-        # Rendered verbatim by the UI badge. Never upgraded by hand.
-        "ui_label": _policy_ui_label(modes.policy.value, settings),
-    }
+    payload["policy_pack"] = _policy_pack_payload(settings)
     payload["data_seed"] = settings.data_seed
     payload["limits"] = {
         "max_workflow_steps": settings.max_workflow_steps,
@@ -96,9 +91,52 @@ async def system_mode() -> dict[str, Any]:
     return payload
 
 
-def _policy_ui_label(mode: str, settings: Any) -> str:
-    if mode == "demo":
-        return "DEMO FIXTURE · fictional policy · no legal claim"
-    if mode == "charter":
-        return "MoCA PASSENGER CHARTER · FEB 2019 · PENDING CAR VERIFICATION"
-    return f"VERIFIED · {settings.policy_pack_id} {settings.policy_pack_version}"
+def _policy_pack_payload(settings: Any) -> dict[str, Any]:
+    """Pack identity and label read from the loaded pack, never composed from the mode.
+
+    This used to derive the label from the requested `POLICY_MODE` with a string switch, which is
+    the same defect in three different ways. The switch had drifted out of step with the packs it
+    described (it uppercased the charter's `MoCA Passenger Charter · Feb 2019 · pending CAR
+    verification`, and carried demo text the fixture pack no longer used), and in the remaining
+    branch it *composed* the word "VERIFIED" from a requested mode — a legal standing asserted by
+    configuration rather than read from a reviewed pack.
+
+    The pack is the authority for its own label, so the shell now reads the same `LoadedPack` that
+    `GET /incidents/{id}/policy` reports. One derivation, so the chip and the citation card cannot
+    disagree about the instrument a figure is cited from.
+
+    Identity comes from the loaded pack too, not from `POLICY_PACK_ID`. In demo mode those differ:
+    `active_pack_coordinates` resolves demo to the fictional fixture regardless of the configured
+    id, so reporting the configured id beside the fixture's label would have put one pack's name
+    next to another pack's standing.
+
+    Imported inside the function, as `app/api/policy.py` does, to keep the reasoning/policy layer
+    off the import path of the liveness probe.
+    """
+    from app.errors import PackNotVerifiedEligible, PolicyPackUnavailable
+    from app.policy.entitlements import active_pack_coordinates, load_active_pack
+
+    pack_id, pack_version = active_pack_coordinates(settings)
+    try:
+        pack = load_active_pack(settings)
+    except (PolicyPackUnavailable, PackNotVerifiedEligible) as exc:
+        # The shell must still render, so this reports the coordinates it was asked for and an
+        # empty label rather than failing. Empty, not a stand-in string: the console already
+        # renders a blank label as "policy pack unknown", and inventing a label here for a pack
+        # that would not load is precisely what this function was changed to stop doing.
+        log.warning(
+            "policy_pack_label_unavailable",
+            pack_id=pack_id,
+            pack_version=pack_version,
+            policy_mode=settings.policy_mode.value,
+            reason_code=getattr(exc, "code", "UNKNOWN"),
+            detail=str(exc)[:200],
+        )
+        return {"id": pack_id, "version": pack_version, "ui_label": ""}
+
+    return {
+        "id": pack.pack_id,
+        "version": pack.version,
+        # Rendered verbatim by the UI badge. Never upgraded, recased or composed by hand.
+        "ui_label": pack.ui_label,
+    }
