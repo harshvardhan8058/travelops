@@ -19,14 +19,16 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Final, TypeVar
 
 import structlog
 from pydantic import BaseModel, ValidationError
 
-from app.agents.contract import ModelCallAudit
-from app.config import LLMMode, get_settings
+from app.agents.contract import ModelCallAudit, PlannerResponse
+from app.config import LLMMode, LLMProvider, get_settings
+from app.models.enums import ActionStatus, ActionType
 
 log = structlog.get_logger(__name__)
 
@@ -82,6 +84,203 @@ MIN_OUTPUT_BUDGET = 512
 #: against the two real 413s (prompts of 710 and 1395 tokens) this over-estimates, which is the
 #: safe direction for a ceiling.
 _CHARS_PER_TOKEN = 2.5
+
+
+# ---------------------------------------------------------------- provider-facing output shape
+#
+# The shape a model is ASKED to emit, as distinct from the shape this system accepts.
+#
+# This exists because of one live Phase 3 failure. The planner request asked OpenRouter for
+# `response_format={"type": "json_object"}`, which guarantees **syntactically valid JSON and
+# nothing else**. `openai/gpt-oss-120b` answered HTTP 200, `finish_reason=stop`, and this:
+#
+#     {"final": {"status": ..., "reason": ..., "tasks": [...]}}
+#
+# Valid JSON. Not a `PlannerResponse`. `status`, `reason` and `tasks` were missing at the root and
+# `final` was an undeclared key, so validation refused it, the candidate was dropped and the run
+# continued on the deterministic playbook. That refusal was correct — the defect was upstream of
+# it, in a request that never said what shape the answer had to take.
+#
+# It lives in this module, beside the request it belongs to, rather than in one of its own: a
+# guard in `test_llm_provider_transport.py` asserts that `app/llm/` holds exactly one module,
+# because a second one is how two request shapes start to drift. The request shape is this file's
+# business.
+#
+# ## Why a second schema is needed at all
+#
+# `PlannerResponse.model_json_schema()` cannot be handed to a strict provider unchanged. Strict
+# structured-output implementations accept a restricted JSON Schema subset and impose
+# requirements Pydantic does not emit:
+#
+#   * every object must carry `additionalProperties: false`;
+#   * every declared property must appear in `required` — Pydantic omits defaulted fields, so
+#     `evidence_refs` and `payload_type` would be absent from `required`;
+#   * `PlanTask` would arrive requiring only `action`;
+#   * cardinality and length keywords (`minItems`, `minLength`, `maxLength`) are outside the
+#     reliably-supported subset and are ignored or rejected depending on the endpoint;
+#   * an object with no declared properties is rejected outright by at least one major
+#     implementation, which is what decides how `inputs` is represented below.
+#
+# So this is a deliberate projection, and a NARROWING one: every document it admits is also
+# admitted by `PlannerResponse`, and not the reverse. That direction is the point — the provider
+# is held to a subset of what the contract already allows, and the contract still has the last
+# word.
+#
+# ## What it does NOT do
+#
+# It does not replace validation. `_call_provider` still parses the assistant text and still runs
+# `PlannerResponse.model_validate` on it afterwards, unchanged. Provider enforcement is a request
+# for cooperation, not a guarantee: OpenRouter routes per endpoint, endpoints differ in whether
+# they constrain decoding or treat the schema as a strong hint, and a schema-shaped answer can
+# still be semantically wrong. So the properties that actually protect execution stay where they
+# were:
+#
+#     non-empty `tasks`            PlannerResponse (`min_length=1`) — NOT expressible here
+#     `reason` length bounds       PlannerResponse (`min_length=1, max_length=2000`)
+#     non-blank `target_refs`      PlanTask's own field validator
+#     undeclared keys refused      `extra="forbid"` on both models
+#     invented actions refused     the closed `ActionType` enum
+#     unexecutable tasks dropped   `reflection.reflect`
+#     authority to execute         the Decision Assurance Gate and human approval
+#
+# ## `inputs` is deliberately not emittable
+#
+# `PlanTask.inputs` stays `dict[str, Any]` — no local semantics change — but the schema does not
+# declare it, and every object here is closed, so a cooperating provider cannot produce it and
+# Pydantic's existing default supplies `{}`. That is the only value this contract can yield, and
+# it is the right one on the evidence:
+#
+#   * no `PlaybookStep` in `app/orchestrator/playbook.py` sets any inputs;
+#   * the committed planner fixture carries `"inputs": {}` on all six tasks;
+#   * services load their own inputs from the database through `service_registry`, so a
+#     model-authored value is not what makes an action executable;
+#   * `config/proposal_authority.v1.yaml` exists precisely because `inputs` flows into
+#     `GateInputs.payload`, and it enumerates the fields a model-authored payload may not
+#     assert. Not offering the model a place to write them is narrower than refusing them
+#     afterwards, and that refusal remains in place regardless.
+#
+# Declaring it as an empty closed object was the alternative, and that is the construct strict
+# validators reject. Omitting it achieves the same required `{}` without betting on the edge case.
+
+
+@dataclass(frozen=True)
+class WireSchema:
+    """A named strict schema, ready to become a `response_format` block."""
+
+    name: str
+    schema: dict[str, Any]
+
+    def as_response_format(self) -> dict[str, Any]:
+        """The OpenAI-compatible `response_format` for strict structured output.
+
+        `strict: true` is what asks a provider to *constrain decoding* to the schema rather than
+        treat it as advice. On endpoints that honour it the wrapper defect becomes unreachable; on
+        endpoints that do not, local validation refuses the answer exactly as it does today.
+        """
+        return {
+            "type": "json_schema",
+            "json_schema": {"name": self.name, "strict": True, "schema": self.schema},
+        }
+
+
+def _string_array(description: str) -> dict[str, Any]:
+    return {"type": "array", "items": {"type": "string"}, "description": description}
+
+
+def _enum_values(enum_cls: type[ActionStatus] | type[ActionType]) -> list[str]:
+    """The enum's members, read from the enum itself so the two cannot drift apart."""
+    return [member.value for member in enum_cls]
+
+
+def _planner_wire_schema() -> dict[str, Any]:
+    """The strict planner schema, inlined rather than using `$defs`/`$ref`.
+
+    One nested object does not need indirection, and `$ref` support is the most uneven corner of
+    the strict subset across providers. Inlining costs a few lines and removes that variable.
+
+    `payload_type` is read from `PlannerResponse`'s own generated schema rather than retyped: it
+    is the discriminator for `ReasoningResponse`, so a copy that drifted would steer the model to
+    a shape the contract then rejects — the class of bug this whole section exists to remove.
+    """
+    action_values = _enum_values(ActionType)
+    payload_type = str(PlannerResponse.model_json_schema()["properties"]["payload_type"]["const"])
+
+    task = {
+        "type": "object",
+        "additionalProperties": False,
+        # All three declared properties, as strict mode requires. `inputs` is absent by design.
+        "required": ["action", "target_refs", "depends_on"],
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": action_values,
+                "description": (
+                    "The action to perform. Closed set: a value outside this list is refused "
+                    "before assurance runs."
+                ),
+            },
+            "target_refs": _string_array(
+                "The exact entity references supplied in the instructions, such as "
+                "'incident:INC-...' and 'flight:42'. Never invent one."
+            ),
+            "depends_on": {
+                "type": "array",
+                # Dependencies are action names and nothing else: `reflection.reflect` resolves
+                # each one against the surviving plan's actions and drops what it cannot match.
+                # Constraining the vocabulary here removes dangling edges at the source instead
+                # of dropping them afterwards.
+                "items": {"type": "string", "enum": action_values},
+                "description": (
+                    "Actions in this same plan that must complete first. Use only for genuine "
+                    "data dependencies."
+                ),
+            },
+        },
+    }
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["status", "reason", "evidence_refs", "payload_type", "tasks"],
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": _enum_values(ActionStatus),
+                "description": "Outcome of the planning step itself.",
+            },
+            "reason": {
+                "type": "string",
+                "description": (
+                    "One sentence, under 300 characters, explaining why this plan was chosen. "
+                    "Longer values are refused by the contract after receipt."
+                ),
+            },
+            "evidence_refs": _string_array(
+                "References to entities from the supplied context that informed this plan. A "
+                "reference nobody recorded refuses the action rather than being cited."
+            ),
+            "payload_type": {
+                "type": "string",
+                "enum": [payload_type],
+                "description": "Payload discriminator. Always the single permitted value.",
+            },
+            "tasks": {
+                "type": "array",
+                # `minItems` is not in the portable strict subset, so the non-empty guarantee
+                # stays where it is enforceable: `PlannerResponse.tasks` has `min_length=1` and
+                # an empty list is still refused after receipt.
+                "items": task,
+                "description": (
+                    "The ordered recovery plan: 4 to 8 tasks, most urgent first, no action "
+                    "repeated. Must not be empty."
+                ),
+            },
+        },
+    }
+
+
+#: `name` is sent as the schema's identifier and appears in provider-side error messages.
+PLANNER_WIRE_SCHEMA: Final = WireSchema(name="travelops_planner_v1", schema=_planner_wire_schema())
 
 
 def _estimate_prompt_tokens(system: str, prompt: str) -> int:
@@ -345,10 +544,17 @@ class LLMClient:
         scenario_key: str = "bengaluru_storm",
         max_tokens: int = DEFAULT_MAX_TOKENS,
         budget_seconds: float | None = None,
+        wire_schema: WireSchema | None = None,
     ) -> tuple[T, ModelCallAudit]:
         """Invoke the configured mode and return (validated_response, audit).
 
         Raises `LLMUnavailable` when the model is not reachable or not configured.
+
+        `wire_schema` is the strict schema the PROVIDER is asked to constrain its output to. It is
+        optional and additive: a caller that supplies one gets `response_format` in `json_schema`
+        mode, and a caller that does not keeps JSON-object mode exactly as before. It never
+        replaces `response_schema`, which is still validated against the parsed answer afterwards
+        — see `PLANNER_WIRE_SCHEMA` above for why the two are different objects.
 
         `max_tokens` is per call because the agents are not the same size. The planner returns
         a handful of small task objects; the reporter is asked for four to six sections of
@@ -384,6 +590,7 @@ class LLMClient:
             prompt_version=prompt_version,
             max_tokens=max_tokens,
             budget_seconds=budget_seconds,
+            wire_schema=wire_schema,
         )
 
     def _replay_fixture(
@@ -437,6 +644,7 @@ class LLMClient:
         prompt_version: str,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         budget_seconds: float | None = None,
+        wire_schema: WireSchema | None = None,
     ) -> tuple[T, ModelCallAudit]:
         """Live call to the configured provider, with retry on transient failures.
 
@@ -477,6 +685,33 @@ class LLMClient:
             **transport.extra_headers,
         }
         temperature = self._settings.groq_temperature
+
+        # ------------------------------------------------------------------ output shape
+        # JSON-object mode promises valid JSON and says nothing about its shape. That is what
+        # allowed a 200/`stop` planner response of `{"final": {...}}` — syntactically perfect,
+        # structurally wrong, and refused by `PlannerResponse` after the fact. A caller that
+        # supplies a wire schema asks the provider to constrain decoding to it instead.
+        #
+        # Callers without one are untouched: both prose agents deliberately tolerate decoration
+        # (`extra="ignore"`) and are not asked to fit a closed schema they would fail for reasons
+        # nobody wants — a verbose `reason` on a read-only artifact is not a contract breach.
+        response_format: dict[str, Any] = (
+            wire_schema.as_response_format() if wire_schema else {"type": "json_object"}
+        )
+
+        extra_body: dict[str, Any] = {}
+        if wire_schema is not None and transport.provider is LLMProvider.openrouter:
+            # OpenRouter load-balances one model across many endpoints, and structured-output
+            # support is a property of the ENDPOINT, not the model: `openai/gpt-oss-120b` is
+            # served by endpoints that advertise `structured_outputs` and by endpoints that do
+            # not. Without this the request can be routed to one that ignores the schema, which
+            # reproduces the original defect intermittently — the worst possible failure mode.
+            #
+            # `require_parameters` restricts routing to endpoints supporting every parameter
+            # sent. If none qualifies the request fails, which surfaces as a named provider
+            # refusal, the planner candidate is skipped, and the deterministic playbook that was
+            # already persisted carries the incident. Fail-closed, and legible.
+            extra_body["provider"] = {"require_parameters": True}
 
         tpm_limit = transport.tpm_limit
         prompt_tokens_estimate = _estimate_prompt_tokens(system, prompt)
@@ -575,7 +810,8 @@ class LLMClient:
                             ],
                             "temperature": temperature,
                             "max_tokens": max_tokens,
-                            "response_format": {"type": "json_object"},
+                            "response_format": response_format,
+                            **extra_body,
                         },
                     )
                 latency_ms = int((time.perf_counter() - start) * 1000)
