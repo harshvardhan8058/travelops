@@ -532,21 +532,34 @@ async def _delete_workflow_records(session: AsyncSession, report: ResetReport) -
         .scalars()
         .all()
     )
-    group_ids = (
-        (
-            await session.execute(
-                select(IncidentGroup.id).where(IncidentGroup.demo_dataset_id == DEMO_DATASET_ID)
+    group_rows = (
+        await session.execute(
+            select(IncidentGroup.id, IncidentGroup.reference).where(
+                IncidentGroup.demo_dataset_id == DEMO_DATASET_ID
             )
         )
-        .scalars()
-        .all()
-    )
+    ).all()
+    group_ids = [group_id for group_id, _reference in group_rows]
+    group_references = [reference for _group_id, reference in group_rows]
 
     if group_ids:
         result = await session.execute(
             delete(PairingImpact).where(PairingImpact.incident_group_id.in_(group_ids))
         )
         report.deleted["pairing_impact"] = result.rowcount or 0
+        result = await session.execute(
+            delete(DecisionLog).where(
+                DecisionLog.incident_id.is_(None),
+                DecisionLog.correlation_id.in_(group_references),
+            )
+        )
+        report.deleted["group_decision_log"] = result.rowcount or 0
+        # Runtime-authored scenarios can add declared members to the demo dataset. Delete by
+        # owning group rather than only by fixed seed ids, or reset leaves foreign keys behind.
+        result = await session.execute(
+            delete(IncidentGroupFlight).where(IncidentGroupFlight.incident_group_id.in_(group_ids))
+        )
+        report.deleted["incident_group_flight"] = result.rowcount or 0
 
     if not incident_ids:
         return
@@ -677,7 +690,7 @@ async def reset_demo_dataset(session: AsyncSession) -> ResetReport:
             statement = delete(model).where(model.id.in_([row["id"] for row in rows]))
 
         result = await session.execute(statement)
-        report.deleted[table] = result.rowcount or 0
+        report.deleted[table] = (report.deleted.get(table) or 0) + (result.rowcount or 0)
 
     await session.flush()
     return report
