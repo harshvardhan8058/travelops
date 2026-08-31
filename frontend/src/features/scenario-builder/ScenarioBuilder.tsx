@@ -1,45 +1,25 @@
 /**
  * Scenario Builder — `/scenarios/new`. Phase 5.
  *
- * The question this screen answers: **what would this disruption do?** Until now a scenario could
- * only be introduced by running `python -m app.cli inject`, which means the one thing a reviewer most
- * wants to try — a disruption of their own — was the one thing the console could not do.
+ * Operators choose a template, edit and validate its declarations, then use the published scenario
+ * lifecycle. The live adapter resolves designators to recorded flight IDs and delays before POSTing;
+ * Create persists only, while Create & Run starts the scenario and opens its canonical incidents.
+ * Neither path advances actions or approvals. Impact figures remain engine-owned and are never
+ * guessed in this screen.
  *
- * Three steps, because there are three genuinely different decisions: which shape of disruption,
- * what its details are, and whether the result is what was meant. The third is not decoration. A
- * scenario opens one incident per declared flight and each of those carries its own approval gate, so
- * a mis-typed flight list is an operator authorising work on the wrong aircraft.
- *
- * What this screen refuses to do:
- *
- *   1. **It does not report a scenario as created.** No endpoint accepts one. `Create` and
- *      `Create & Run` build the exact request body and show it, labelled as prepared and not sent,
- *      with the endpoint that would receive it. Rendering a fabricated scenario id would put a state
- *      transition on screen that never happened — the rule `api/client.ts` sets for every write.
- *   2. **It computes no impact figures.** Passengers, connections, crew pairings and hotels are
- *      derived by the engine from the seeded dataset. The preview names them as pending rather than
- *      guessing, because a passenger count typed into a form is a number no record supports.
- *   3. **It offers a command only when the command works.** The equivalent CLI line appears only for
- *      a draft still matching a scenario this repository actually seeds.
- *
- * All validation, preview and step logic lives in `scenarioDraft.ts` so it is unit-tested; this file
- * is rendering and local state only.
+ * Draft validation and request mapping live in pure modules so malformed or unrecorded flights
+ * cannot reach the backend, and the Create & Run regression can exercise the exact API sequence.
  *
  * Owner: Stream D.
  */
 
-import { useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Play,
-  Plus,
-  Terminal,
-} from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Play, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
 
+import { api, ApiError } from '@/api/client';
 import { MonoValue, Panel, ProvenanceDot, StateBadge } from '@/components/ui/primitives';
 import { StepRail } from '@/components/ui/primitives';
 import { FilterChips } from '@/components/ui/Metric';
@@ -60,9 +40,7 @@ import {
   SCENARIO_SEVERITIES,
   SCENARIO_TEMPLATES,
   findTemplate,
-  scenarioApi,
   type DisruptionType,
-  type ScenarioRequestReceipt,
   type ScenarioSeverity,
   type ScenarioTemplate,
 } from './scenarioContracts';
@@ -74,13 +52,18 @@ import {
   emptyDraft,
   issuesForField,
   parseFlightList,
-  prepareScenarioRequest,
   setFlightNumbers,
   stepStates,
   validateDraft,
   type ScenarioStepId,
   type ValidationIssue,
 } from './scenarioDraft';
+import {
+  ScenarioLifecycleFailure,
+  ScenarioSubmissionError,
+  submitScenario,
+  type ScenarioLifecycleResult,
+} from './scenarioLifecycle';
 
 /*
  * The local `INPUT_CLASS`, `PRIMARY_BUTTON` and `SECONDARY_BUTTON` constants that used to live here
@@ -188,60 +171,78 @@ function TemplateCard({
  * as rendering "MoCA" as "MOCA". One component, one rule: `uppercase` goes on the label span only.
  */
 
-/** The prepared request. Everything here is a fact about the console, not about the backend. */
-function ReceiptPanel({ receipt }: { receipt: ScenarioRequestReceipt }) {
+/** Persisted lifecycle result; every value below came from the API response. */
+function SubmissionPanel({ result }: { result: ScenarioLifecycleResult }) {
   return (
     <Panel
-      title="Prepared request"
-      actions={<StateBadge status="pending" label="prepared, not sent" />}
+      title={result.started ? 'Scenario started' : 'Scenario created'}
+      actions={
+        <StateBadge
+          status={result.started ? 'approved' : 'pending'}
+          label={result.started ? 'incidents opened' : 'persisted'}
+        />
+      }
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5">
-        <Labelled label="request">
-          <MonoValue muted>{receipt.requestId}</MonoValue>
+        <Labelled label="scenario">
+          <MonoValue muted>{result.created.scenario_reference}</MonoValue>
         </Labelled>
-        <Labelled label="would POST to">
-          <MonoValue muted>{receipt.targetEndpoint}</MonoValue>
+        <Labelled label="members">
+          <MonoValue muted>{result.created.members.length}</MonoValue>
         </Labelled>
-        {receipt.payload.run_after_create && (
-          <Labelled label="then">
-            <MonoValue muted>{scenarioApi.runEndpoint}</MonoValue>
-          </Labelled>
-        )}
+        <ProvenanceDot
+          kind={result.created.provenance.kind}
+          provider={result.created.provenance.provider}
+          sourceRef={result.created.provenance.source_ref}
+        />
       </div>
+      <Notice tone="muted" icon={false}>
+        {result.started
+          ? `${result.started.opened_incident_ids.length} canonical incidents were opened. No action was executed or approved.`
+          : 'The scenario is persisted. Its incidents have not been opened or advanced.'}
+      </Notice>
+    </Panel>
+  );
+}
 
-      {/* The console's own sentence about why nothing was sent. Never blank while unsubmitted. */}
-      <Notice tone="warn">{receipt.unsubmittedReason}</Notice>
-
-      {receipt.equivalentCommand && (
-        <PanelSection title="This draft is reproducible today" tone="muted">
-          <div className="flex items-start gap-1.5">
-            <Terminal
-              size={12}
-              strokeWidth={1.5}
-              className="mt-1 shrink-0 text-fg-muted"
-              aria-hidden
-            />
-            <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-inset px-2 py-1.5 font-mono text-mono-sm text-fg-secondary">
-              {receipt.equivalentCommand}
-            </pre>
-          </div>
-        </PanelSection>
-      )}
-
-      <PanelSection title="Request body" tone="muted">
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-inset px-2 py-1.5 font-mono text-mono-sm text-fg-secondary">
-          {JSON.stringify(receipt.payload, null, 2)}
-        </pre>
-      </PanelSection>
+function SubmissionFailure({ error }: { error: Error }) {
+  const partial = error instanceof ScenarioLifecycleFailure ? error : null;
+  const cause = partial?.cause ?? error;
+  const apiError = cause instanceof ApiError ? cause : null;
+  const lifecycleError = cause instanceof ScenarioSubmissionError ? cause : null;
+  return (
+    <Panel title={partial ? 'Scenario lifecycle incomplete' : 'Scenario not submitted'}>
+      <Notice tone="crit" alert>
+        <div>
+          <p>{error.message}</p>
+          {partial && (
+            <p className="mt-1 text-fg-secondary">
+              The recorded scenario is{' '}
+              <MonoValue muted>{partial.progress.created.scenario_reference}</MonoValue>. Retry uses
+              the same idempotency keys and resumes the recorded lifecycle.
+            </p>
+          )}
+          <p className="mt-1 font-mono text-mono-sm text-fg-muted">
+            {apiError?.code ?? lifecycleError?.code ?? 'INTERNAL_ERROR'}
+            {apiError?.correlationId ? ` · ${apiError.correlationId}` : ''}
+          </p>
+        </div>
+      </Notice>
     </Panel>
   );
 }
 
 export function ScenarioBuilder() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const operationKey = useRef(crypto.randomUUID());
   const [draft, setDraft] = useState(emptyDraft);
   const [step, setStep] = useState<ScenarioStepId>('template');
   const [flightText, setFlightText] = useState('');
-  const [receipt, setReceipt] = useState<ScenarioRequestReceipt | null>(null);
+  const [submission, setSubmission] = useState<ScenarioLifecycleResult | null>(null);
+  const [submissionError, setSubmissionError] = useState<Error | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const flightsQuery = useQuery({ queryKey: ['flights'], queryFn: api.flights });
 
   const report = useMemo(() => validateDraft(draft), [draft]);
   const preview = useMemo(() => buildPreview(draft), [draft]);
@@ -249,30 +250,75 @@ export function ScenarioBuilder() {
   const parsedFlights = useMemo(() => parseFlightList(flightText), [flightText]);
   const template = findTemplate(draft.templateId);
 
+  const clearSubmission = () => {
+    operationKey.current = crypto.randomUUID();
+    setSubmission(null);
+    setSubmissionError(null);
+  };
+
   const chooseTemplate = (chosen: ScenarioTemplate) => {
     setDraft((current) => applyTemplate(current, chosen));
     setFlightText(chosen.flightNumbers.join(', '));
-    setReceipt(null);
+    clearSubmission();
     setStep('details');
   };
 
   const commitFlightText = (raw: string) => {
     setFlightText(raw);
-    setReceipt(null);
+    clearSubmission();
     const { flights } = parseFlightList(raw);
     setDraft((current) => setFlightNumbers(current, flights));
   };
 
-  const prepare = (runAfterCreate: boolean) => {
-    const outcome = prepareScenarioRequest(draft, { runAfterCreate, now: new Date() });
-    if ('receipt' in outcome) {
-      setReceipt(outcome.receipt);
-      setStep('review');
+  const submit = async (runAfterCreate: boolean) => {
+    if (!report.ok) {
+      clearSubmission();
+      setStep('details');
       return;
     }
-    // Refused. The report already renders beside every field; move to the step that shows it.
-    setReceipt(null);
-    setStep('details');
+    if (!api.canWrite) {
+      setSubmissionError(
+        new ScenarioSubmissionError(
+          'LIVE_API_REQUIRED',
+          'Scenario creation requires the live API; fixture mode cannot record writes.',
+        ),
+      );
+      return;
+    }
+    if (!flightsQuery.data) {
+      setSubmissionError(
+        flightsQuery.error instanceof Error
+          ? flightsQuery.error
+          : new ScenarioSubmissionError(
+              'FLIGHTS_UNAVAILABLE',
+              'The flight board is not available.',
+            ),
+      );
+      return;
+    }
+
+    setSubmission(null);
+    setSubmissionError(null);
+    setIsSubmitting(true);
+    try {
+      const result = await submitScenario(api, draft, flightsQuery.data.flights, {
+        runAfterCreate,
+        operationKey: operationKey.current,
+      });
+      setSubmission(result);
+      if (result.route) {
+        queryClient.setQueryData(['incident-group', 'current'], {
+          selected: result.selected,
+          detail: result.detail,
+        });
+        await queryClient.invalidateQueries({ queryKey: ['incident-groups'] });
+        navigate(result.route);
+      }
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error : new Error('Scenario submission failed.'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -308,12 +354,12 @@ export function ScenarioBuilder() {
         actions={
           <Toolbar>
             <ProvenanceDot
-              kind="unavailable"
-              provider="scenario-authoring"
-              sourceRef={scenarioApi.createEndpoint}
+              kind={api.canWrite ? 'simulated' : 'unavailable'}
+              provider="scenario-builder"
+              sourceRef="POST /api/v1/scenarios"
             />
             <span className="text-caption uppercase text-fg-muted">
-              authoring endpoint not published
+              {api.canWrite ? 'published scenario lifecycle' : 'live API required'}
             </span>
           </Toolbar>
         }
@@ -366,12 +412,16 @@ export function ScenarioBuilder() {
               }
             >
               <div className="grid gap-x-6 gap-y-3.5 px-3 py-3 md:grid-cols-2">
-                <Field label="Scenario name" issues={issuesForField(report, 'name')}>
+                <Field
+                  label="Scenario name"
+                  hint="Draft-only label for review; the published scenario contract does not persist it."
+                  issues={issuesForField(report, 'name')}
+                >
                   <input
                     className={FIELD_SHELL}
                     value={draft.name}
                     onChange={(event) => {
-                      setReceipt(null);
+                      clearSubmission();
                       setDraft((current) => ({ ...current, name: event.target.value }));
                     }}
                   />
@@ -387,7 +437,7 @@ export function ScenarioBuilder() {
                     value={draft.airportIcao}
                     maxLength={4}
                     onChange={(event) => {
-                      setReceipt(null);
+                      clearSubmission();
                       setDraft((current) => ({
                         ...current,
                         airportIcao: event.target.value.toUpperCase(),
@@ -402,7 +452,7 @@ export function ScenarioBuilder() {
                     className={FIELD_SHELL}
                     value={draft.startsAt}
                     onChange={(event) => {
-                      setReceipt(null);
+                      clearSubmission();
                       setDraft((current) => ({ ...current, startsAt: event.target.value }));
                     }}
                   />
@@ -410,6 +460,7 @@ export function ScenarioBuilder() {
 
                 <Field
                   label="Duration (minutes)"
+                  hint="Draft-only preview window; the published scenario contract records the effective start."
                   issues={issuesForField(report, 'durationMinutes')}
                 >
                   <input
@@ -419,7 +470,7 @@ export function ScenarioBuilder() {
                     min={15}
                     max={1440}
                     onChange={(event) => {
-                      setReceipt(null);
+                      clearSubmission();
                       setDraft((current) => ({
                         ...current,
                         durationMinutes: Number.parseInt(event.target.value, 10),
@@ -433,7 +484,7 @@ export function ScenarioBuilder() {
                     label="Disruption type"
                     value={draft.disruptionType}
                     onChange={(next) => {
-                      setReceipt(null);
+                      clearSubmission();
                       setDraft((current) => ({ ...current, disruptionType: next }));
                     }}
                     options={DISRUPTION_TYPES.map((value) => ({
@@ -448,7 +499,7 @@ export function ScenarioBuilder() {
                     label="Severity"
                     value={draft.severity}
                     onChange={(next) => {
-                      setReceipt(null);
+                      clearSubmission();
                       setDraft((current) => ({ ...current, severity: next }));
                     }}
                     options={SCENARIO_SEVERITIES.map((value) => ({ value, label: value }))}
@@ -500,7 +551,7 @@ export function ScenarioBuilder() {
                         label="Primary flight"
                         value={draft.primaryFlight}
                         onChange={(next) => {
-                          setReceipt(null);
+                          clearSubmission();
                           setDraft((current) => ({ ...current, primaryFlight: next }));
                         }}
                         options={draft.flightNumbers.map((flight) => ({
@@ -515,14 +566,14 @@ export function ScenarioBuilder() {
                 <div className="md:col-span-2">
                   <Field
                     label="Notes"
-                    hint={`Recorded with the scenario so a replay can say why it was run. ${draft.notes.length}/${MAX_NOTES_LENGTH}.`}
+                    hint={`Draft-only operator context; the published scenario contract does not persist this field. ${draft.notes.length}/${MAX_NOTES_LENGTH}.`}
                     issues={issuesForField(report, 'notes')}
                   >
                     <textarea
                       className={clsx(FIELD_SHELL, 'min-h-[72px] resize-y')}
                       value={draft.notes}
                       onChange={(event) => {
-                        setReceipt(null);
+                        clearSubmission();
                         setDraft((current) => ({ ...current, notes: event.target.value }));
                       }}
                     />
@@ -561,7 +612,8 @@ export function ScenarioBuilder() {
                 {report.issues.length === 0 ? (
                   <p className="flex items-center gap-1.5 px-3 py-2.5 text-caption text-state-ok">
                     <Check size={12} strokeWidth={1.5} aria-hidden />
-                    Every field the request needs is present and well-formed.
+                    Every draft field is present and well-formed. Flight identity and delay are
+                    resolved from the live board before submission.
                   </p>
                 ) : (
                   <ul className="flex flex-col gap-1.5 px-3 py-2.5">
@@ -646,28 +698,29 @@ export function ScenarioBuilder() {
                   </Button>
                   <Button
                     icon={Plus}
-                    onClick={() => prepare(false)}
-                    disabled={!report.ok}
-                    disabledReason="The draft still has errors. Fix them in Disruption details first."
+                    onClick={() => void submit(false)}
+                    disabled={!report.ok || !api.canWrite || isSubmitting || flightsQuery.isLoading}
+                    disabledReason="A valid draft and the live flight board are required before creation."
                   >
                     Create scenario
                   </Button>
                   <Button
                     variant="primary"
                     icon={Play}
-                    onClick={() => prepare(true)}
-                    disabled={!report.ok}
-                    disabledReason="The draft still has errors. Fix them in Disruption details first."
+                    onClick={() => void submit(true)}
+                    disabled={!report.ok || !api.canWrite || isSubmitting || flightsQuery.isLoading}
+                    disabledReason="A valid draft and the live flight board are required before creation."
                   >
                     Create &amp; run
                   </Button>
                   <span className="ml-auto text-caption uppercase text-fg-muted">
-                    creating opens one gate per flight — it approves nothing
+                    Create & run opens one incident per flight — it approves nothing
                   </span>
                 </div>
               </Panel>
 
-              {receipt && <ReceiptPanel receipt={receipt} />}
+              {submission && <SubmissionPanel result={submission} />}
+              {submissionError && <SubmissionFailure error={submissionError} />}
             </>
           )}
         </div>
@@ -706,7 +759,7 @@ export function ScenarioBuilder() {
           <Panel title="What happens next">
             <ol className="flex flex-col gap-2 px-3 py-2.5">
               {[
-                'The scenario seeds flights, passengers and crew for the airport and window you set.',
+                'The scenario declares membership over flights already recorded on the live board.',
                 'One incident opens per affected flight, each with its own assurance gate.',
                 'Every high-risk action still waits for a named person, exactly as it does today.',
                 'Figures on the operations screens come from the engine, never from this form.',
