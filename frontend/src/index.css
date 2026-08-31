@@ -9,7 +9,15 @@
   body,
   #root {
     height: 100%;
+    overflow: hidden;
   }
+
+  /*
+   * AppShell owns the viewport and delegates real content scrolling to its main and timeline
+   * regions. Containing the document at this boundary prevents those deliberately scrollable
+   * descendants from creating a second browser-level scrollbar; their content remains available
+   * through the main, table and timeline scroll owners below.
+   */
 
   body {
     background-color: var(--bg-base);

@@ -155,10 +155,7 @@ function ExposureRow({ exposure }: { exposure: GroupExposure }) {
 
 function ChecksRow({ checks }: { checks: PlanCheck[] }) {
   return (
-    <table className="w-full border-collapse text-body">
-      <caption className="sr-only">
-        The six plan-level checks, in fixed order. Every check always renders.
-      </caption>
+    <TableFrame caption="The six plan-level checks, in fixed order. Every check always renders.">
       <thead>
         <tr className="border-b border-border-subtle">
           <th scope="col" className="px-3 py-1.5 text-left text-label uppercase text-fg-muted">
@@ -192,7 +189,7 @@ function ChecksRow({ checks }: { checks: PlanCheck[] }) {
           </tr>
         ))}
       </tbody>
-    </table>
+    </TableFrame>
   );
 }
 

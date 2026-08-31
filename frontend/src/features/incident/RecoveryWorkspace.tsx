@@ -50,7 +50,7 @@ function WorkspaceSkeleton() {
           <LoadingState label="Loading incident" />
         </div>
       </Panel>
-      <div className="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] 2xl:grid-cols-[340px_minmax(0,1fr)_400px]">
+      <div className="grid items-start gap-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] 2xl:grid-cols-[340px_minmax(0,1fr)_400px]">
         {['Evidence', 'Plan', 'Assurance'].map((title) => (
           <Panel key={title} title={title}>
             <div className="h-[420px] px-3 py-2">
@@ -436,19 +436,12 @@ export function RecoveryWorkspace() {
       )}
 
       {/*
-       * Fixed left and right columns with a flexible centre: the evidence list and the
-       * assurance panel have known content widths, and the plan is what benefits from space.
+       * Fixed outer tracks with a flexible plan column. The persistent 380px timeline now appears
+       * at 2xl, so this grid can safely enter its three-column layout at lg without both responsive
+       * systems subtracting width at the same breakpoint. `items-start` prevents shorter cards from
+       * stretching to the height of the assurance column and leaving empty tails.
        */}
-      {/*
-       * Fixed left and right columns with a flexible centre: the evidence list and the
-       * assurance panel have known content widths, and the plan is what benefits from space.
-       *
-       * The track list is now responsive. It was `grid-cols-[320px_minmax(0,1fr)_380px]` at every
-       * width, so below roughly 800px the three fixed columns could not fit and the whole screen
-       * gained a horizontal scrollbar. At 2xl the outer columns take the extra room instead of
-       * leaving the centre to stretch alone.
-       */}
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] 2xl:grid-cols-[340px_minmax(0,1fr)_400px]">
+      <div className="grid items-start gap-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] 2xl:grid-cols-[340px_minmax(0,1fr)_400px]">
         <EvidenceColumn incident={incident} />
 
         <PlanColumn
@@ -457,7 +450,7 @@ export function RecoveryWorkspace() {
           onSelectTask={setSelectedTaskId}
         />
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        <div className="flex min-w-0 flex-col gap-3">
           {assuranceQuery.error ? (
             <Panel title="Assurance">
               <ErrorState

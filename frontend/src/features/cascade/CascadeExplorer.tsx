@@ -43,7 +43,7 @@ const ROLLUP_TILES = [
 
 function CascadeSkeleton() {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-3">
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
       <Panel title="Cascade">
         <div className="h-[440px]">
           <LoadingState label="Loading cascade" />
@@ -198,7 +198,7 @@ export function CascadeExplorer() {
         </div>
       </Panel>
 
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-3">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex min-h-0 flex-col gap-3">
           <Panel
             title="Cascade"
@@ -366,7 +366,7 @@ export function CascadeExplorer() {
           />
         </div>
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        <div className="flex min-w-0 flex-col gap-3">
           <BlastRadius
             group={group as IncidentGroupDetail}
             selectedHop={selectedHop}

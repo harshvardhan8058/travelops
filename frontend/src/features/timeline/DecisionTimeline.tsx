@@ -73,7 +73,7 @@ export function DecisionTimeline({ incidentId }: { incidentId: string }) {
   });
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
         <h2 className="text-label uppercase text-fg-secondary">Decision timeline</h2>
         {data && <MonoValue muted>{data.entries.length}</MonoValue>}
@@ -98,7 +98,7 @@ export function DecisionTimeline({ incidentId }: { incidentId: string }) {
       )}
 
       {data && data.entries.length > 0 && (
-        <div className="flex-1 overflow-auto py-1.5">
+        <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
           {/*
            * Newest first, and now on an actual spine. This was a `divide-y` list of rows: correct,
            * and indistinguishable from a table. The claim the rail exists to make is that these

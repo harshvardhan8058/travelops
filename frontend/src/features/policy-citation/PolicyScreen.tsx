@@ -340,7 +340,7 @@ export function PolicyScreen() {
         </Panel>
       )}
 
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_380px] gap-3">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Panel
           title="Entitlements"
           actions={
@@ -418,7 +418,7 @@ export function PolicyScreen() {
           )}
         </Panel>
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        <div className="flex min-w-0 flex-col gap-3 break-words">
           <Panel title="Cause assessment">
             <dl className="flex flex-col gap-1 px-3 py-2">
               {Object.entries(policy.cause_assessment).map(([key, value]) => (
@@ -442,7 +442,7 @@ export function PolicyScreen() {
               <ul className="flex flex-col gap-2 px-3 py-2">
                 {policy.excluded_rules.map((rule) => (
                   <li key={rule.rule_key} className="flex flex-col gap-0.5">
-                    <span className="flex items-center gap-1.5">
+                    <span className="flex flex-wrap items-center gap-1.5">
                       <MonoValue>{rule.rule_key}</MonoValue>
                       <StateBadge status="skipped" label={rule.status.replace(/_/g, ' ')} />
                     </span>
