@@ -14,6 +14,24 @@
  * kind renders with a neutral fallback icon rather than being dropped, because a missing actor is
  * worse than an unstyled one.
  *
+ * **This is now the only actor chip in the console.** It previously existed alongside two private
+ * copies of the same palette, in `features/timeline/DecisionTimeline.tsx` and
+ * `features/replay/ReplayScreen.tsx`, and all three carried the byte-identical `human` class string.
+ * That is the single rule the design documents care most about — identity must never look like
+ * status — reimplemented three times, which is how such a rule quietly stops holding. Both of those
+ * copies also painted `agent` with `text-state-info`, borrowing from the operational state ramp for
+ * an identity signal, which is exactly what this component exists to prevent.
+ *
+ * The reasoning inherited from the decision timeline is worth keeping explicit, because it is why
+ * `human` looks the way it does: `human` was once `--state-warn`, the colour this product uses for
+ * SEVERITY HIGH, NEEDS HUMAN, TIER HIGH and AWAITING APPROVAL. On the recovery workspace all five
+ * appear at once, so an operator's *completed* approval read as one more amber warning rather than
+ * as the thing a person did. `docs/21` reserves green, amber and red exclusively for operational
+ * state, so identity has no business borrowing one. A human act is therefore the only chip drawn in
+ * primary text on a raised fill with a strong border — the highest-contrast, most solid chip on the
+ * screen, appropriate for the one actor who carries accountability, and impossible to mistake for a
+ * status.
+ *
  * Owner: Stream D.
  */
 

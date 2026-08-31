@@ -21,6 +21,14 @@ import { clsx } from 'clsx';
 import type { ActionRecord, IncidentDetail, PlanSummary, PlanTaskRow } from '@/api/types';
 import { EmptyState, MonoValue, Panel, StateBadge, WhyPopover } from '@/components/ui/primitives';
 import { actionDerivation } from '@/components/ui/derivation';
+import { CountBar } from '@/components/ui/Metric';
+import {
+  Absent,
+  DefinitionList,
+  DefinitionRow,
+  rowSelectionClass,
+} from '@/components/ui/composition';
+import { utcStamp } from '@/components/ui/format';
 import { refusalFor } from './refusal';
 
 /**
@@ -92,12 +100,7 @@ function TaskRow({
   onToggleExpand: () => void;
 }) {
   return (
-    <li
-      className={clsx(
-        'border-b border-l-2 border-border-subtle',
-        isSelected ? 'border-l-accent bg-raised' : 'border-l-transparent',
-      )}
-    >
+    <li className={rowSelectionClass(isSelected)}>
       <div className="flex items-center gap-2 px-2">
         {/*
          * Selection and expansion are separate buttons rather than one clickable row: the row
@@ -142,26 +145,22 @@ function TaskRow({
       </div>
 
       {isExpanded && (
-        <dl className="border-t border-border-subtle bg-inset px-3 py-2">
-          <div className="flex gap-2 py-0.5">
-            <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">task id</dt>
-            <dd>
-              <MonoValue>{task.id}</MonoValue>
-            </dd>
-          </div>
-          <div className="flex gap-2 py-0.5">
-            <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">assurance</dt>
-            <dd>
-              {task.assurance_id === null ? (
-                <span className="text-caption text-fg-muted">not evaluated yet</span>
-              ) : (
-                <MonoValue>{task.assurance_id}</MonoValue>
-              )}
-            </dd>
-          </div>
-          <div className="flex gap-2 py-0.5">
-            <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">action</dt>
-            <dd className="min-w-0 flex-1">
+        <DefinitionList className="border-t border-border-subtle bg-inset px-3 py-2">
+          <DefinitionRow label="task id">
+            <MonoValue>{task.id}</MonoValue>
+          </DefinitionRow>
+          <DefinitionRow label="assurance">
+            {task.assurance_id === null ? (
+              <Absent
+                label="not evaluated yet"
+                title="No assurance evaluation references this task. Nothing is assumed to have passed."
+              />
+            ) : (
+              <MonoValue>{task.assurance_id}</MonoValue>
+            )}
+          </DefinitionRow>
+          <DefinitionRow label="action">
+            <>
               {action ? (
                 <>
                   <WhyPopover derivation={actionDerivation(action, incident)}>
@@ -184,33 +183,25 @@ function TaskRow({
                   </p>
                 </>
               ) : (
-                <span className="text-caption text-fg-muted">
-                  nothing executed — no action record references this task
-                </span>
+                <Absent label="nothing executed" title="No action record references this task." />
               )}
-            </dd>
-          </div>
+            </>
+          </DefinitionRow>
           {action && (
-            <div className="flex gap-2 py-0.5">
-              <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">
-                idempotency
-              </dt>
-              <dd className="min-w-0 flex-1">
-                <MonoValue muted className="break-all text-caption">
-                  {action.idempotency_key}
-                </MonoValue>
-              </dd>
-            </div>
+            <DefinitionRow label="idempotency">
+              <MonoValue muted className="break-all text-caption">
+                {action.idempotency_key}
+              </MonoValue>
+            </DefinitionRow>
           )}
           {/* Named, not omitted: the endpoint returns no per-task inputs. */}
-          <div className="flex gap-2 py-0.5">
-            <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">inputs</dt>
-            <dd className="text-caption text-fg-muted">
+          <DefinitionRow label="inputs">
+            <span className="text-caption text-fg-muted">
               not recorded on this endpoint — task-level inputs are not returned by GET /incidents/
               {'{id}'}
-            </dd>
-          </div>
-        </dl>
+            </span>
+          </DefinitionRow>
+        </DefinitionList>
       )}
     </li>
   );
@@ -227,6 +218,31 @@ export function PlanColumn({
 }) {
   const { plan, actions } = incident;
   const actionByTask = new Map(actions.map((action) => [action.plan_task_id, action]));
+
+  /**
+   * The plan's task states, partitioned. Tones follow `StateBadge`'s own mapping so the bar and the
+   * badges beside it cannot disagree about what amber means.
+   */
+  const taskStateSegments = (() => {
+    if (!plan) return [];
+    const tally = new Map<string, number>();
+    for (const task of plan.tasks) tally.set(task.state, (tally.get(task.state) ?? 0) + 1);
+    const tone = (state: string) =>
+      state === 'succeeded' || state === 'executed'
+        ? ('ok' as const)
+        : state === 'awaiting_approval' || state === 'needs_human'
+          ? ('warn' as const)
+          : state === 'failed' || state === 'blocked'
+            ? ('crit' as const)
+            : state === 'executing'
+              ? ('info' as const)
+              : ('neutral' as const);
+    return [...tally.entries()].map(([state, count]) => ({
+      label: state.replace(/_/g, ' '),
+      count,
+      tone: tone(state),
+    }));
+  })();
 
   /*
    * `plan` is null until the orchestrator proposes one — the normal state of a freshly opened
@@ -250,25 +266,47 @@ export function PlanColumn({
 
   return (
     <Panel title="Plan" className="flex min-h-0 flex-col overflow-hidden">
-      <div className="border-b border-border-subtle px-3 py-2">
+      {/*
+       * How the plan presents itself: who authored it, why, what it is made of.
+       *
+       * The rationale was `text-caption text-fg-muted` — the quietest type in the system — which
+       * meant the model's or the playbook's own reasoning was the least readable thing in a panel
+       * about that reasoning. It is now body copy. Everything else about the plan's identity moves
+       * into a definition list so the three facts line up instead of running together as one wrapped
+       * sentence of `plan 12 generated ... tasks 6`.
+       */}
+      <div className="flex flex-col gap-2.5 border-b border-border-subtle px-3 py-2.5">
         <GeneratorChip plan={plan} />
-        {plan.rationale && <p className="mt-1.5 text-caption text-fg-muted">{plan.rationale}</p>}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-caption text-fg-muted">
-          <span>
-            plan <MonoValue muted>{plan.id}</MonoValue>
-          </span>
-          {plan.generated_at && (
-            <span>
-              generated{' '}
-              <MonoValue muted>
-                {plan.generated_at.slice(0, 10)} {plan.generated_at.slice(11, 19)}Z
-              </MonoValue>
-            </span>
-          )}
-          <span>
-            tasks <MonoValue muted>{plan.tasks.length}</MonoValue>
-          </span>
-        </div>
+
+        {plan.rationale ? (
+          <p className="text-body text-fg-secondary">{plan.rationale}</p>
+        ) : (
+          <Absent
+            label="no rationale recorded"
+            title="This plan carries no rationale. Absent, not empty."
+          />
+        )}
+
+        <DefinitionList width="sm">
+          <DefinitionRow label="plan" width="sm">
+            <MonoValue muted>{plan.id}</MonoValue>
+          </DefinitionRow>
+          <DefinitionRow label="generated" width="sm">
+            <MonoValue muted>{utcStamp(plan.generated_at) ?? 'not recorded'}</MonoValue>
+          </DefinitionRow>
+          <DefinitionRow label="tasks" width="sm">
+            <MonoValue muted>{plan.tasks.length}</MonoValue>
+          </DefinitionRow>
+        </DefinitionList>
+
+        {/*
+         * What state the plan's tasks are actually in, as a partition of the tasks returned. A
+         * count, never a trend — the same rule `CountBar` is built around. It answers "how far
+         * along is this plan" without the operator counting badges down the list.
+         */}
+        {taskStateSegments.length > 0 && (
+          <CountBar segments={taskStateSegments} total={plan.tasks.length} />
+        )}
       </div>
 
       <ol className="min-h-0 flex-1 overflow-y-auto">

@@ -25,6 +25,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -42,6 +43,18 @@ import {
   Panel,
   StateBadge,
 } from '@/components/ui/primitives';
+import {
+  Absent,
+  Button,
+  Labelled,
+  Notice,
+  NotYetAvailable,
+  PageHeader,
+  PanelBody,
+  ReasonField,
+  TableFrame,
+  Toolbar,
+} from '@/components/ui/composition';
 
 /** Rows of the comparison table. `format` keeps the arithmetic in the API, not here. */
 const FIELDS: {
@@ -59,6 +72,28 @@ const FIELDS: {
   { key: 'rooms_committed', label: 'Rooms committed' },
   { key: 'uncovered_entities', label: 'Uncovered entities' },
 ];
+
+/**
+ * A key that is unique per COLUMN, not per candidate id.
+ *
+ * `candidate_id` is the backend's `plan.variant_key or f"plan-{plan.id}"`, and two candidates in one
+ * comparison can legitimately carry the same variant key — the live cascade returns two candidates
+ * both keyed `notify-first`. Using it as a React key made every `<th>` in the head and every `<td>`
+ * in each row a duplicate, which React reports as a console error:
+ *
+ *     Encountered two children with the same key, `notify-first`.
+ *
+ * That is not cosmetic. React may reuse or drop a node with a colliding key, so two candidate
+ * columns could render each other's figures — on the one screen whose entire job is to let an
+ * operator tell two plans apart. The browser gate treats any console error as a route failure, and
+ * this was the single failing check across all eleven routes.
+ *
+ * The fix belongs here rather than in the contract: the position of a column is a fact about this
+ * table, and the id stays exactly as the API returned it everywhere it is displayed.
+ */
+function columnKey(row: CandidateComparisonRow, index: number): string {
+  return `${index}:${row.candidate_id}`;
+}
 
 function display(value: unknown): string | number | null {
   if (value === null || value === undefined) return null;
@@ -142,18 +177,8 @@ export function PlanComparison() {
   const outcome = resolveUnavailable([comparison.error, plans.error]);
 
   if (outcome && 'unavailable' in outcome) {
-    const { unavailable } = outcome;
     return (
-      <EmptyState
-        title="No candidates to compare yet"
-        description={unavailable.resolution}
-        action={
-          <span className="flex flex-wrap items-center justify-center gap-2">
-            <StateBadge status="pending" label={unavailable.code} />
-            <span className="text-caption text-fg-muted">{unavailable.message}</span>
-          </span>
-        }
-      />
+      <NotYetAvailable title="No candidates to compare yet" unavailable={outcome.unavailable} />
     );
   }
 
@@ -191,190 +216,225 @@ export function PlanComparison() {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* The boundary, rendered verbatim from the response rather than written here. */}
-      <Panel title="Basis">
-        <div className="flex flex-col gap-2 px-3 py-2">
-          <p className="text-body text-fg-secondary">{data.not_a_forecast}</p>
-          {/*
-            The LABEL is uppercased, never the value. `basis` is a contract literal and `decision`
-            is a gate enum: CSS-transforming either misrepresents what the API returned, which is
-            the same defect that once rendered the policy pack label as "MOCA".
-          */}
-          <div className="flex flex-wrap items-center gap-3 text-label text-fg-muted">
-            <span>
-              <span className="uppercase">basis</span> <MonoValue>{data.basis}</MonoValue>
-            </span>
+      {/*
+       * The comparison is the screen, so the count of candidates is the title and the basis becomes
+       * the header's supporting row rather than a panel of its own. `not_a_forecast` is the most
+       * important sentence here — it is the boundary the whole surface depends on — and it was
+       * `text-body text-fg-secondary` at the bottom of the visual stack.
+       *
+       * The LABEL is uppercased, never the value. `basis` is a contract literal and `decision` is a
+       * gate enum: CSS-transforming either misrepresents what the API returned, which is the same
+       * defect that once rendered the policy pack label as "MOCA". `Labelled` enforces that.
+       */}
+      <PageHeader
+        eyebrow="Plan comparison"
+        title={`${data.candidates.length} candidate${data.candidates.length === 1 ? '' : 's'}`}
+        status={<StateBadge status={data.decision} label={data.decision.replace(/_/g, ' ')} />}
+        meta={
+          <>
+            <Labelled label="incident">
+              <MonoValue muted>{incidentId}</MonoValue>
+            </Labelled>
+            <Labelled label="basis">
+              <MonoValue>{data.basis}</MonoValue>
+            </Labelled>
             {data.seed !== null && (
-              <span>
-                <span className="uppercase">seed</span> <MonoValue>{data.seed}</MonoValue>
+              <Labelled label="seed">
+                <MonoValue>{data.seed}</MonoValue>
+              </Labelled>
+            )}
+          </>
+        }
+        footer={
+          <div className="flex flex-col gap-2">
+            <p className="text-body text-fg-secondary">{data.not_a_forecast}</p>
+            {data.blocking_reasons.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {data.blocking_reasons.map((entry) => (
+                  <li key={entry} className="flex items-start gap-1.5 text-body text-state-warn">
+                    <AlertTriangle
+                      size={12}
+                      strokeWidth={1.5}
+                      className="mt-1 shrink-0"
+                      aria-hidden
+                    />
+                    {entry}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        }
+      />
+
+      <Panel
+        title="Candidates"
+        actions={
+          <Toolbar>
+            {differing.size > 0 && (
+              <span className="text-caption uppercase text-accent">
+                {differing.size} figure{differing.size === 1 ? '' : 's'} differ
               </span>
             )}
-            <span>
-              <span className="uppercase">gate</span>{' '}
-              <MonoValue>{data.decision.replace(/_/g, ' ')}</MonoValue>
-            </span>
-          </div>
-          {data.blocking_reasons.length > 0 && (
-            <ul className="flex flex-col gap-1 text-body text-state-warn">
-              {data.blocking_reasons.map((entry) => (
-                <li key={entry}>{entry}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </Panel>
-
-      <Panel title={`Candidates (${data.candidates.length})`}>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-body">
-            <caption className="sr-only">
-              Candidate recovery plans compared against the same recorded evidence. No candidate is
-              ranked.
-            </caption>
-            <thead>
-              <tr className="border-b border-border-subtle">
-                <th scope="col" className="px-3 py-2 text-left text-label uppercase text-fg-muted">
-                  Figure
-                </th>
-                {data.candidates.map((row) => (
-                  <th
-                    key={row.candidate_id}
-                    scope="col"
-                    className="px-3 py-2 text-left text-label uppercase text-fg-secondary"
+            <MonoValue muted className="text-caption">
+              {data.candidates.length}
+            </MonoValue>
+          </Toolbar>
+        }
+      >
+        <TableFrame caption="Candidate recovery plans compared against the same recorded evidence. No candidate is ranked; the column order is the order the endpoint returned them in.">
+          <thead>
+            <tr className="border-b border-border-subtle">
+              <th scope="col" className="px-3 py-2 text-left text-label uppercase text-fg-muted">
+                Figure
+              </th>
+              {data.candidates.map((row, index) => (
+                <th
+                  key={columnKey(row, index)}
+                  scope="col"
+                  className="px-3 py-2 text-left text-label uppercase text-fg-secondary"
+                >
+                  <span className="block">{row.variant_key}</span>
+                  <span className="block text-caption font-normal normal-case text-fg-muted">
+                    {row.generator ?? 'unknown'}
+                    {row.prompt_version ? ` · ${row.prompt_version}` : ''}
+                  </span>
+                  <span
+                    className={clsx(
+                      'block font-normal normal-case',
+                      row.admissible ? 'text-state-ok' : 'text-state-warn',
+                    )}
                   >
-                    <span className="block">{row.variant_key}</span>
-                    <span className="block text-caption font-normal normal-case text-fg-muted">
-                      {row.generator ?? 'unknown'}
-                      {row.prompt_version ? ` · ${row.prompt_version}` : ''}
-                    </span>
-                    <span
-                      className={clsx(
-                        'block font-normal normal-case',
-                        row.admissible ? 'text-state-ok' : 'text-state-warn',
-                      )}
-                    >
-                      {row.admissible ? 'admissible' : 'not admissible'}
-                    </span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {FIELDS.map((field) => {
-                const differs = differing.has(String(field.key));
-                return (
-                  <tr
-                    key={String(field.key)}
-                    className={clsx('border-b border-border-subtle', differs && 'bg-accent-subtle')}
-                  >
-                    <th scope="row" className="px-3 py-1.5 text-left font-normal text-fg-secondary">
-                      {field.label}
-                      {differs && (
-                        <span className="ml-2 text-label uppercase text-accent">differs</span>
-                      )}
-                      {field.hint && (
-                        <span className="block text-label text-fg-muted">{field.hint}</span>
-                      )}
-                    </th>
-                    {data.candidates.map((row) => (
-                      <td key={row.candidate_id} className="px-3 py-1.5">
-                        <Metric
-                          value={display(row[field.key])}
-                          derivation={candidateDerivation(row, data.basis, data.seed)}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-              <tr className="border-b border-border-subtle">
-                <th scope="row" className="px-3 py-1.5 text-left font-normal text-fg-secondary">
-                  Blocking checks
-                  <span className="block text-label text-fg-muted">
-                    Shown, not hidden: a refused candidate is still an option considered
+                    {row.admissible ? 'admissible' : 'not admissible'}
                   </span>
                 </th>
-                {data.candidates.map((row) => (
-                  <td key={row.candidate_id} className="px-3 py-1.5">
-                    {row.blocking_checks.length === 0 ? (
-                      <span className="text-fg-muted">none</span>
-                    ) : (
-                      <ul className="flex flex-col gap-0.5">
-                        {row.blocking_checks.map((check) => (
-                          <li key={check} className="text-state-warn">
-                            {check.replace(/_/g, ' ')}
-                          </li>
-                        ))}
-                      </ul>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {FIELDS.map((field) => {
+              const differs = differing.has(String(field.key));
+              return (
+                <tr
+                  key={String(field.key)}
+                  className={clsx('border-b border-border-subtle', differs && 'bg-accent-subtle')}
+                >
+                  <th scope="row" className="px-3 py-1.5 text-left font-normal text-fg-secondary">
+                    {field.label}
+                    {differs && (
+                      <span className="ml-2 text-label uppercase text-accent">differs</span>
                     )}
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <th scope="row" className="px-3 py-1.5 text-left font-normal text-fg-secondary">
-                  Rationale
-                </th>
-                {data.candidates.map((row) => (
-                  <td key={row.candidate_id} className="px-3 py-1.5 text-fg-secondary">
-                    {row.rationale ?? '—'}
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    {field.hint && (
+                      <span className="block text-label text-fg-muted">{field.hint}</span>
+                    )}
+                  </th>
+                  {data.candidates.map((row, index) => (
+                    <td key={columnKey(row, index)} className="px-3 py-1.5">
+                      <Metric
+                        value={display(row[field.key])}
+                        derivation={candidateDerivation(row, data.basis, data.seed)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+            <tr className="border-b border-border-subtle">
+              <th scope="row" className="px-3 py-1.5 text-left font-normal text-fg-secondary">
+                Blocking checks
+                <span className="block text-label text-fg-muted">
+                  Shown, not hidden: a refused candidate is still an option considered
+                </span>
+              </th>
+              {data.candidates.map((row, index) => (
+                <td key={columnKey(row, index)} className="px-3 py-1.5">
+                  {row.blocking_checks.length === 0 ? (
+                    <span className="text-fg-muted">none</span>
+                  ) : (
+                    <ul className="flex flex-col gap-0.5">
+                      {row.blocking_checks.map((check) => (
+                        <li key={check} className="text-state-warn">
+                          {check.replace(/_/g, ' ')}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <th scope="row" className="px-3 py-1.5 text-left font-normal text-fg-secondary">
+                Rationale
+              </th>
+              {data.candidates.map((row, index) => (
+                <td key={columnKey(row, index)} className="px-3 py-1.5 text-fg-secondary">
+                  {row.rationale ?? <Absent label="no rationale recorded" />}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </TableFrame>
       </Panel>
 
       <Panel title="Selection">
-        <div className="flex flex-col gap-3 px-3 py-3">
+        <PanelBody gap="loose">
           <p className="text-body text-fg-secondary">
             A selection is attributed and immutable. A different choice later needs a new plan, not
             a re-selection — the same rule the operator decision record already follows.
           </p>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-label uppercase text-fg-muted">Reason (required)</span>
-            <input
-              type="text"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              maxLength={2000}
-              aria-invalid={reason.trim().length === 0}
-              className="rounded border border-border-subtle bg-inset px-2 py-1.5 text-body text-fg-primary"
-              placeholder="Why this plan, in the operator's words"
-            />
-          </label>
+          {/*
+           * The identical block lived here and in the approval queue, down to `maxLength={2000}` and
+           * the `aria-invalid` expression. A recorded decision is only as good as its reason, so the
+           * field that captures it is one component.
+           */}
+          <ReasonField
+            id="plan-selection-reason"
+            value={reason}
+            onChange={setReason}
+            disabled={!api.canWrite}
+            placeholder="Why this plan, in the operator's words"
+            hint="Recorded against the selection and shown in the audit trail. It cannot be edited afterwards."
+          />
 
           {failure && (
-            <p role="alert" className="text-body text-state-crit">
+            <Notice tone="crit" alert divider="none" className="rounded border px-2">
               {failure}
-            </p>
+            </Notice>
           )}
 
           <div className="flex flex-wrap gap-2">
             {(plans.data?.plans ?? []).map((plan) => {
               const isSelected = plan.id === selectedId;
               const chosenElsewhere = selectedId !== null && !isSelected;
+              const label = plan.variant_key ?? `plan ${plan.id}`;
               return (
-                <button
+                <Button
                   key={plan.id}
-                  type="button"
+                  size="md"
+                  variant={isSelected ? 'primary' : 'secondary'}
                   disabled={!canSelect || isSelected || chosenElsewhere || select.isPending}
+                  disabledReason={
+                    !api.canWrite
+                      ? 'Fixtures are being served. Point the console at the live API to record a selection.'
+                      : isSelected
+                        ? 'This plan is already the selection of record.'
+                        : chosenElsewhere
+                          ? 'A plan has already been selected for this incident. A different choice needs a new plan.'
+                          : reason.trim().length === 0
+                            ? 'Give a reason first: a selection is recorded with its justification.'
+                            : undefined
+                  }
                   onClick={() => {
                     setPending(plan.id);
                     select.mutate({ planId: plan.id, why: reason.trim() });
                   }}
-                  className={clsx(
-                    'rounded border px-3 py-1.5 text-body',
-                    isSelected
-                      ? 'border-state-ok text-state-ok'
-                      : 'border-border-subtle text-fg-primary hover:border-accent disabled:text-fg-muted',
-                  )}
                 >
-                  {isSelected ? 'Selected: ' : 'Select '}
-                  {plan.variant_key ?? `plan ${plan.id}`}
+                  {isSelected ? 'Selected' : 'Select'}
+                  {/* The variant key is a contract value, so it is never case-transformed. */}
+                  <span className="font-mono normal-case">{label}</span>
                   {pending === plan.id && select.isPending && ' …'}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -388,13 +448,13 @@ export function PlanComparison() {
               . Further selection is refused with a conflict.
             </p>
           )}
-          {!api.canWrite && (
-            <p className="text-body text-fg-muted">
-              Fixture mode: write affordances are disabled, because a synthesised response would put
-              a state change on screen that never happened.
-            </p>
-          )}
-        </div>
+        </PanelBody>
+        {!api.canWrite && (
+          <Notice tone="muted">
+            Fixture mode: write affordances are disabled, because a synthesised response would put a
+            state change on screen that never happened.
+          </Notice>
+        )}
       </Panel>
     </div>
   );

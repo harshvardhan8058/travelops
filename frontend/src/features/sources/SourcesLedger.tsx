@@ -21,6 +21,15 @@ import {
   StateBadge,
 } from '@/components/ui/primitives';
 import { CountBar } from '@/components/ui/Metric';
+import {
+  Absent,
+  Labelled,
+  Notice,
+  PageHeader,
+  TableFrame,
+  TableHead,
+} from '@/components/ui/composition';
+import { utcStamp } from '@/components/ui/format';
 
 const KIND_ORDER: SourceRow['kind'][] = [
   'real',
@@ -82,95 +91,119 @@ export function SourcesLedger() {
     count: sources.filter((source) => source.kind === kind).length,
   })).filter((segment) => segment.count > 0);
 
+  const realCount = sources.filter((source) => source.kind === 'real').length;
+  const unavailableCount = sources.filter((source) => source.kind === 'unavailable').length;
+
   return (
     <div className="flex flex-col gap-3">
-      <Panel title="Provenance ledger" actions={<MonoValue muted>{sources.length}</MonoValue>}>
-        <div className="border-b border-border-subtle px-3 py-2">
+      {/*
+       * This screen is the root of every provenance claim in the product: each badge elsewhere is
+       * read from here. So it now says so at the top, and states how much of the ledger is a live
+       * source versus a fixture — counts of the rows returned, never a score.
+       */}
+      <PageHeader
+        eyebrow="Provenance"
+        title="Source ledger"
+        meta={
+          <>
+            <Labelled label="sources">
+              <MonoValue>{sources.length}</MonoValue>
+            </Labelled>
+            <Labelled label="live">
+              <MonoValue className={realCount > 0 ? 'text-state-ok' : undefined}>
+                {realCount}
+              </MonoValue>
+            </Labelled>
+            <Labelled label="unavailable">
+              <MonoValue className={unavailableCount > 0 ? 'text-state-crit' : undefined}>
+                {unavailableCount}
+              </MonoValue>
+            </Labelled>
+          </>
+        }
+        footer={
+          <p className="text-body text-fg-secondary">
+            Every provenance badge in the console is read from this ledger. A source that is not
+            registered here cannot claim provenance anywhere else.
+          </p>
+        }
+      />
+
+      <Panel title="Registered sources" actions={<MonoValue muted>{sources.length}</MonoValue>}>
+        <div className="border-b border-border-subtle px-3 py-2.5">
           <CountBar segments={segments} total={sources.length} />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-body">
-            <caption className="sr-only">Every data source, its kind, licence and health.</caption>
-            <thead>
-              <tr className="border-b border-border-subtle bg-inset text-label uppercase text-fg-muted">
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Source
+        <TableFrame caption="Every data source, its kind, licence and health. The order is the order the endpoint returned them in and implies no priority.">
+          <TableHead
+            columns={[
+              { key: 'source', label: 'Source' },
+              { key: 'kind', label: 'Kind' },
+              { key: 'provider', label: 'Provider' },
+              { key: 'mode', label: 'Mode' },
+              { key: 'checked', label: 'Last checked', hint: 'UTC' },
+              { key: 'licence', label: 'Licence' },
+              { key: 'health', label: 'Health' },
+            ]}
+          />
+          <tbody>
+            {sources.map((source) => (
+              <tr key={source.name} className="border-b border-border-subtle">
+                <th scope="row" className="px-3 py-1.5 text-left font-normal">
+                  <span className="flex items-center gap-1.5">
+                    <ProvenanceDot kind={source.kind} provider={source.provider} />
+                    <span className="text-body text-fg">{source.name}</span>
+                  </span>
+                  {source.note && (
+                    <span className="block text-caption text-fg-muted">{source.note}</span>
+                  )}
                 </th>
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Kind
-                </th>
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Provider
-                </th>
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Mode
-                </th>
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Last checked
-                </th>
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Licence
-                </th>
-                <th scope="col" className="px-3 py-1.5 text-left font-medium">
-                  Health
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sources.map((source) => (
-                <tr key={source.name} className="border-b border-border-subtle">
-                  <th scope="row" className="px-3 py-1.5 text-left font-normal">
-                    <span className="flex items-center gap-1.5">
-                      <ProvenanceDot kind={source.kind} provider={source.provider} />
-                      <span className="text-body text-fg">{source.name}</span>
-                    </span>
-                    {source.note && (
-                      <span className="block text-caption text-fg-muted">{source.note}</span>
-                    )}
-                  </th>
-                  <td className="px-3 py-1.5">
-                    <StateBadge
-                      status={
-                        source.kind === 'real'
-                          ? 'up'
-                          : source.kind === 'unavailable'
-                            ? 'down'
-                            : 'scheduled'
-                      }
-                      label={source.kind}
+                <td className="px-3 py-1.5">
+                  <StateBadge
+                    status={
+                      source.kind === 'real'
+                        ? 'up'
+                        : source.kind === 'unavailable'
+                          ? 'down'
+                          : 'scheduled'
+                    }
+                    label={source.kind}
+                  />
+                </td>
+                <td className="px-3 py-1.5">
+                  <MonoValue>{source.provider}</MonoValue>
+                </td>
+                <td className="px-3 py-1.5">
+                  <MonoValue muted>{source.current_mode}</MonoValue>
+                </td>
+                <td className="px-3 py-1.5">
+                  {source.last_checked ? (
+                    <MonoValue muted>{utcStamp(source.last_checked)}</MonoValue>
+                  ) : (
+                    <Absent
+                      label="never checked"
+                      title="This source has no recorded health check."
                     />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <MonoValue>{source.provider}</MonoValue>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <MonoValue muted>{source.current_mode}</MonoValue>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    {source.last_checked ? (
-                      <MonoValue muted>
-                        {source.last_checked.slice(0, 10)} {source.last_checked.slice(11, 19)}Z
-                      </MonoValue>
-                    ) : (
-                      <span className="text-caption text-fg-muted" title="never checked">
-                        —
-                      </span>
-                    )}
-                  </td>
-                  <td className="max-w-[280px] px-3 py-1.5 text-caption text-fg-secondary">
-                    {source.licence}
-                    {source.attribution_required && (
-                      <span className="ml-1 text-fg-muted">· attribution required</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <span className="text-caption text-fg-secondary">{source.health}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  )}
+                </td>
+                <td className="max-w-[280px] px-3 py-1.5 text-caption text-fg-secondary">
+                  {source.licence}
+                  {source.attribution_required && (
+                    <span className="ml-1 text-fg-muted">· attribution required</span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5">
+                  <span className="text-caption text-fg-secondary">{source.health}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </TableFrame>
+        {unavailableCount > 0 && (
+          <Notice tone="warn">
+            {unavailableCount} source{unavailableCount === 1 ? '' : 's'} unavailable. Anything
+            derived from one is badged unavailable rather than falling back to a value.
+          </Notice>
+        )}
       </Panel>
     </div>
   );

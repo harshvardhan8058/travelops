@@ -8,74 +8,52 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { User } from 'lucide-react';
-import { clsx } from 'clsx';
 
 import { api, ApiError } from '@/api/client';
 import type { TimelineEntry } from '@/api/types';
 import { EmptyState, ErrorState, LoadingState, MonoValue } from '@/components/ui/primitives';
+import { TimelineItem, TimelineList } from '@/components/ui/composition';
+import { utcClock } from '@/components/ui/format';
+import { ActorChip } from '@/features/agent/ActorChip';
 
-/**
- * Actor chips. Identity, not status.
+/*
+ * The local `ACTOR_CLASS` and `ACTOR_ICON` maps are gone: attribution renders through `ActorChip`.
  *
- * `human` was `--state-warn`, which is the colour this product uses for SEVERITY HIGH, NEEDS
- * HUMAN, TIER HIGH and AWAITING APPROVAL. On the workspace all five appear at once, so an
- * operator's completed approval read as one more amber warning rather than as the thing a
- * person did. docs/21 reserves green, amber and red exclusively for operational state, so
- * identity has no business borrowing one.
+ * The reasoning above is preserved by that component, not discarded — a human act is still the
+ * highest-contrast, most solid chip in the rail, and it is still the only one carrying a glyph,
+ * which is what makes an operator's action findable while scrolling a dense log.
  *
- * It is now the only chip drawn in primary text on a raised fill with a strong border: the
- * highest-contrast, most solid chip in the rail, which is appropriate for the one actor who
- * carries accountability, and impossible to mistake for a status.
+ * What changes is that there is now one implementation instead of three. This map, an identical one
+ * in `ReplayScreen.tsx` and `ActorChip.tsx` itself all carried the same `human` class string, and
+ * two of the three painted `agent` with `text-state-info` — identity borrowing a colour from the
+ * operational state ramp, which is the exact conflation this rail's own header warns about. Three
+ * copies of the one rule the design docs care most about is how that rule quietly stops holding.
  */
-const ACTOR_CLASS: Record<TimelineEntry['actor_kind'], string> = {
-  orchestrator: 'text-accent border-accent-border',
-  agent: 'text-state-info border-state-info/30',
-  service: 'text-fg-secondary border-border',
-  human: 'text-fg bg-raised border-border-strong font-medium',
-  provider: 'text-fg-muted border-border-subtle',
-};
-
-/**
- * Only the human chip carries an icon, deliberately.
- *
- * Every status badge on screen pairs a word with an icon, and before this the one entry
- * representing a person had the least furniture of anything in the rail. A single glyph among
- * twenty text-only chips is what makes an operator's action findable while scrolling a dense
- * log — which is the whole point of attributing it.
- */
-const ACTOR_ICON: Partial<Record<TimelineEntry['actor_kind'], typeof User>> = {
-  human: User,
-};
-
-function Entry({ entry }: { entry: TimelineEntry }) {
+function Entry({ entry, isLast }: { entry: TimelineEntry; isLast: boolean }) {
   const detail = entry.detail ? JSON.stringify(entry.detail, null, 2) : null;
-  const ActorIcon = ACTOR_ICON[entry.actor_kind];
-  return (
-    <li className="border-b border-border-subtle px-3 py-2">
-      <div className="flex items-center gap-2">
-        <MonoValue muted className="shrink-0">
-          {new Date(entry.occurred_at).toISOString().slice(11, 19)}
-        </MonoValue>
-        <span
-          className={clsx(
-            'inline-flex shrink-0 items-center gap-1 rounded-sm border px-1 py-0.5 text-caption uppercase',
-            ACTOR_CLASS[entry.actor_kind],
-          )}
-        >
-          {ActorIcon && <ActorIcon size={11} strokeWidth={1.5} aria-hidden />}
-          {entry.actor_kind}
-        </span>
-      </div>
+  /*
+   * A person's act is marked on the spine as well as in the chip. `accent` is an active-state cue
+   * rather than a status colour, so it can carry "this one was a human" without being mistaken for
+   * a warning — which is the whole reason identity is kept off the green/amber/red ramp.
+   */
+  const isHuman = entry.actor_kind === 'human';
 
-      <p className="mt-1 text-body text-fg">{entry.summary}</p>
+  return (
+    <TimelineItem
+      tone={isHuman ? 'accent' : 'muted'}
+      time={utcClock(entry.occurred_at)}
+      isLast={isLast}
+      className="px-3"
+    >
+      <ActorChip actorKind={entry.actor_kind} actor={entry.actor} />
+      <p className="mt-1.5 text-body text-fg">{entry.summary}</p>
       <MonoValue muted className="text-caption">
         {entry.event_type}
       </MonoValue>
 
       {detail && (
         <details className="mt-1">
-          <summary className="cursor-pointer text-caption text-fg-muted hover:text-fg-secondary">
+          <summary className="cursor-pointer rounded-sm text-caption text-fg-muted transition-colors duration-hover ease-out hover:text-fg-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             evidence
           </summary>
           <pre className="mt-1 overflow-x-auto rounded-sm bg-inset p-2 font-mono text-caption text-fg-secondary">
@@ -83,7 +61,7 @@ function Entry({ entry }: { entry: TimelineEntry }) {
           </pre>
         </details>
       )}
-    </li>
+    </TimelineItem>
   );
 }
 
@@ -120,11 +98,18 @@ export function DecisionTimeline({ incidentId }: { incidentId: string }) {
       )}
 
       {data && data.entries.length > 0 && (
-        <ol className="flex-1 overflow-auto">
-          {[...data.entries].reverse().map((entry) => (
-            <Entry key={entry.id} entry={entry} />
-          ))}
-        </ol>
+        <div className="flex-1 overflow-auto py-1.5">
+          {/*
+           * Newest first, and now on an actual spine. This was a `divide-y` list of rows: correct,
+           * and indistinguishable from a table. The claim the rail exists to make is that these
+           * records are ONE ordered sequence, and a marker per entry states that at a glance.
+           */}
+          <TimelineList label="Decisions, newest first">
+            {[...data.entries].reverse().map((entry, index, entries) => (
+              <Entry key={entry.id} entry={entry} isLast={index === entries.length - 1} />
+            ))}
+          </TimelineList>
+        </div>
       )}
     </div>
   );

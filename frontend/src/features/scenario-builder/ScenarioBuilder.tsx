@@ -44,6 +44,18 @@ import { MonoValue, Panel, ProvenanceDot, StateBadge } from '@/components/ui/pri
 import { StepRail } from '@/components/ui/primitives';
 import { FilterChips } from '@/components/ui/Metric';
 import {
+  Button,
+  DefinitionList,
+  DefinitionRow,
+  FIELD_SHELL,
+  Labelled,
+  Notice,
+  PageHeader,
+  PanelBody,
+  PanelSection,
+  Toolbar,
+} from '@/components/ui/composition';
+import {
   DISRUPTION_TYPES,
   SCENARIO_SEVERITIES,
   SCENARIO_TEMPLATES,
@@ -70,26 +82,15 @@ import {
   type ValidationIssue,
 } from './scenarioDraft';
 
-/** Shared input shell. One recipe so two fields cannot disagree about what a field looks like. */
-const INPUT_CLASS = clsx(
-  'w-full rounded-sm border border-border-strong bg-inset px-2 py-1 text-body text-fg',
-  'placeholder:text-fg-muted',
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-);
-
-const PRIMARY_BUTTON = clsx(
-  'flex items-center gap-1.5 rounded-sm border px-2 py-1 text-caption uppercase',
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-  'border-accent-border bg-accent-subtle text-accent',
-  'disabled:cursor-not-allowed disabled:border-border-subtle disabled:bg-transparent disabled:text-fg-muted',
-);
-
-const SECONDARY_BUTTON = clsx(
-  'flex items-center gap-1.5 rounded-sm border px-2 py-1 text-caption uppercase',
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-  'border-border-strong text-fg-secondary hover:border-accent-border hover:text-accent',
-  'disabled:cursor-not-allowed disabled:border-border-subtle disabled:text-fg-muted',
-);
+/*
+ * The local `INPUT_CLASS`, `PRIMARY_BUTTON` and `SECONDARY_BUTTON` constants that used to live here
+ * are now `FIELD_SHELL` and `Button` in `@/components/ui/composition`.
+ *
+ * They were the clearest primitives-in-waiting in the codebase: this screen held the only real
+ * button vocabulary in the product while five other surfaces hand-rolled their own, which is how the
+ * approval control and the plan-selection control ended up disagreeing about padding and type size.
+ * Moving them changes no pixel here and gives every other screen the same three affordances.
+ */
 
 /** A labelled field with its own validation messages beside it, never in a distant summary. */
 function Field({
@@ -177,29 +178,24 @@ function TemplateCard({
   );
 }
 
-/**
- * A label beside a value, with `uppercase` on the LABEL only.
+/*
+ * The local `Labelled` is now the shared one in `@/components/ui/composition`.
  *
- * Written first as one uppercased span wrapping both, which case-transformed the values inside it: the
+ * Three screens each carried a copy, and each copy carried its own version of the same comment: the
+ * component exists because an uppercased *wrapper* case-transforms the values inside it, so the
  * request id `scn-1a2b3c4d` rendered as `SCN-1A2B3C4D` and the endpoint path as `/API/V1/SCENARIOS`.
- * An operator copying either one would copy something the console never produced. Same defect class
- * as rendering "MoCA" as "MOCA", and the reason the policy screen has a component for this too.
+ * An operator copying either would copy something the console never produced — the same defect class
+ * as rendering "MoCA" as "MOCA". One component, one rule: `uppercase` goes on the label span only.
  */
-function Labelled({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-caption uppercase text-fg-muted">{label}</span>
-      {children}
-    </span>
-  );
-}
 
 /** The prepared request. Everything here is a fact about the console, not about the backend. */
 function ReceiptPanel({ receipt }: { receipt: ScenarioRequestReceipt }) {
   return (
-    <Panel title="Prepared request">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
-        <StateBadge status="pending" label="prepared, not sent" />
+    <Panel
+      title="Prepared request"
+      actions={<StateBadge status="pending" label="prepared, not sent" />}
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5">
         <Labelled label="request">
           <MonoValue muted>{receipt.requestId}</MonoValue>
         </Labelled>
@@ -214,28 +210,29 @@ function ReceiptPanel({ receipt }: { receipt: ScenarioRequestReceipt }) {
       </div>
 
       {/* The console's own sentence about why nothing was sent. Never blank while unsubmitted. */}
-      <p className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
-        {receipt.unsubmittedReason}
-      </p>
+      <Notice tone="warn">{receipt.unsubmittedReason}</Notice>
 
       {receipt.equivalentCommand && (
-        <div className="border-t border-border-subtle px-3 py-2">
-          <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
-            <Terminal size={11} strokeWidth={1.5} aria-hidden />
-            this draft is reproducible today
-          </span>
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-mono-sm text-fg-secondary">
-            {receipt.equivalentCommand}
-          </pre>
-        </div>
+        <PanelSection title="This draft is reproducible today" tone="muted">
+          <div className="flex items-start gap-1.5">
+            <Terminal
+              size={12}
+              strokeWidth={1.5}
+              className="mt-1 shrink-0 text-fg-muted"
+              aria-hidden
+            />
+            <pre className="min-w-0 overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-inset px-2 py-1.5 font-mono text-mono-sm text-fg-secondary">
+              {receipt.equivalentCommand}
+            </pre>
+          </div>
+        </PanelSection>
       )}
 
-      <div className="border-t border-border-subtle px-3 py-2">
-        <span className="text-caption uppercase text-fg-muted">request body</span>
-        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-mono-sm text-fg-secondary">
+      <PanelSection title="Request body" tone="muted">
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-inset px-2 py-1.5 font-mono text-mono-sm text-fg-secondary">
           {JSON.stringify(receipt.payload, null, 2)}
         </pre>
-      </div>
+      </PanelSection>
     </Panel>
   );
 }
@@ -280,18 +277,36 @@ export function ScenarioBuilder() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      <Panel>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
-          <span className="text-subtitle text-fg">Scenario builder</span>
-          <StepRail
-            steps={steps}
-            label="Scenario builder steps"
-            onSelect={(id) => {
-              const next = id as ScenarioStepId;
-              if (canOpenStep(draft, next)) setStep(next);
-            }}
+      {/*
+       * The draft's own name is the subject of this screen, so it is the title. Rendered verbatim:
+       * it is operator-typed text and CSS-transforming it would show them something they did not
+       * write. The rail moves to the header footer, where it reads as progress through the screen
+       * rather than as one more chip in a row of chips.
+       */}
+      <PageHeader
+        eyebrow="Scenario builder"
+        title={draft.name.trim() === '' ? 'Untitled scenario' : draft.name}
+        status={
+          <StateBadge
+            status={report.ok ? 'approved' : 'pending'}
+            label={report.ok ? 'valid draft' : 'incomplete draft'}
           />
-          <span className="ml-auto flex items-center gap-1.5">
+        }
+        meta={
+          <>
+            <Labelled label="airport">
+              <MonoValue muted>{draft.airportIcao || 'not set'}</MonoValue>
+            </Labelled>
+            <Labelled label="flights">
+              <MonoValue muted>{draft.flightNumbers.length}</MonoValue>
+            </Labelled>
+            <Labelled label="severity">
+              <MonoValue muted>{draft.severity}</MonoValue>
+            </Labelled>
+          </>
+        }
+        actions={
+          <Toolbar>
             <ProvenanceDot
               kind="unavailable"
               provider="scenario-authoring"
@@ -300,9 +315,19 @@ export function ScenarioBuilder() {
             <span className="text-caption uppercase text-fg-muted">
               authoring endpoint not published
             </span>
-          </span>
-        </div>
-      </Panel>
+          </Toolbar>
+        }
+        footer={
+          <StepRail
+            steps={steps}
+            label="Scenario builder steps"
+            onSelect={(id) => {
+              const next = id as ScenarioStepId;
+              if (canOpenStep(draft, next)) setStep(next);
+            }}
+          />
+        }
+      />
 
       <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex min-h-0 flex-col gap-3">
@@ -311,7 +336,7 @@ export function ScenarioBuilder() {
               <div
                 role="radiogroup"
                 aria-label="Scenario template"
-                className="grid gap-2 px-3 py-2 md:grid-cols-2"
+                className="grid gap-2 px-3 py-2.5 md:grid-cols-2 2xl:grid-cols-3"
               >
                 {SCENARIO_TEMPLATES.map((candidate) => (
                   <TemplateCard
@@ -322,10 +347,10 @@ export function ScenarioBuilder() {
                   />
                 ))}
               </div>
-              <p className="border-t border-border-subtle px-3 py-1.5 text-caption text-fg-muted">
+              <Notice tone="muted" icon={false}>
                 A template sets the starting values. Every field stays editable in the next step,
                 and nothing is created by choosing one.
-              </p>
+              </Notice>
             </Panel>
           )}
 
@@ -340,10 +365,10 @@ export function ScenarioBuilder() {
                 )
               }
             >
-              <div className="grid gap-3 px-3 py-2 md:grid-cols-2">
+              <div className="grid gap-x-6 gap-y-3.5 px-3 py-3 md:grid-cols-2">
                 <Field label="Scenario name" issues={issuesForField(report, 'name')}>
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_SHELL}
                     value={draft.name}
                     onChange={(event) => {
                       setReceipt(null);
@@ -358,7 +383,7 @@ export function ScenarioBuilder() {
                   issues={issuesForField(report, 'airportIcao')}
                 >
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_SHELL}
                     value={draft.airportIcao}
                     maxLength={4}
                     onChange={(event) => {
@@ -374,7 +399,7 @@ export function ScenarioBuilder() {
                 <Field label="Starts at (UTC)" issues={issuesForField(report, 'startsAt')}>
                   <input
                     type="datetime-local"
-                    className={INPUT_CLASS}
+                    className={FIELD_SHELL}
                     value={draft.startsAt}
                     onChange={(event) => {
                       setReceipt(null);
@@ -389,7 +414,7 @@ export function ScenarioBuilder() {
                 >
                   <input
                     type="number"
-                    className={INPUT_CLASS}
+                    className={FIELD_SHELL}
                     value={String(draft.durationMinutes)}
                     min={15}
                     max={1440}
@@ -437,7 +462,7 @@ export function ScenarioBuilder() {
                     issues={issuesForField(report, 'flightNumbers')}
                   >
                     <input
-                      className={INPUT_CLASS}
+                      className={FIELD_SHELL}
                       value={flightText}
                       onChange={(event) => commitFlightText(event.target.value)}
                     />
@@ -494,7 +519,7 @@ export function ScenarioBuilder() {
                     issues={issuesForField(report, 'notes')}
                   >
                     <textarea
-                      className={clsx(INPUT_CLASS, 'min-h-[64px] resize-y')}
+                      className={clsx(FIELD_SHELL, 'min-h-[72px] resize-y')}
                       value={draft.notes}
                       onChange={(event) => {
                         setReceipt(null);
@@ -505,24 +530,19 @@ export function ScenarioBuilder() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 border-t border-border-subtle px-3 py-2">
-                <button
-                  type="button"
-                  className={SECONDARY_BUTTON}
-                  onClick={() => setStep('template')}
-                >
-                  <ChevronLeft size={12} strokeWidth={1.5} aria-hidden />
+              <div className="flex items-center gap-2 border-t border-border-subtle px-3 py-2.5">
+                <Button icon={ChevronLeft} onClick={() => setStep('template')}>
                   Template
-                </button>
-                <button
-                  type="button"
-                  className={PRIMARY_BUTTON}
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={() => setStep('review')}
                   disabled={!canOpenStep(draft, 'review')}
+                  disabledReason="Fill in the required fields first. Each one names its own problem beside the input."
                 >
-                  Validate & preview
+                  Validate &amp; preview
                   <ChevronRight size={12} strokeWidth={1.5} aria-hidden />
-                </button>
+                </Button>
               </div>
             </Panel>
           )}
@@ -539,12 +559,12 @@ export function ScenarioBuilder() {
                 }
               >
                 {report.issues.length === 0 ? (
-                  <p className="flex items-center gap-1.5 px-3 py-2 text-caption text-state-ok">
+                  <p className="flex items-center gap-1.5 px-3 py-2.5 text-caption text-state-ok">
                     <Check size={12} strokeWidth={1.5} aria-hidden />
                     Every field the request needs is present and well-formed.
                   </p>
                 ) : (
-                  <ul className="flex flex-col gap-1 px-3 py-2">
+                  <ul className="flex flex-col gap-1.5 px-3 py-2.5">
                     {report.issues.map((issue) => (
                       <li key={`${issue.field}-${issue.code}`} className="flex items-start gap-2">
                         <StateBadge
@@ -559,43 +579,37 @@ export function ScenarioBuilder() {
                   </ul>
                 )}
                 {report.warnings.length > 0 && report.ok && (
-                  <p className="border-t border-border-subtle px-3 py-1.5 text-caption text-fg-muted">
+                  <Notice tone="muted" icon={false}>
                     Warnings do not block creation. They are things worth having intended.
-                  </p>
+                  </Notice>
                 )}
               </Panel>
 
               <Panel title="Preview">
-                <dl className="grid gap-x-4 gap-y-1 px-3 py-2 md:grid-cols-2">
-                  {(
-                    [
-                      ['name', preview.name || 'not set'],
-                      ['template', preview.templateName ?? 'none'],
-                      ['type', preview.disruptionType.replace(/_/g, ' ')],
-                      ['airport', preview.airportIcao || 'not set'],
-                      ['starts', preview.startsAt || 'not set'],
-                      ['ends', preview.endsAt ?? 'not derivable yet'],
-                      ['duration', `${preview.durationMinutes} minutes`],
-                      ['severity', preview.severity],
-                      ['primary flight', preview.primaryFlight || 'not set'],
-                    ] as const
-                  ).map(([label, value]) => (
-                    <div key={label} className="flex items-baseline gap-2">
-                      <dt className="w-[104px] shrink-0 text-caption uppercase text-fg-muted">
-                        {label}
-                      </dt>
-                      <dd className="min-w-0 flex-1">
+                <div className="px-3 py-2.5">
+                  <DefinitionList className="gap-x-6 gap-y-1 md:grid md:grid-cols-2">
+                    {(
+                      [
+                        ['name', preview.name || 'not set'],
+                        ['template', preview.templateName ?? 'none'],
+                        ['type', preview.disruptionType.replace(/_/g, ' ')],
+                        ['airport', preview.airportIcao || 'not set'],
+                        ['starts', preview.startsAt || 'not set'],
+                        ['ends', preview.endsAt ?? 'not derivable yet'],
+                        ['duration', `${preview.durationMinutes} minutes`],
+                        ['severity', preview.severity],
+                        ['primary flight', preview.primaryFlight || 'not set'],
+                      ] as const
+                    ).map(([label, value]) => (
+                      <DefinitionRow key={label} label={label}>
                         <MonoValue muted>{value}</MonoValue>
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+                      </DefinitionRow>
+                    ))}
+                  </DefinitionList>
+                </div>
 
-                <div className="border-t border-border-subtle px-3 py-2">
-                  <Labelled label="incidents this would open">
-                    <MonoValue muted>{preview.affectedFlightCount}</MonoValue>
-                  </Labelled>
-                  <ul className="mt-1 flex flex-wrap gap-1">
+                <PanelSection title="Incidents this would open" count={preview.affectedFlightCount}>
+                  <ul className="flex flex-wrap gap-1">
                     {preview.affectedFlights.map((flight) => (
                       <li key={flight}>
                         <span className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5">
@@ -607,17 +621,14 @@ export function ScenarioBuilder() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </PanelSection>
 
                 {/*
                   The figures this console will not produce, named. A review step that showed an
                   invented passenger count would be the most convincing wrong number in the product.
                 */}
-                <div className="border-t border-border-subtle px-3 py-2">
-                  <span className="text-caption uppercase text-fg-muted">
-                    computed by the engine when the scenario runs
-                  </span>
-                  <ul className="mt-1 flex flex-wrap gap-1">
+                <PanelSection title="Computed by the engine when the scenario runs" tone="muted">
+                  <ul className="flex flex-wrap gap-1">
                     {preview.computedByEngine.map((figure) => (
                       <li
                         key={figure}
@@ -627,35 +638,29 @@ export function ScenarioBuilder() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </PanelSection>
 
-                <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-3 py-2">
-                  <button
-                    type="button"
-                    className={SECONDARY_BUTTON}
-                    onClick={() => setStep('details')}
-                  >
-                    <ChevronLeft size={12} strokeWidth={1.5} aria-hidden />
+                <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-3 py-2.5">
+                  <Button icon={ChevronLeft} onClick={() => setStep('details')}>
                     Edit details
-                  </button>
-                  <button
-                    type="button"
-                    className={SECONDARY_BUTTON}
+                  </Button>
+                  <Button
+                    icon={Plus}
                     onClick={() => prepare(false)}
                     disabled={!report.ok}
+                    disabledReason="The draft still has errors. Fix them in Disruption details first."
                   >
-                    <Plus size={12} strokeWidth={1.5} aria-hidden />
                     Create scenario
-                  </button>
-                  <button
-                    type="button"
-                    className={PRIMARY_BUTTON}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    icon={Play}
                     onClick={() => prepare(true)}
                     disabled={!report.ok}
+                    disabledReason="The draft still has errors. Fix them in Disruption details first."
                   >
-                    <Play size={12} strokeWidth={1.5} aria-hidden />
                     Create &amp; run
-                  </button>
+                  </Button>
                   <span className="ml-auto text-caption uppercase text-fg-muted">
                     creating opens one gate per flight — it approves nothing
                   </span>
@@ -669,26 +674,23 @@ export function ScenarioBuilder() {
 
         <div className="flex min-h-0 flex-col gap-3">
           <Panel title="Draft">
-            <dl className="flex flex-col gap-1 px-3 py-2">
-              {(
-                [
-                  ['template', template?.name ?? 'not chosen'],
-                  ['airport', draft.airportIcao || 'not set'],
-                  ['flights', String(draft.flightNumbers.length)],
-                  ['severity', draft.severity],
-                ] as const
-              ).map(([label, value]) => (
-                <div key={label} className="flex items-baseline gap-2">
-                  <dt className="w-[72px] shrink-0 text-caption uppercase text-fg-muted">
-                    {label}
-                  </dt>
-                  <dd className="min-w-0 flex-1">
+            <PanelBody gap="tight">
+              <DefinitionList width="sm">
+                {(
+                  [
+                    ['template', template?.name ?? 'not chosen'],
+                    ['airport', draft.airportIcao || 'not set'],
+                    ['flights', String(draft.flightNumbers.length)],
+                    ['severity', draft.severity],
+                  ] as const
+                ).map(([label, value]) => (
+                  <DefinitionRow key={label} label={label} width="sm">
                     <MonoValue muted>{value}</MonoValue>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-            <div className="flex items-center gap-2 border-t border-border-subtle px-3 py-2">
+                  </DefinitionRow>
+                ))}
+              </DefinitionList>
+            </PanelBody>
+            <div className="flex items-center gap-2 border-t border-border-subtle px-3 py-2.5">
               <StateBadge
                 status={report.ok ? 'approved' : 'pending'}
                 label={report.ok ? 'valid' : 'incomplete'}
@@ -702,7 +704,7 @@ export function ScenarioBuilder() {
           </Panel>
 
           <Panel title="What happens next">
-            <ol className="flex flex-col gap-2 px-3 py-2">
+            <ol className="flex flex-col gap-2 px-3 py-2.5">
               {[
                 'The scenario seeds flights, passengers and crew for the airport and window you set.',
                 'One incident opens per affected flight, each with its own assurance gate.',

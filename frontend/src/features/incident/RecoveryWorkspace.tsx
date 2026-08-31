@@ -33,6 +33,8 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { elapsedDerivation } from '@/components/ui/derivation';
+import { Button, Labelled, Notice, PageHeader, Toolbar } from '@/components/ui/composition';
+import { utcClock } from '@/components/ui/format';
 import { AssurancePanel } from '@/features/assurance/AssurancePanel';
 import { PlanAssuranceMatrix } from '@/features/assurance/PlanAssuranceMatrix';
 import { EvidenceColumn } from './EvidenceColumn';
@@ -48,7 +50,7 @@ function WorkspaceSkeleton() {
           <LoadingState label="Loading incident" />
         </div>
       </Panel>
-      <div className="grid grid-cols-[320px_minmax(0,1fr)_380px] gap-3">
+      <div className="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] 2xl:grid-cols-[340px_minmax(0,1fr)_400px]">
         {['Evidence', 'Plan', 'Assurance'].map((title) => (
           <Panel key={title} title={title}>
             <div className="h-[420px] px-3 py-2">
@@ -61,6 +63,14 @@ function WorkspaceSkeleton() {
   );
 }
 
+/**
+ * Deliberately NOT `durationBetween` from `@/components/ui/format`.
+ *
+ * That helper reports whole minutes, which is right for a delay or a freshness window. This one
+ * needs seconds: the deterministic slice resolves an incident in around twenty seconds, and a
+ * minute-resolution formatter renders that as `0m` — a recovery that reads as having taken no time
+ * at all. The one place in the product that needs second resolution keeps its own formatter.
+ */
 function formatDuration(fromIso: string, toIso: string): string {
   const seconds = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -112,83 +122,99 @@ function Header({
   const isTerminal =
     incident.state === 'resolved' || incident.state === 'blocked' || incident.state === 'failed';
 
+  const runBlockedReason = !api.canWrite
+    ? 'Fixtures are being served. Point the console at the live API to advance the workflow.'
+    : isTerminal
+      ? `This incident is terminal in ${incident.state} and cannot advance.`
+      : undefined;
+
   return (
-    <Panel>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
-        <div className="flex items-baseline gap-2">
-          <MonoValue className="text-subtitle">{incident.reference}</MonoValue>
-          <ProvenanceDot
-            kind={incident.provenance.kind}
-            provider={incident.provenance.provider}
-            sourceRef={incident.provenance.source_ref}
-          />
-        </div>
-
-        <span className="flex items-baseline gap-1.5">
-          <MonoValue>{flight.flight_number}</MonoValue>
-          {flight.route && <MonoValue muted>{flight.route}</MonoValue>}
-          {flight.delay_minutes !== undefined && flight.delay_minutes > 0 && (
-            <MonoValue className="text-state-warn">+{flight.delay_minutes}m</MonoValue>
-          )}
-        </span>
-
-        <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
-          trigger <MonoValue muted>{incident.trigger_type}</MonoValue>
-        </span>
-        <StateBadge status={incident.severity} label={`severity ${incident.severity}`} />
-
-        <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
-          opened <MonoValue muted>{incident.opened_at.slice(11, 19)}Z</MonoValue>
-        </span>
-
-        <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
-          workflow {/* Both ends are recorded transitions, so this cannot mix two clocks. */}
-          <WhyPopover derivation={elapsedDerivation(incident, first, latest)}>
-            <MonoValue>
-              {first && latest ? formatDuration(first.at, latest.at) : 'not derivable'}
-            </MonoValue>
-          </WhyPopover>
-        </span>
-
-        <div className="ml-auto flex items-center gap-2">
-          {/*
-           * The real POST /incidents/{id}/run. Disabled for two honest reasons rather than one
-           * vague one: a terminal incident cannot advance, and fixture mode has no endpoint to
-           * call. Both say which applies.
-           */}
-          <button
-            type="button"
-            onClick={onRun}
-            disabled={isRunning || isTerminal || !api.canWrite}
-            aria-disabled={isRunning || isTerminal || !api.canWrite}
-            className="inline-flex items-center gap-1.5 rounded-sm border border-accent-border bg-accent-subtle px-2 py-1 text-label uppercase text-accent transition-colors duration-hover ease-out hover:bg-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:border-border-subtle disabled:bg-inset disabled:text-fg-muted"
-          >
-            <PlayCircle size={14} strokeWidth={1.5} aria-hidden />
-            {isRunning ? 'Running…' : 'Run workflow'}
-          </button>
-          <span className="max-w-[280px] text-caption text-fg-muted">
-            {!api.canWrite
-              ? 'fixtures are being served — point the UI at the live API to run'
-              : isTerminal
-                ? `incident is terminal in ${incident.state}`
-                : 'advances the workflow one run'}
+    <>
+      {/*
+       * The FLIGHT is the subject of this screen, not the incident reference.
+       *
+       * An operator arrives here from the board thinking "6E 2134", and the aircraft is what the
+       * recovery is about; the incident reference is how the record is filed. So the flight number
+       * is the title and the reference moves into the supporting row. Both are contract values and
+       * neither is CSS-transformed.
+       */}
+      <PageHeader
+        eyebrow="Recovery workspace"
+        title={
+          <span className="flex flex-wrap items-baseline gap-2.5">
+            <span className="font-mono tabular-nums">{flight.flight_number}</span>
+            {flight.route && (
+              <span className="font-mono text-subtitle text-fg-secondary">{flight.route}</span>
+            )}
+            {flight.delay_minutes !== undefined && flight.delay_minutes > 0 && (
+              <span className="font-mono text-subtitle text-state-warn">
+                +{flight.delay_minutes}m
+              </span>
+            )}
           </span>
-        </div>
-      </div>
+        }
+        status={<StateBadge status={incident.severity} label={`severity ${incident.severity}`} />}
+        meta={
+          <>
+            <Labelled label="incident">
+              <MonoValue muted>{incident.reference}</MonoValue>
+            </Labelled>
+            <Labelled label="trigger">
+              <MonoValue muted>{incident.trigger_type}</MonoValue>
+            </Labelled>
+            <Labelled label="opened">
+              <MonoValue muted>{utcClock(incident.opened_at) ?? 'not recorded'}Z</MonoValue>
+            </Labelled>
+            <Labelled label="workflow">
+              {/* Both ends are recorded transitions, so this cannot mix two clocks. */}
+              <WhyPopover derivation={elapsedDerivation(incident, first, latest)}>
+                <MonoValue>
+                  {first && latest ? formatDuration(first.at, latest.at) : 'not derivable'}
+                </MonoValue>
+              </WhyPopover>
+            </Labelled>
+            <ProvenanceDot
+              kind={incident.provenance.kind}
+              provider={incident.provenance.provider}
+              sourceRef={incident.provenance.source_ref}
+            />
+          </>
+        }
+        actions={
+          <Toolbar className="items-start">
+            {/*
+             * The real POST /incidents/{id}/run. Disabled for two honest reasons rather than one
+             * vague one: a terminal incident cannot advance, and fixture mode has no endpoint to
+             * call. Both say which applies — now in the button's own title as well as beside it,
+             * so the reason travels with the control that refused.
+             */}
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                variant="primary"
+                size="md"
+                icon={PlayCircle}
+                onClick={onRun}
+                disabled={isRunning || isTerminal || !api.canWrite}
+                aria-disabled={isRunning || isTerminal || !api.canWrite}
+                disabledReason={runBlockedReason}
+              >
+                {isRunning ? 'Running…' : 'Run workflow'}
+              </Button>
+              <span className="max-w-[240px] text-right text-caption text-fg-muted">
+                {runBlockedReason ?? 'advances the workflow one run'}
+              </span>
+            </div>
+          </Toolbar>
+        }
+        footer={<StateRail rail={incident.state_rail} current={incident.state} />}
+      />
 
       {runError && (
-        <p
-          role="alert"
-          className="border-t border-state-crit/30 bg-state-crit-bg px-3 py-1.5 text-caption text-state-crit"
-        >
+        <Notice tone="crit" alert divider="none" className="rounded border">
           {runError}
-        </p>
+        </Notice>
       )}
-
-      <div className="border-t border-border-subtle px-3 py-2">
-        <StateRail rail={incident.state_rail} current={incident.state} />
-      </div>
-    </Panel>
+    </>
   );
 }
 
@@ -388,26 +414,24 @@ export function RecoveryWorkspace() {
       {lastRun && (
         <Panel>
           {/* Compact: this strip competes for vertical budget with the approval control. */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5">
-            <span className="text-label uppercase text-fg-muted">Last run</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2">
+            <span className="text-label uppercase text-fg-secondary">Last run</span>
             <span className="flex items-center gap-1.5">
               <StateBadge status={lastRun.previous_state} />
-              <span className="text-fg-muted">{'->'}</span>
+              <span className="text-fg-muted" aria-hidden>
+                {'->'}
+              </span>
               <StateBadge status={lastRun.state} />
             </span>
-            <span className="text-caption uppercase text-fg-muted">
-              steps <MonoValue>{lastRun.steps_taken}</MonoValue>
-            </span>
-            <span className="text-caption uppercase text-fg-muted">
-              terminal <MonoValue>{String(lastRun.is_terminal)}</MonoValue>
-            </span>
+            <Labelled label="steps">
+              <MonoValue>{lastRun.steps_taken}</MonoValue>
+            </Labelled>
+            <Labelled label="terminal">
+              <MonoValue>{String(lastRun.is_terminal)}</MonoValue>
+            </Labelled>
             {lastRun.replayed && <StateBadge status="skipped" label="replayed" />}
           </div>
-          {lastRun.note && (
-            <p className="border-t border-border-subtle px-3 py-1.5 text-caption text-fg-secondary">
-              {lastRun.note}
-            </p>
-          )}
+          {lastRun.note && <Notice tone="default">{lastRun.note}</Notice>}
         </Panel>
       )}
 
@@ -415,7 +439,16 @@ export function RecoveryWorkspace() {
        * Fixed left and right columns with a flexible centre: the evidence list and the
        * assurance panel have known content widths, and the plan is what benefits from space.
        */}
-      <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_380px] gap-3">
+      {/*
+       * Fixed left and right columns with a flexible centre: the evidence list and the
+       * assurance panel have known content widths, and the plan is what benefits from space.
+       *
+       * The track list is now responsive. It was `grid-cols-[320px_minmax(0,1fr)_380px]` at every
+       * width, so below roughly 800px the three fixed columns could not fit and the whole screen
+       * gained a horizontal scrollbar. At 2xl the outer columns take the extra room instead of
+       * leaving the centre to stretch alone.
+       */}
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)_360px] 2xl:grid-cols-[340px_minmax(0,1fr)_400px]">
         <EvidenceColumn incident={incident} />
 
         <PlanColumn

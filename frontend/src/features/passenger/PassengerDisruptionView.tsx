@@ -38,7 +38,6 @@ import {
   CircleDot,
   Clock,
   Hotel,
-  Info,
   Plane,
   RefreshCcw,
   Ticket,
@@ -47,12 +46,23 @@ import {
 import { clsx } from 'clsx';
 
 import {
+  ErrorState,
   LoadingState,
   MonoValue,
   Panel,
   ProvenanceDot,
   StateBadge,
 } from '@/components/ui/primitives';
+import {
+  Labelled,
+  Notice,
+  PageHeader,
+  PanelBody,
+  TimelineItem,
+  TimelineList,
+  Toolbar,
+} from '@/components/ui/composition';
+import { utcMinute } from '@/components/ui/format';
 import {
   PASSENGER_SAMPLE,
   passengerApi,
@@ -79,22 +89,12 @@ const OPTION_ICON: Record<PassengerOptionKind, typeof Plane> = {
   transport: ArrowRight,
 };
 
-/**
- * A label beside a value, with `uppercase` on the LABEL only.
- *
- * The value must never be case-transformed. Written first as a single uppercased span wrapping both,
- * it turned the recorded cause token `weather` into `WEATHER` and `not assigned` into `NOT ASSIGNED` —
- * strings the contract never published. The policy screen carries the same component for the same
- * reason.
+/*
+ * `Labelled` is imported from `@/components/ui/composition`, where the third copy of it now lives
+ * once. The rule it encodes is unchanged and still load-bearing: `uppercase` goes on the LABEL only,
+ * because on the wrapper it case-transformed the values inside — the recorded cause token `weather`
+ * became `WEATHER` and `not assigned` became `NOT ASSIGNED`, strings the contract never published.
  */
-function Labelled({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-caption uppercase text-fg-muted">{label}</span>
-      {children}
-    </span>
-  );
-}
 
 /** `label N of M`, with `uppercase` kept off both figures for the same reason as `Labelled`. */
 function Ratio({ label, value, total }: { label: string; value: number; total: number }) {
@@ -108,13 +108,12 @@ function Ratio({ label, value, total }: { label: string; value: number; total: n
   );
 }
 
-/** `HH:MM` in UTC. Times are rendered in one zone so two rows cannot be compared wrongly. */
-function clockOf(iso: string | null): string | null {
-  if (iso === null) return null;
-  const parsed = Date.parse(iso);
-  if (Number.isNaN(parsed)) return null;
-  return new Date(parsed).toISOString().slice(11, 16);
-}
+/*
+ * Times come from `utcMinute` in `@/components/ui/format`. One zone across the whole product, so two
+ * rows can never be compared wrongly, and an unparseable instant returns null rather than
+ * `Invalid Date`. A passenger-facing screen is the last place that should render a JavaScript error
+ * string as if it were a departure time.
+ */
 
 /**
  * A scheduled time and its revision, with the revision marked.
@@ -123,8 +122,8 @@ function clockOf(iso: string | null): string | null {
  * checking a screen against a boarding pass needs to see both to trust either.
  */
 function TimePair({ scheduled, revised }: { scheduled: string; revised: string | null }) {
-  const scheduledClock = clockOf(scheduled);
-  const revisedClock = clockOf(revised);
+  const scheduledClock = utcMinute(scheduled);
+  const revisedClock = utcMinute(revised);
 
   return (
     <span className="flex items-baseline gap-1.5">
@@ -182,7 +181,7 @@ function SegmentRow({ segment }: { segment: PassengerSegment }) {
         <Clock size={11} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
         {delay === null ? (
           <span className="text-caption text-fg-muted" title="No revised time has been published.">
-            no revision published
+            no new time yet
           </span>
         ) : (
           <span
@@ -200,7 +199,7 @@ function SegmentRow({ segment }: { segment: PassengerSegment }) {
 
       <span className="ml-auto">
         <Labelled label="gate">
-          <MonoValue muted>{segment.gate ?? 'not assigned'}</MonoValue>
+          <MonoValue muted>{segment.gate ?? 'not assigned yet'}</MonoValue>
         </Labelled>
       </span>
     </li>
@@ -278,6 +277,28 @@ export function PassengerDisruptionView() {
   );
   const impacts = useMemo(() => (view ? orderImpacts(view.impacts) : []), [view]);
 
+  /*
+   * An error branch, which this screen did not have.
+   *
+   * The query cannot fail today — its `queryFn` resolves a local sample — but the seam above exists
+   * precisely so that it becomes a network call, and the day it does, the previous code would have
+   * held a passenger on a spinner forever. The wording is the one thing that changes for this
+   * audience: a reader with no ledger to check against needs to be told the page could not load
+   * their trip, not handed a correlation id and an error code as the headline.
+   */
+  if (viewQuery.error) {
+    return (
+      <Panel title="Your trip">
+        <ErrorState
+          code="TRIP_UNAVAILABLE"
+          message="We could not load your trip just now. Nothing about your booking has changed, and your options are still open. Please try again."
+          correlationId={null}
+          onRetry={() => void viewQuery.refetch()}
+        />
+      </Panel>
+    );
+  }
+
   if (viewQuery.isLoading || !view || !tripStatus || !nextStep || !options || !progress) {
     return (
       <Panel title="Your trip">
@@ -290,21 +311,30 @@ export function PassengerDisruptionView() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      {/* Trip and flight status. */}
-      <Panel>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
-          <span className="flex items-baseline gap-2">
-            <span className="text-subtitle text-fg">
-              {view.trip.origin_iata} to {view.trip.destination_iata}
-            </span>
-            <MonoValue muted>{view.booking_ref}</MonoValue>
-          </span>
-          <StateBadge status={tripStatus.token} label={tripStatus.label} />
-          <span className="text-caption uppercase text-fg-muted">{view.passenger_name}</span>
-          <Labelled label="flights">
-            <MonoValue muted>{tripStatus.totalSegments}</MonoValue>
-          </Labelled>
-          <span className="ml-auto flex items-center gap-1.5">
+      {/*
+       * The trip is the subject, so the route is the title — at `text-title` rather than the
+       * `text-subtitle` it shared with every panel heading on the page. The passenger's own name
+       * reads as a name here rather than as a 12px uppercase caption, which is what it was.
+       */}
+      <PageHeader
+        eyebrow="Your trip"
+        title={`${view.trip.origin_iata} to ${view.trip.destination_iata}`}
+        status={<StateBadge status={tripStatus.token} label={tripStatus.label} />}
+        meta={
+          <>
+            <Labelled label="booking">
+              <MonoValue>{view.booking_ref}</MonoValue>
+            </Labelled>
+            <Labelled label="passenger">
+              <span className="text-body text-fg-secondary">{view.passenger_name}</span>
+            </Labelled>
+            <Labelled label="flights">
+              <MonoValue muted>{tripStatus.totalSegments}</MonoValue>
+            </Labelled>
+          </>
+        }
+        actions={
+          <Toolbar>
             <ProvenanceDot
               kind={view.provenance.kind}
               provider={view.provenance.provider}
@@ -313,19 +343,23 @@ export function PassengerDisruptionView() {
             <span className="text-caption uppercase text-fg-muted">
               {passengerApi.isLive ? 'live booking' : 'sample booking, no service behind it'}
             </span>
-          </span>
-        </div>
-      </Panel>
+          </Toolbar>
+        }
+      />
 
-      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_440px]">
         <div className="flex min-h-0 flex-col gap-3">
           {/* What happened. */}
           <Panel title="What happened">
-            <div className="px-3 py-2">
-              <p className="text-body text-fg">{view.what_happened.headline}</p>
-              <p className="mt-1 text-caption text-fg-secondary">{view.what_happened.detail}</p>
+            <div className="px-3 py-3">
+              {/*
+               * The headline is the sentence the reader came for, so it is the largest thing in the
+               * panel. It was `text-body`, identical to the supporting detail beneath it.
+               */}
+              <p className="text-subtitle text-fg">{view.what_happened.headline}</p>
+              <p className="mt-1.5 text-body text-fg-secondary">{view.what_happened.detail}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle px-3 py-1.5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-subtle px-3 py-2">
               {/*
                 `uppercase` sits on each LABEL, never on the wrapper. On the wrapper it case-transformed
                 the values inside: the recorded cause token `weather` became `WEATHER`, which is not the
@@ -336,7 +370,7 @@ export function PassengerDisruptionView() {
               </Labelled>
               <Labelled label="recorded">
                 <MonoValue muted>
-                  {clockOf(view.what_happened.recorded_at) ?? 'not published'}
+                  {utcMinute(view.what_happened.recorded_at) ?? 'not published'}
                 </MonoValue>
               </Labelled>
               <Labelled label="incident">
@@ -426,17 +460,14 @@ export function PassengerDisruptionView() {
               Where a figure comes from, in the contract's own words. This screen states no amount and
               makes no claim about what the rules require.
             */}
-            <p className="flex items-start gap-2 border-t border-border-subtle px-3 py-2 text-caption text-fg-muted">
-              <Info size={11} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
-              {view.entitlement_note}
-            </p>
+            <Notice tone="muted">{view.entitlement_note}</Notice>
             {options.missingReason.length > 0 && (
               /* A contract defect, surfaced rather than tolerated. */
-              <p className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
+              <Notice tone="warn">
                 {options.missingReason.length} option
                 {options.missingReason.length === 1 ? '' : 's'} were marked unavailable without a
                 reason, so this page cannot say why.
-              </p>
+              </Notice>
             )}
           </Panel>
         </div>
@@ -444,7 +475,7 @@ export function PassengerDisruptionView() {
         <div className="flex min-h-0 flex-col gap-3">
           {/* Approval / next-step state. The most important panel on the screen. */}
           <Panel title="What happens next">
-            <div className="px-3 py-2">
+            <PanelBody gap="tight">
               <div className="flex flex-wrap items-center gap-2">
                 <StateBadge status={nextStep.token} label={nextStep.token.replace(/_/g, ' ')} />
                 {nextStep.passengerMustAct ? (
@@ -455,24 +486,25 @@ export function PassengerDisruptionView() {
                   </span>
                 )}
               </div>
-              <p className="mt-1.5 text-body text-fg">{nextStep.headline}</p>
-              <p className="mt-1 text-caption text-fg-secondary">{nextStep.detail}</p>
+              {/* The instruction outranks everything else on the page, so it is set largest. */}
+              <p className="text-subtitle text-fg">{nextStep.headline}</p>
+              <p className="text-body text-fg-secondary">{nextStep.detail}</p>
               {nextStep.respondBy && (
-                <p className="mt-1 flex items-baseline gap-1.5">
+                <p className="flex items-baseline gap-1.5">
                   <span className="text-caption uppercase text-state-warn">respond by</span>
                   <MonoValue className="text-state-warn">{nextStep.respondBy}</MonoValue>
                 </p>
               )}
-            </div>
+            </PanelBody>
             {nextStep.awaitingDecision && (
               /*
                 Said plainly. A passenger told their rebooking is "being reviewed" understands the
                 state; one told it is confirmed, when a gate has not cleared, has been misinformed.
               */
-              <p className="border-t border-border-subtle bg-inset px-3 py-1.5 text-caption text-fg-muted">
+              <Notice tone="muted" icon={false} className="bg-inset">
                 Changes of this size are approved by a person, not automatically. Nothing on your
                 booking has changed yet.
-              </p>
+              </Notice>
             )}
           </Panel>
 
@@ -481,48 +513,59 @@ export function PassengerDisruptionView() {
             title="What TravelOps is doing"
             actions={<Ratio label="done" value={progress.done} total={progress.total} />}
           >
-            <ol>
-              {view.travelops_actions.map((action) => {
-                const Icon = ACTION_ICON[action.state];
-                const tone =
-                  action.state === 'succeeded'
-                    ? 'text-state-ok'
-                    : action.state === 'awaiting_approval'
-                      ? 'text-state-warn'
-                      : action.state === 'executing'
-                        ? 'text-state-info'
-                        : 'text-fg-muted';
+            {/*
+             * An actual timeline rather than a divided list.
+             *
+             * These actions are one ordered sequence — that is the whole reassurance the panel
+             * offers — and a `divide-y` list of rows states it no more clearly than a table does.
+             * The spine and per-entry marker make the sequence legible at a glance, and the marker
+             * tone is the action's own state, so "this one is waiting on a person" is visible
+             * without reading. The state word is still on every row: tone is never the only signal.
+             */}
+            <div className="px-3 py-2.5">
+              <TimelineList label="What TravelOps is doing">
+                {view.travelops_actions.map((action, index) => {
+                  const Icon = ACTION_ICON[action.state];
+                  const tone =
+                    action.state === 'succeeded'
+                      ? ('ok' as const)
+                      : action.state === 'awaiting_approval'
+                        ? ('warn' as const)
+                        : action.state === 'executing'
+                          ? ('info' as const)
+                          : ('muted' as const);
 
-                return (
-                  <li
-                    key={action.action_ref}
-                    className="flex items-start gap-2 border-b border-border-subtle px-3 py-2"
-                  >
-                    <Icon
-                      size={12}
-                      strokeWidth={1.5}
-                      className={clsx('mt-1 shrink-0', tone)}
-                      aria-hidden
-                    />
-                    <div className="min-w-0 flex-1">
+                  return (
+                    <TimelineItem
+                      key={action.action_ref}
+                      tone={tone}
+                      // Absent until it starts. Never backfilled with "now".
+                      time={utcMinute(action.at)}
+                      isLast={index === view.travelops_actions.length - 1}
+                    >
                       <span className="flex flex-wrap items-center gap-2">
+                        <Icon
+                          size={12}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-fg-muted"
+                          aria-hidden
+                        />
                         <span className="text-body text-fg">{action.label}</span>
                         <StateBadge status={action.state} label={action.state.replace(/_/g, ' ')} />
                       </span>
-                      <p className="mt-0.5 text-caption text-fg-secondary">{action.detail}</p>
-                      {/* Absent until it starts. Never backfilled with "now". */}
-                      <Labelled label="at">
-                        <MonoValue muted>{clockOf(action.at) ?? 'not started'}</MonoValue>
-                      </Labelled>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
+                      <p className="mt-1 text-caption text-fg-secondary">{action.detail}</p>
+                      {action.at === null && (
+                        <p className="mt-0.5 text-caption text-fg-muted">not started yet</p>
+                      )}
+                    </TimelineItem>
+                  );
+                })}
+              </TimelineList>
+            </div>
             {progress.blockedOnPerson && progress.current && (
-              <p className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
+              <Notice tone="warn">
                 Waiting on a person: {progress.current.label.toLowerCase()}.
-              </p>
+              </Notice>
             )}
           </Panel>
         </div>
