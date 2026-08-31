@@ -30,10 +30,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 
 import { api, ApiError } from '@/api/client';
+import { resolveUnavailable, retryUnlessUnavailable } from '@/api/unavailable';
 import type { CandidateComparisonRow } from '@/api/types';
 import { Metric } from '@/components/ui/Metric';
 import { candidateDerivation } from '@/components/ui/derivation';
-import { EmptyState, ErrorState, LoadingState, MonoValue, Panel } from '@/components/ui/primitives';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  MonoValue,
+  Panel,
+  StateBadge,
+} from '@/components/ui/primitives';
 
 /** Rows of the comparison table. `format` keeps the arithmetic in the API, not here. */
 const FIELDS: {
@@ -60,17 +68,11 @@ function display(value: unknown): string | number | null {
   return null;
 }
 
-function preplanningResolution(error: unknown): string | null {
-  if (
-    !(error instanceof ApiError) ||
-    error.status !== 404 ||
-    error.code !== 'ENTITY_NOT_FOUND' ||
-    typeof error.details.resolution !== 'string'
-  ) {
-    return null;
-  }
-  return error.details.resolution;
-}
+/*
+ * The local copy of this classification lived here and a second copy lived in the approval queue.
+ * Two derivations of "does this data exist yet" is how two screens end up disagreeing about whether
+ * a 404 is a failure, so both now call `@/api/unavailable`.
+ */
 
 export function PlanComparison() {
   const { incidentId = '' } = useParams<{ incidentId: string }>();
@@ -79,16 +81,22 @@ export function PlanComparison() {
   const [pending, setPending] = useState<number | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
+  /*
+   * Both endpoints propose candidates, so both answer 404 with a resolution until the incident has a
+   * plan. Not retried: the answer is already known and retrying only delays the empty state.
+   */
   const comparison = useQuery({
     queryKey: ['plan-comparison', incidentId],
     queryFn: () => api.planComparison(incidentId),
     enabled: Boolean(incidentId),
+    retry: retryUnlessUnavailable,
   });
 
   const plans = useQuery({
     queryKey: ['plans', incidentId],
     queryFn: () => api.plans(incidentId),
     enabled: Boolean(incidentId),
+    retry: retryUnlessUnavailable,
   });
 
   const select = useMutation({
@@ -125,19 +133,32 @@ export function PlanComparison() {
   }, [comparison.data]);
 
   if (comparison.isLoading || plans.isLoading) return <LoadingState label="Comparing plans" />;
-  const comparisonResolution = preplanningResolution(comparison.error);
-  const plansResolution = preplanningResolution(plans.error);
-  const genericError = [comparison.error, plans.error].find(
-    (error) => error && !preplanningResolution(error),
-  );
-  const queryError = genericError ?? comparison.error ?? plans.error;
-  if (queryError) {
-    const resolution = genericError ? null : (comparisonResolution ?? plansResolution);
 
-    if (resolution) {
-      return <EmptyState title="No candidates to compare yet" description={resolution} />;
-    }
+  /*
+   * A genuine failure on either query wins over a not-yet on the other: a screen that reports "no
+   * candidates yet" while one of its endpoints is actually broken has hidden an outage behind an
+   * empty state.
+   */
+  const outcome = resolveUnavailable([comparison.error, plans.error]);
 
+  if (outcome && 'unavailable' in outcome) {
+    const { unavailable } = outcome;
+    return (
+      <EmptyState
+        title="No candidates to compare yet"
+        description={unavailable.resolution}
+        action={
+          <span className="flex flex-wrap items-center justify-center gap-2">
+            <StateBadge status="pending" label={unavailable.code} />
+            <span className="text-caption text-fg-muted">{unavailable.message}</span>
+          </span>
+        }
+      />
+    );
+  }
+
+  if (outcome) {
+    const queryError = outcome.failure;
     return (
       <ErrorState
         code={queryError instanceof ApiError ? queryError.code : 'UNAVAILABLE'}
@@ -147,6 +168,10 @@ export function PlanComparison() {
             : 'The plan endpoints did not respond.'
         }
         correlationId={queryError instanceof ApiError ? queryError.correlationId : null}
+        onRetry={() => {
+          void comparison.refetch();
+          void plans.refetch();
+        }}
       />
     );
   }
