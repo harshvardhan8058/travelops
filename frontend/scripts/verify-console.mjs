@@ -45,7 +45,82 @@ try {
 const BASE = process.argv[2] ?? 'http://127.0.0.1:5173';
 const BROWSER_API_BASE = process.env.VITE_API_BASE_URL?.replace(/\/$/, '');
 const VERIFY_API_BASE = process.env.VERIFY_API_BASE_URL?.replace(/\/$/, '');
-/** @type {{path: string, name: string, expect: string[], expectExactCase?: string[]}[]} */
+
+/**
+ * Where this script (not the browser) reads the contract it checks the DOM against.
+ *
+ * The final fallback is the same literal `api/client.ts` falls back to. Without it the documented
+ * host invocation — `make verify-console`, which exports neither variable — would fail the Policy
+ * route on configuration while the browser bundle talked to the API perfectly well. A gate that goes
+ * red because it disagrees with the bundle about where the API lives teaches people to ignore it.
+ */
+const CONTRACT_API_BASE = VERIFY_API_BASE || BROWSER_API_BASE || 'http://127.0.0.1:8000/api/v1';
+
+/**
+ * Policy expectations read from the contract instead of pinned to one pack.
+ *
+ * This route used to pin `official_guidance_dated`, `official but dated`, `MoCA` and the runtime
+ * mode string `charter`. Every one of those is a property of the *charter* pack, so the gate would
+ * have failed on the day Phase 4's verified pack loaded — `approved`, `reviewed and approved` and a
+ * DGCA CAR label instead — and the pressure at that moment would have been to delete assertions,
+ * which is how a gate quietly stops checking anything. Pinning `charter` was wrong in a second way:
+ * it is the *requested runtime mode*, and asserting standing from it is exactly the coupling
+ * `packStanding.ts` exists to remove.
+ *
+ * So the tokens come from `GET /incidents/{id}/policy` itself: whatever ladder rung, pack label and
+ * mode that endpoint returns must reach the DOM verbatim. That holds for demo, charter and verified
+ * without naming any of them, and it is a stronger check than the literals it replaces — the pack's
+ * whole `ui_label` is now asserted uncased, not just the four characters of "MoCA".
+ *
+ * A pack whose standing cannot be read is a failure, not a skip: if the contract cannot be reached
+ * the badge cannot be verified, and this gate exists to say so.
+ *
+ * What this deliberately no longer asserts is *which* pack the environment loaded. That was a side
+ * effect of the old literals, and it is a configuration question; this route checks that whatever
+ * loaded is reported faithfully. `POLICY_MODE` is asserted by the backend's own config tests.
+ */
+async function policyExpectations(route) {
+  const incidentId = route.path.split('/').filter(Boolean).pop();
+  const response = await fetch(`${CONTRACT_API_BASE}/incidents/${incidentId}/policy`, {
+    // Bounded like every page operation here: an API that accepts the connection and never answers
+    // must fail this route rather than hang the whole gate.
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) {
+    throw new Error(`GET /incidents/${incidentId}/policy returned ${response.status}`);
+  }
+  const body = await response.json();
+  const pack = body.pack ?? {};
+  const exact = [pack.status, pack.ui_label, body.policy_mode].filter(
+    (token) => typeof token === 'string' && token.trim() !== '',
+  );
+  // All three, not one: a degraded response that published only a mode would otherwise be satisfied
+  // by the provenance strip's static labels, which is the "an empty policy card passes" hole this
+  // route exists to close.
+  if (exact.length < 3) {
+    throw new Error(
+      `the policy contract published ${exact.length} of 3 verifiable values ` +
+        '(pack.status, pack.ui_label, policy_mode)',
+    );
+  }
+  return {
+    // Case-insensitive: these are CSS-uppercased row LABELS, not contract values. `verified mode
+    // eligible` is the standing banner's own row, so its presence proves the banner rendered rather
+    // than the provenance strip alone.
+    expect: ['pack hash', 'source hash', 'verified mode eligible'],
+    expectExactCase: exact,
+    // The banner must have resolved a standing from those values. Asserting the absence of the
+    // unknown label is pack-independent and restores what the old `official but dated` token proved:
+    // that the derived standing word — not just the raw status — reached the screen. The mapping
+    // itself belongs to packStanding.test.ts, so it is not restated here.
+    absent: ['standing unknown'],
+  };
+}
+
+/**
+ * @type {{path: string, name: string, expect: string[], expectExactCase?: string[],
+ *         derive?: (route: {path: string}) => Promise<{expect: string[], expectExactCase: string[]}>}[]}
+ */
 const ROUTES = [
   { path: '/', name: 'Command Center', expect: ['604', '22'] },
   { path: '/cascade/GRP-2026-0820-VOBL', name: 'Cascade Explorer', expect: ['604', '9'] },
@@ -76,26 +151,15 @@ const ROUTES = [
   {
     path: '/policy/INC-2026-0820-VOBL-01',
     name: 'Policy',
-    // This route asserted nothing, so an empty policy card passed. The pack's real ladder rung and
-    // the derived standing beside it now both have to reach the DOM, which is what proves the badge
-    // is read from the contract rather than assumed from the runtime mode.
-    //
-    // These assert the pack's ladder rung, the standing derived from it, and that the source-hash row
-    // is present. They deliberately do NOT pin the source hash's VALUE.
-    //
-    // This route asserted `PENDING_ARCHIVAL` and failed against the real G4 endpoint, which publishes
-    // `source_hash: null` on purpose — `schemas/policy.py` calls that field the SHA-256 of the
-    // archived document, `PENDING_ARCHIVAL` is a sentinel rather than a digest, and
-    // `test_the_source_hash_is_absent_rather_than_a_placeholder` locks the null in place. The token
-    // could therefore never reach the DOM. Pinning it was also wrong in a second way: it is a value
-    // whose entire purpose is to change, so the gate would have broken again the day the document is
-    // archived. The three integrity states are pinned in packStanding.test.ts, where a state machine
-    // belongs; this gate checks the structure that holds in all of them.
-    expect: ['official_guidance_dated', 'official but dated', 'source hash'],
-    // Contract literals that must not be case-transformed: the ladder token a replay compares, the
-    // instrument's own name, and the runtime mode. "MOCA" for "MoCA" is the defect this assertion
-    // exists for, and the provenance row was uppercasing its values the same way.
-    expectExactCase: ['official_guidance_dated', 'MoCA', 'charter'],
+    // What this route must prove is that the badge is read from the contract rather than assumed
+    // from the runtime mode — so the tokens are read from the contract too, by `policyExpectations`
+    // above, and no pack-specific literal or mode string is pinned here. It previously pinned the
+    // charter pack's rung, label and mode, which would have failed the day a verified pack loaded.
+    // The source hash's VALUE is deliberately never pinned either: it is a value whose entire
+    // purpose is to change the day the document is archived. The integrity state machine is pinned
+    // in packStanding.test.ts, where a state machine belongs.
+    expect: [],
+    derive: policyExpectations,
   },
   { path: '/sources', name: 'Provenance ledger', expect: [] },
 ];
@@ -222,10 +286,28 @@ for (const route of ROUTES) {
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
     );
     const placeholder = /not yet built|placeholder/i.test(body);
+
+    // Routes whose expected values belong to the contract rather than to this file read them now.
+    // A derive failure is reported as a route failure: an unverifiable badge is not a passing one.
+    let expectTokens = route.expect;
+    let exactTokens = route.expectExactCase ?? [];
+    let absentTokens = [];
+    let deriveError = null;
+    if (route.derive) {
+      try {
+        const derived = await route.derive(route);
+        expectTokens = [...expectTokens, ...derived.expect];
+        exactTokens = [...exactTokens, ...derived.expectExactCase];
+        absentTokens = derived.absent ?? [];
+      } catch (error) {
+        deriveError = String(error instanceof Error ? error.message : error);
+      }
+    }
+
     // innerText reflects CSS text-transform, so presence is compared case-insensitively. Whether
     // a value SHOULD be uppercased is a separate assertion, made below.
     const haystack = body.toLowerCase();
-    const missing = route.expect.filter((token) => !haystack.includes(token.toLowerCase()));
+    const missing = expectTokens.filter((token) => !haystack.includes(token.toLowerCase()));
 
     if (errors.length > 0) {
       record(
@@ -245,8 +327,13 @@ for (const route of ROUTES) {
       record('FAIL', `${route.name} fits 1920 without horizontal overflow`);
     } else if (placeholder) {
       record('FAIL', `${route.name} is not a placeholder`, 'placeholder copy found in the DOM');
-    } else if (route.expectExactCase?.some((token) => !body.includes(token))) {
-      const wrong = route.expectExactCase.filter((token) => !body.includes(token));
+    } else if (deriveError !== null) {
+      // Reported AFTER the render, contrast and overflow checks on purpose: an unreadable contract
+      // must not hide a page error or a WCAG regression on this route, which is what happens when the
+      // environment is misconfigured and this branch is evaluated first.
+      record('FAIL', `${route.name} standing can be read from the contract`, deriveError);
+    } else if (exactTokens.some((token) => !body.includes(token))) {
+      const wrong = exactTokens.filter((token) => !body.includes(token));
       record(
         'FAIL',
         `${route.name} does not case-transform a contract value`,
@@ -257,6 +344,13 @@ for (const route of ROUTES) {
         'FAIL',
         `${route.name} shows real figures`,
         `missing from the DOM: ${missing.join(', ')} | body starts: ${body.slice(0, 220).replace(/\s+/g, ' ')}`,
+      );
+    } else if (absentTokens.some((token) => haystack.includes(token.toLowerCase()))) {
+      const present = absentTokens.filter((token) => haystack.includes(token.toLowerCase()));
+      record(
+        'FAIL',
+        `${route.name} resolves what the contract published`,
+        `should not be in the DOM for a pack this endpoint described: ${present.join(', ')}`,
       );
     } else {
       const headings = await page.evaluate(() =>

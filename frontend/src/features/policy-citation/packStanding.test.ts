@@ -17,6 +17,14 @@ const CHARTER: PackStandingInput = {
   source_hash: SOURCE_PENDING_ARCHIVAL,
 };
 
+/**
+ * A syntactically valid SHA-256: 64 hex characters, which is what the contract documents.
+ *
+ * Obviously synthetic on purpose. Earlier tests used 16-character strings as stand-ins for a digest,
+ * which is what let a value that could not be a SHA-256 read as an archived, checkable document.
+ */
+const ARCHIVED_DIGEST = '9f2c'.repeat(16);
+
 describe('packStanding — the status ladder', () => {
   it('keeps all four rungs distinct, so a retired pack cannot read like a current one', () => {
     expect(PACK_STATUS_LADDER).toEqual(['draft', 'official_guidance_dated', 'approved', 'retired']);
@@ -46,7 +54,7 @@ describe('packStanding — the status ladder', () => {
     const standing = packStanding({
       status: 'approved',
       verified_mode_eligible: true,
-      source_hash: 'a1b2c3d4e5f60718',
+      source_hash: ARCHIVED_DIGEST,
     });
     expect(standing.kind).toBe('verified');
     expect(standing.tone).toBe('ok');
@@ -150,9 +158,51 @@ describe('packStanding — source document integrity', () => {
   });
 
   it('reports a real digest as archived', () => {
+    expect(packStanding({ status: 'approved', source_hash: ARCHIVED_DIGEST }).sourceIntegrity).toBe(
+      'archived',
+    );
+    // Case is normalised the way `verify_source_document` normalises it, so an upper-case digest is
+    // not reported as unusable.
     expect(
-      packStanding({ status: 'approved', source_hash: 'c41a7e9b28d5f603' }).sourceIntegrity,
+      packStanding({ status: 'approved', source_hash: ARCHIVED_DIGEST.toUpperCase() })
+        .sourceIntegrity,
     ).toBe('archived');
+    // The digest is carried verbatim even so: it is a citation, not a normalised value.
+    expect(
+      packStanding({ status: 'approved', source_hash: ARCHIVED_DIGEST.toUpperCase() }).sourceHash,
+    ).toBe(ARCHIVED_DIGEST.toUpperCase());
+  });
+
+  it('refuses to call a recorded value archived when it cannot be the documented SHA-256', () => {
+    /*
+     * The old rule was "not the sentinel, therefore archived", so any non-empty string produced copy
+     * inviting the reader to check the text against its source. Verified mode is precisely where a
+     * real digest is expected, so a value that cannot be one is reported as its own state.
+     */
+    for (const sourceHash of [
+      'a1b2c3d4e5f60718', // too short to be a SHA-256
+      `${ARCHIVED_DIGEST}00`, // too long
+      `${ARCHIVED_DIGEST.slice(0, 63)}z`, // right length, not hex
+      'ARCHIVE_PENDING', // a different sentinel nobody has taught this console
+    ]) {
+      const standing = packStanding({
+        status: 'approved',
+        verified_mode_eligible: true,
+        source_hash: sourceHash,
+      });
+      expect(standing.sourceIntegrity).toBe('malformed');
+      // Reported, never silently upgraded — and the recorded value is still shown verbatim.
+      expect(standing.sourceHash).toBe(sourceHash);
+    }
+  });
+
+  it('does not claim a hash mismatch, which only the backend can determine', () => {
+    // The console holds no file, so it can say a value is not a SHA-256 but never that it is the
+    // wrong SHA-256. docs/38 G3 makes the comparison Stream B's.
+    const copy = SOURCE_INTEGRITY_COPY.malformed.toLowerCase();
+    expect(copy).not.toContain('mismatch');
+    expect(copy).not.toContain('does not match');
+    expect(copy).not.toContain('tampered');
   });
 
   it('reports an absent digest as unknown, not as archived', () => {
@@ -161,13 +211,28 @@ describe('packStanding — source document integrity', () => {
     expect(packStanding({ status: 'approved', source_hash: null }).sourceHash).toBeNull();
   });
 
-  it('handles the real endpoint shape: a dated pack with no digest published at all', () => {
+  it('handles the real endpoint shape: the sentinel passed through, not null', () => {
     /*
-     * The live contract for the charter pack, verified against the running API:
-     *   status official_guidance_dated · verified_mode_eligible false · source_hash null
-     * The endpoint publishes null rather than echoing the pack's PENDING_ARCHIVAL sentinel, because
-     * that field is documented as a SHA-256 and a sentinel is not one.
+     * The live contract for the charter pack, against the running API:
+     *   status official_guidance_dated · verified_mode_eligible false · source_hash PENDING_ARCHIVAL
+     *
+     * This test previously asserted `source_hash: null` and said the endpoint published null "rather
+     * than echoing the pack's PENDING_ARCHIVAL sentinel". That is inverted: `api/policy.py` passes
+     * `LoadedPack.source_content_sha256` through verbatim, and the backend e2e test named
+     * `test_the_source_hash_is_the_digest_the_pack_records` locks it. So the state the charter pack
+     * actually produces is `not_archived`, and it was documented here as impossible.
      */
+    const standing = packStanding(CHARTER);
+    expect(standing.kind).toBe('official_dated');
+    expect(standing.sourceIntegrity).toBe('not_archived');
+    expect(standing.sourceHash).toBe(SOURCE_PENDING_ARCHIVAL);
+    // Source integrity must not drag the ladder rung down, and must not read as archived.
+    expect(standing.isUnknown).toBe(false);
+  });
+
+  it('still reports a pack that records no digest at all as unknown', () => {
+    // `null` remains reachable and means something different from the sentinel: no digest recorded,
+    // versus a digest explicitly pending archival.
     const standing = packStanding({
       status: 'official_guidance_dated',
       verified_mode_eligible: false,
@@ -176,7 +241,6 @@ describe('packStanding — source document integrity', () => {
     expect(standing.kind).toBe('official_dated');
     expect(standing.sourceIntegrity).toBe('unknown');
     expect(standing.sourceHash).toBeNull();
-    // Unknown source integrity must not drag the ladder rung down, and must not read as archived.
     expect(standing.isUnknown).toBe(false);
     expect(SOURCE_INTEGRITY_COPY[standing.sourceIntegrity]).toMatch(/unknown/i);
   });
@@ -191,6 +255,103 @@ describe('packStanding — source document integrity', () => {
     });
     expect(standing.kind).toBe('verified');
     expect(standing.sourceIntegrity).toBe('not_archived');
+  });
+});
+
+/**
+ * The four states an operator can actually be looking at, as each pack on disk publishes them.
+ *
+ * Phase 4 G1/G2 readiness is the point of this block: the verified row is the pack that does not
+ * exist yet (`policy_packs/in-dgca-car-3m4/`), and it is here so the console's handling of it is
+ * settled before the pack lands rather than discovered on the day it does.
+ *
+ * The demo and charter rows are read off `pack.yaml` and `source-metadata.yaml` on disk, and both were
+ * confirmed against the running API. The verified row is necessarily anticipated: it encodes what
+ * docs/38 §1 and §2 require of that pack — `status: approved`, `verified_mode_eligible: true`, and an
+ * archived document with a real digest — and its digest is synthetic because no such document exists.
+ */
+describe('packStanding — demo, charter, verified and unknown', () => {
+  const PACKS = {
+    // policy_packs/demo-fixture/1.0 — fictional, cites nothing, content_sha256: null.
+    demo: {
+      input: { status: 'draft', verified_mode_eligible: false, source_hash: null },
+      kind: 'draft',
+      tone: 'warn',
+      sourceIntegrity: 'unknown',
+    },
+    // policy_packs/in-moca-charter-2019/2019.02 — official, dated, content_sha256: PENDING_ARCHIVAL.
+    charter: {
+      input: CHARTER,
+      kind: 'official_dated',
+      tone: 'warn',
+      sourceIntegrity: 'not_archived',
+    },
+    // The G1 pack: approved, eligible, and an archived document with a real digest.
+    verified: {
+      input: {
+        status: 'approved',
+        verified_mode_eligible: true,
+        source_hash: ARCHIVED_DIGEST,
+      },
+      kind: 'verified',
+      tone: 'ok',
+      sourceIntegrity: 'archived',
+    },
+    // Any response that did not publish the fields standing is derived from.
+    unknown: {
+      input: {},
+      kind: 'unknown',
+      tone: 'warn',
+      sourceIntegrity: 'unknown',
+    },
+  } as const;
+
+  it('reports each pack on its own terms, and only verified reads as settled', () => {
+    for (const [name, expected] of Object.entries(PACKS)) {
+      const standing = packStanding(expected.input);
+      expect(standing.kind, name).toBe(expected.kind);
+      expect(standing.tone, name).toBe(expected.tone);
+      expect(standing.sourceIntegrity, name).toBe(expected.sourceIntegrity);
+      // Every state says something, in words, whichever pack is loaded.
+      expect(standing.label.trim().length, name).toBeGreaterThan(0);
+      expect(standing.detail.trim().length, name).toBeGreaterThan(0);
+    }
+    // Exactly one of the four is green, and only because its input declares both approval and
+    // eligibility — the pair a reviewer has to put there. No SME has signed anything yet.
+    const ok = Object.values(PACKS).filter((pack) => packStanding(pack.input).tone === 'ok');
+    expect(ok).toHaveLength(1);
+    expect(packStanding(PACKS.verified.input).kind).toBe('verified');
+  });
+
+  it('gives the four states four distinct labels, so none can be mistaken for another', () => {
+    const labels = Object.values(PACKS).map((pack) => packStanding(pack.input).label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('cannot be told a standing by the runtime mode, only by the pack', () => {
+    /*
+     * The defect this module was built to remove: the shell painted itself green from
+     * `policy_mode === 'verified'`. `/system/mode`'s label is still composed from the requested mode
+     * in `backend/app/api/health.py` (docs/38 G7, Stream A), so this asserts the derivation ignores a
+     * mode entirely — a payload carrying nothing but `policy_mode: 'verified'` is unknown, not
+     * verified.
+     */
+    for (const mode of ['verified', 'charter', 'demo']) {
+      const standing = packStanding({ policy_mode: mode } as unknown as PackStandingInput);
+      expect(standing.kind).toBe('unknown');
+      expect(standing.isUnknown).toBe(true);
+      expect(standing.tone).not.toBe('ok');
+    }
+  });
+
+  it('does not let an unarchived document produce checkable-provenance copy', () => {
+    // The three non-archived states must never render the sentence that invites a reader to check
+    // the text against its source, because in none of them can they.
+    const checkable = SOURCE_INTEGRITY_COPY.archived;
+    for (const state of ['not_archived', 'malformed', 'unknown'] as const) {
+      expect(SOURCE_INTEGRITY_COPY[state]).not.toBe(checkable);
+      expect(SOURCE_INTEGRITY_COPY[state].trim().length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -372,25 +533,54 @@ describe('no surface derives policy standing for itself', () => {
   /**
    * The browser gate must not pin a value whose purpose is to change.
    *
-   * `verify-console.mjs` asserted `PENDING_ARCHIVAL` on the Policy route. The real G4 endpoint
-   * publishes `source_hash: null` deliberately — a sentinel is not a SHA-256, and a backend e2e test
-   * locks the null — so the token could never appear. It was doubly wrong: even once published it
-   * would vanish the day the document is archived. Structure is asserted there; the state machine is
-   * asserted here.
+   * It asserted `PENDING_ARCHIVAL`, then the charter pack's rung, label and runtime mode. Each is a
+   * property of one pack, so the gate would have failed on the day Phase 4's verified pack loaded and
+   * the fix under that pressure is always to delete assertions. The tokens are now read from
+   * `GET /incidents/{id}/policy`, so the gate verifies whichever pack is loaded — demo, charter or
+   * verified — and this guard keeps any pack-specific literal from creeping back in.
    */
-  it('the browser gate does not pin the transient source-hash sentinel', () => {
+  it('the browser gate reads the policy tokens from the contract, not from this repository', () => {
     const verifier = readFileSync(
       new URL('../../../scripts/verify-console.mjs', import.meta.url),
       'utf8',
     );
-    const policyRoute = verifier.slice(
-      verifier.indexOf("name: 'Policy'"),
-      verifier.indexOf("name: 'Provenance ledger'"),
+    const policyRoute = stripComments(
+      verifier.slice(
+        verifier.indexOf("name: 'Policy'"),
+        verifier.indexOf("name: 'Provenance ledger'"),
+      ),
     );
-    expect(policyRoute).not.toMatch(/expect(ExactCase)?:[^\]]*PENDING_ARCHIVAL/);
-    // The stable assertions are still in place.
-    expect(policyRoute).toMatch(/official_guidance_dated/);
-    expect(policyRoute).toMatch(/source hash/);
+    // Derived, not pinned.
+    expect(policyRoute).toMatch(/derive:\s*policyExpectations/);
+    // No transient digest, no ladder rung, no pack name and no runtime mode as a literal.
+    expect(policyRoute).not.toMatch(/PENDING_ARCHIVAL/);
+    expect(policyRoute).not.toMatch(/official_guidance_dated|approved|retired|draft/);
+    expect(policyRoute).not.toMatch(/MoCA|charter|verified|demo/i);
+
+    // And the deriving function asserts the contract's own values, uncased, plus the row structure.
+    const derive = stripComments(
+      verifier.slice(
+        verifier.indexOf('async function policyExpectations'),
+        verifier.indexOf("name: 'Command Center'"),
+      ),
+    );
+    expect(derive).toMatch(/pack\.status/);
+    expect(derive).toMatch(/pack\.ui_label/);
+    expect(derive).toMatch(/expectExactCase:\s*exact/);
+    expect(derive).toMatch(/source hash/);
+    // The derived standing must be resolved, not merely echoed: the banner printing the unknown label
+    // beside a perfectly good status/eligibility pair has to fail this route.
+    expect(derive).toMatch(/absent:\s*\['standing unknown'\]/);
+
+    /*
+     * And the gate must not depend on an environment variable the documented invocation does not set.
+     * `make verify-console` runs on the host and exports neither VITE_API_BASE_URL nor
+     * VERIFY_API_BASE_URL, so without a fallback this route failed on configuration while the browser
+     * bundle — which has its own fallback in `api/client.ts` — talked to the API perfectly well.
+     */
+    expect(stripComments(verifier)).toMatch(
+      /CONTRACT_API_BASE\s*=[^;]*\|\|\s*'http:\/\/127\.0\.0\.1:8000\/api\/v1'/,
+    );
   });
 
   it('the policy screen names an absent contract value instead of rendering a blank', () => {

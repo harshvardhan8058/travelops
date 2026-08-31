@@ -1046,11 +1046,14 @@ export interface PolicyPackInfo {
   document: string | null;
   pack_hash: string;
   /**
-   * SHA-256 of the archived source document, or `null` when none has been recorded.
+   * The digest the pack records for its primary document, passed through verbatim.
    *
-   * The real endpoint sends `null` rather than echoing the pack's `PENDING_ARCHIVAL` sentinel, on the
-   * grounds that a sentinel is not a digest. So this is genuinely nullable and the console must render
-   * the absence rather than a blank.
+   * An earlier comment here claimed the endpoint sends `null` rather than echoing the pack's
+   * `PENDING_ARCHIVAL` sentinel. That is not what it does: `api/policy.py` passes
+   * `LoadedPack.source_content_sha256` straight through, so the charter pack yields the sentinel and
+   * the demo pack — which records no digest — yields `null`. Two different states, and the console
+   * reports them differently. Still genuinely nullable, so an absence is rendered as one, never as a
+   * blank.
    */
   source_hash: string | null;
 }

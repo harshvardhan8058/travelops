@@ -230,10 +230,14 @@ export function PolicyScreen() {
             <Recorded value={policy.pack.pack_hash} mono />
           </Cited>
           {/*
-            `source_hash` is genuinely null on the real endpoint, which publishes no digest rather
-            than echoing the pack's PENDING_ARCHIVAL sentinel. Rendering the raw value left the label
-            standing over an empty space, so an absent digest looked like a rendering fault. It is
-            named instead — the same rule `Metric` applies to every absent figure.
+            `source_hash` is the digest the pack records, passed through verbatim: for the charter
+            pack that is the `PENDING_ARCHIVAL` sentinel, and `null` is reserved for a pack that
+            records no digest at all. An earlier comment here claimed the endpoint always published
+            `null`; `api/policy.py` passes `LoadedPack.source_content_sha256` through and a backend
+            e2e test locks that, so both states are real and they are reported differently.
+            Rendering the raw value left the label standing over an empty space when it *is* null, so
+            an absent digest looked like a rendering fault. It is named instead — the same rule
+            `Metric` applies to every absent figure.
           */}
           <Cited label="source hash">
             <Recorded
@@ -245,9 +249,11 @@ export function PolicyScreen() {
         </div>
         {/*
           Source-document integrity, reported from the digest the contract published. The gate that
-          refuses a verified load on a placeholder digest is Stream B's (docs/38 G3); this only states
-          which of the three cases the recorded value falls in, so a reader is not left to recognise
-          `PENDING_ARCHIVAL` on sight.
+          refuses a verified load on a sentinel, a missing file or a mismatched hash is Stream B's
+          (docs/38 G3); this only states which of the four cases the recorded value falls in, so a
+          reader is not left to recognise `PENDING_ARCHIVAL` on sight. Anything short of `archived`
+          is warn-toned, including a recorded value that cannot be the documented SHA-256 — the state
+          that matters in verified mode, where a real digest is what is expected.
         */}
         <p
           className={clsx(
