@@ -82,6 +82,13 @@ from app.orchestrator.playbook import (
     playbook_for,
 )
 from app.orchestrator.state import assert_transition, is_terminal
+from app.orchestrator.weather_adapter import (
+    DETAIL_KEY,
+    EVENT_LIVE_NOT_SCORED,
+    EVENT_LIVE_UNAVAILABLE,
+    WeatherIngestOutcome,
+    ingest_live_weather,
+)
 from app.services.base import ServiceResult
 from app.services.delay_risk import DelayRiskService
 
@@ -1768,6 +1775,77 @@ class Orchestrator:
                 return str(group.airport_icao)
         return str(flight.origin_icao)
 
+    async def _record_weather_source(
+        self, ctx: WorkflowContext, ingest: WeatherIngestOutcome, *, scored: Any
+    ) -> None:
+        """Say so, loudly, when a live-configured run did not actually score live data.
+
+        There are two ways that happens, and both are legitimate — but neither may be silent,
+        because a run badged live that reasoned from an archived row is exactly the
+        misrepresentation this system exists to avoid.
+
+        1. **Nothing was retrieved.** The provider timed out, was rate limited, or has no current
+           METAR for the airport. The ledger keeps what it had and the score is computed from it.
+        2. **Something was retrieved but not selected.** The observation is newer than the
+           incident's own clock, so the existing rule declines it — correctly, since scoring a
+           past disruption against a later reading is the leakage this pipeline guards against.
+           Replaying a historical scenario in live mode always lands here.
+
+        Nothing is degraded and nothing is substituted: the selection rule is unchanged and the
+        archived row was always the right answer for a historical incident. What is added is the
+        record that live was tried, and what it produced.
+        """
+        if not ingest.consulted and ingest.reason is None:
+            # Fixture mode. No provider was asked, so there is nothing to report and the Phase 1-4
+            # journal is byte-for-byte what it was.
+            return
+
+        scored_ref = getattr(scored, "source_ref", None)
+        if ingest.retrieved and scored_ref == ingest.source_ref:
+            # The live reading is the one that was scored. Recorded in the risk entry's
+            # `weather_source` block; no separate entry needed.
+            return
+
+        if not ingest.retrieved:
+            await self._journal(
+                ctx,
+                stage=STAGE_ASSESS,
+                actor="delay_risk_service",
+                event_type=EVENT_LIVE_UNAVAILABLE,
+                summary=(
+                    f"No live observation could be obtained for {ingest.airport_icao}; the risk "
+                    "was scored from the observation already in the ledger."
+                ),
+                detail={
+                    DETAIL_KEY: ingest.as_detail(),
+                    "scored_provenance_kind": getattr(scored, "provenance_kind", None),
+                    "scored_source_ref": scored_ref,
+                },
+            )
+            return
+
+        await self._journal(
+            ctx,
+            stage=STAGE_ASSESS,
+            actor="delay_risk_service",
+            event_type=EVENT_LIVE_NOT_SCORED,
+            summary=(
+                f"A live observation for {ingest.airport_icao} was recorded but not scored: it is "
+                "later than this incident's reference time, so the observation that was current "
+                "when the incident opened was used instead."
+            ),
+            detail={
+                DETAIL_KEY: ingest.as_detail(),
+                "scored_provenance_kind": getattr(scored, "provenance_kind", None),
+                "scored_source_ref": scored_ref,
+                "scored_observed_at": getattr(scored, "observed_at", None),
+                "resolution": (
+                    "Expected when replaying a historical scenario. An incident opened now scores "
+                    "the live observation, because the incident clock is then current."
+                ),
+            },
+        )
+
     async def _assess_delay_risk(self, ctx: WorkflowContext) -> dict[str, Any] | None:
         """Score disruption risk from the recorded observation, and persist a Prediction.
 
@@ -1791,22 +1869,43 @@ class Orchestrator:
         as_of = await self._incident_clock(ctx)
         airport_icao = await self._risk_airport(incident, flight)
 
+        # Live weather, when configured, adds the current observation to the ledger that
+        # `load_delay_risk_inputs` already reads. It does not choose which observation is scored —
+        # the existing "newest actual reading at or before the incident clock" rule still does,
+        # so there is one selection rule rather than a second one for live mode. In fixture mode
+        # nothing is consulted and nothing is written.
+        weather_ingest = await ingest_live_weather(
+            self._session,
+            airport_icao,
+            as_of=as_of,
+            settings=self._settings,
+            mode=self.modes.weather,
+        )
+
         try:
             weather, runways, ruleset = await load_delay_risk_inputs(
                 self._session, airport_icao, as_of=as_of
             )
         except LookupError as exc:
             # No observation to reason from. Recorded, and the risk stays absent rather than
-            # being defaulted to a number nobody measured.
+            # being defaulted to a number nobody measured. When live mode was on, why the live
+            # lookup did not supply one belongs in the same entry — otherwise the operator sees
+            # "no observation" with no indication that a live source was even tried.
             await self._journal(
                 ctx,
                 stage=STAGE_ASSESS,
                 actor="delay_risk_service",
                 event_type="DELAY_RISK_UNAVAILABLE",
                 summary=f"No weather observation available for {airport_icao}",
-                detail={"airport_icao": airport_icao, "detail": str(exc)},
+                detail={
+                    "airport_icao": airport_icao,
+                    "detail": str(exc),
+                    DETAIL_KEY: weather_ingest.as_detail(),
+                },
             )
             return None
+
+        await self._record_weather_source(ctx, weather_ingest, scored=weather)
 
         result = await DelayRiskService().execute(
             weather=weather,
@@ -1857,6 +1956,16 @@ class Orchestrator:
                 "observation_age_minutes": payload.get("observation_age_minutes"),
                 "is_stale": payload.get("is_stale"),
                 "missing_inputs": payload.get("missing_inputs") or [],
+                # Which observation was actually scored, and where it came from. The score alone
+                # cannot answer "was this live data?", and that is the first question asked of any
+                # number a live-configured run produces.
+                "weather_source": {
+                    "mode": self.modes.weather.value,
+                    "provenance_kind": weather.provenance_kind,
+                    "source_ref": weather.source_ref,
+                    "observed_at": weather.observed_at,
+                },
+                DETAIL_KEY: weather_ingest.as_detail(),
             },
         )
 
