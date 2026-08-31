@@ -52,11 +52,40 @@ export type PackStatus = (typeof PACK_STATUS_LADDER)[number];
  */
 export const SOURCE_PENDING_ARCHIVAL = 'PENDING_ARCHIVAL';
 
+/**
+ * The shape `pack.source_hash` has to have before this console will call it a checkable digest.
+ *
+ * `verify_source_document` in `backend/app/policy/loader.py` accepts a recorded digest only as
+ * `_SHA256_HEX_LENGTH` hex characters after `.strip().lower()`, and docs/38 §2 makes that the
+ * condition a verified load turns on. This mirrors that test rather than inventing a second hash
+ * format. The contract in `schemas/policy.py` deliberately promises no format — it passes the pack's
+ * recorded value through verbatim — so the rule is cited from the loader, which owns it.
+ *
+ * It exists because the previous check was "not the sentinel, therefore archived", which would call
+ * any non-empty string a verifiable digest and print copy inviting a reader to check the text
+ * against its source. Verified mode is the one mode where that field is expected to carry a real
+ * digest, so it is also the one mode where guessing is least affordable.
+ */
+const SOURCE_SHA256_HEX = /^[0-9a-f]{64}$/;
+
 export type PackStandingKind =
   'verified' | 'approved_not_eligible' | 'official_dated' | 'draft' | 'retired' | 'unknown';
 
-/** Whether the primary source document behind the pack has a real digest recorded. */
-export type SourceIntegrity = 'archived' | 'not_archived' | 'unknown';
+/**
+ * Whether the primary source document behind the pack has a real digest recorded.
+ *
+ * Four states, because "a digest is recorded" and "the recorded digest could be a SHA-256" are
+ * different facts, and only the second one lets a reader check the text against its source.
+ * `malformed` says a value is present and is not that — it does **not** claim a hash mismatch,
+ * which only the backend can determine because only the backend holds the file.
+ *
+ * `archived` is therefore a statement about form, not about archival: the pack contract publishes
+ * neither `archived` nor `source_document_verified`, both of which exist on `LoadedPack`, so the
+ * console cannot report the load-time verdict. Its copy says so rather than implying the document was
+ * checked here. Publishing `source_document_verified` on `PolicyPackInfo` would let this report the
+ * fact instead of the shape; that is Stream A's contract to widen, not this module's to guess.
+ */
+export type SourceIntegrity = 'archived' | 'not_archived' | 'malformed' | 'unknown';
 
 export interface PackStanding {
   kind: PackStandingKind;
@@ -70,7 +99,13 @@ export interface PackStanding {
   detail: string;
   tone: 'ok' | 'warn' | 'crit' | 'neutral';
   sourceIntegrity: SourceIntegrity;
-  /** The recorded digest or sentinel, verbatim. `null` when the contract published none. */
+  /**
+   * The recorded digest or sentinel, verbatim. `null` when the contract published none.
+   *
+   * The real G4 endpoint passes `LoadedPack.source_content_sha256` straight through, so for the
+   * charter pack this is the `PENDING_ARCHIVAL` sentinel rather than `null`; `null` is reserved for
+   * a pack that records no digest at all. Two different states, reported differently.
+   */
   sourceHash: string | null;
   /** True only when the standing could not be established from the contract. */
   isUnknown: boolean;
@@ -84,9 +119,11 @@ export interface PackStandingInput {
 }
 
 function sourceIntegrityFor(sourceHash: string | null): SourceIntegrity {
-  if (sourceHash === null || sourceHash.trim() === '') return 'unknown';
-  if (sourceHash === SOURCE_PENDING_ARCHIVAL) return 'not_archived';
-  return 'archived';
+  if (sourceHash === null) return 'unknown';
+  const recorded = sourceHash.trim();
+  if (recorded === '') return 'unknown';
+  if (recorded === SOURCE_PENDING_ARCHIVAL) return 'not_archived';
+  return SOURCE_SHA256_HEX.test(recorded.toLowerCase()) ? 'archived' : 'malformed';
 }
 
 function isLadderStatus(value: string): value is PackStatus {
@@ -202,8 +239,10 @@ export function packStanding(pack: PackStandingInput | null | undefined): PackSt
 /** Human-readable copy for the source-document integrity states. */
 export const SOURCE_INTEGRITY_COPY: Record<SourceIntegrity, string> = {
   archived:
-    'A digest of the archived primary document is recorded, so the text behind these figures can be checked against its source.',
+    'A SHA-256 digest is recorded for the primary document, so the text behind these figures can be checked against the archived original. Whether that document is present and still hashes to this value is checked when the pack loads, not here.',
   not_archived: `The source digest is still the ${SOURCE_PENDING_ARCHIVAL} sentinel, so the primary document behind these figures has not been archived or hashed.`,
+  malformed:
+    'A source digest is recorded but it is not in the SHA-256 form the pack format requires, so the text behind these figures cannot be checked against the archived original from here.',
   unknown: 'This response published no source digest, so source integrity is unknown.',
 };
 
