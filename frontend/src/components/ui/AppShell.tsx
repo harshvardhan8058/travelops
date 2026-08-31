@@ -19,8 +19,10 @@ import {
   ListChecks,
   Scale,
   GitCompare,
+  Luggage,
   ShieldCheck,
   Users,
+  Wand2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
@@ -43,6 +45,10 @@ const NAV = [
   { to: '/replay/INC-2026-0820-VOBL-01', icon: History, label: 'Replay' },
   { to: '/reports/INC-2026-0820-VOBL-01', icon: FileText, label: 'Report' },
   { to: '/sources', icon: Database, label: 'Provenance ledger' },
+  // Phase 5. Both are keyed on their own reference rather than an incident, so they sit at the end
+  // rather than beside the incident-scoped entries.
+  { to: '/scenarios/new', icon: Wand2, label: 'Scenario builder' },
+  { to: '/passenger/X9Y2Z1', icon: Luggage, label: 'Passenger view' },
 ] as const;
 
 function Rail() {
