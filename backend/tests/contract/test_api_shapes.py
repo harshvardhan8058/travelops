@@ -58,14 +58,32 @@ class TestSystemMode:
             "limits",
         }
 
-    def test_policy_badge_states_the_real_pack_status(self, client: TestClient):
-        """The UI renders this verbatim; it must never claim more than the pack supports."""
+    def test_policy_badge_is_the_packs_own_label(self, client: TestClient):
+        """The UI renders this verbatim, so it must be the pack's label — not a recased copy.
+
+        This assertion used to name the string the endpoint composed from `POLICY_MODE`
+        (`"PENDING CAR VERIFICATION"`), which had drifted from the charter pack's actual
+        `"... pending CAR verification"`. Comparing against the loaded pack instead means the
+        badge is pinned to the authority rather than to a second copy of it that can rot.
+        """
+        from app.policy.entitlements import load_active_pack
+
         body = client.get(f"{PREFIX}/system/mode").json()
-        label = body["policy_pack"]["ui_label"]
+        assert body["policy_pack"]["ui_label"] == load_active_pack().ui_label
+
+    def test_policy_badge_discloses_the_packs_standing(self, client: TestClient):
+        """Whatever the casing, the badge must still disclose what the pack is.
+
+        Case-insensitive on purpose: the label is a regulation's name, so its casing belongs to
+        the pack. What must not change is that charter discloses pending verification and the
+        demo fixture announces itself as a fixture.
+        """
+        body = client.get(f"{PREFIX}/system/mode").json()
+        label = body["policy_pack"]["ui_label"].lower()
         if body["policy_mode"] == "charter":
-            assert "PENDING CAR VERIFICATION" in label
+            assert "pending car verification" in label
         elif body["policy_mode"] == "demo":
-            assert "DEMO FIXTURE" in label
+            assert "demo fixture" in label
 
     def test_no_secret_leaks(self, client: TestClient):
         raw = client.get(f"{PREFIX}/system/mode").text.lower()
