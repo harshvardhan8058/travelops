@@ -26,7 +26,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { Accessibility, Hotel, PlaneTakeoff, Users } from 'lucide-react';
@@ -651,7 +651,23 @@ function PassengerTable({ impact }: { impact: ReturnType<typeof connectionImpact
                     </button>
                   </th>
                   <td className="px-3">
-                    <MonoValue muted>{row.pnr ?? '—'}</MonoValue>
+                    {/*
+                      The booking reference is the key the passenger view is addressed by, so this
+                      is where an operator crosses from the cascade to one person's trip. A link
+                      rather than a button: it is navigation, and it must be openable in a new tab
+                      beside the operator's own screen.
+                    */}
+                    {row.pnr ? (
+                      <Link
+                        to={`/passenger/${row.pnr}`}
+                        className="rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        title={`Open the passenger view for ${row.pnr}`}
+                      >
+                        <MonoValue className="text-accent">{row.pnr}</MonoValue>
+                      </Link>
+                    ) : (
+                      <MonoValue muted>—</MonoValue>
+                    )}
                   </td>
                   <td className="px-3">
                     <MonoValue muted>

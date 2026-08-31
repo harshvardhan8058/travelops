@@ -1,399 +1,563 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import type {
+  PassengerAction,
+  PassengerDisruptionResponse,
+  PassengerOption,
+  PassengerSegmentOut,
+} from '@/api/types';
 import {
-  PASSENGER_SAMPLE,
-  passengerApi,
-  type PassengerActionRecord,
-  type PassengerDisruptionResponse,
-  type PassengerOption,
-  type PassengerSegment,
-} from './passengerContracts';
-import {
+  actionLabel,
   deriveActionProgress,
+  deriveConsequences,
   deriveNextStep,
   deriveTripStatus,
   formatDelay,
   hasRevisedTime,
-  openImpactCount,
-  orderImpacts,
+  openConsequenceCount,
+  optionBasisNote,
   summariseOptions,
 } from './passengerView';
 
-function segment(overrides: Partial<PassengerSegment> = {}): PassengerSegment {
+/*
+ * These tests are built on locally constructed fixtures, NOT on a shipped sample.
+ *
+ * That distinction is the point of the change they cover. The screen used to render
+ * `PASSENGER_SAMPLE` — a hand-written payload with an invented passenger name, three plausible
+ * consequences no row supported, and four options including a refund and a meal that nothing in the
+ * system records. The file is gone, and the endpoint it stood in for is real.
+ *
+ * So the fixtures below are test data, declared in the test, and the assertions are about how the
+ * derivations behave on shapes the API can actually produce — including the empty and absent ones,
+ * which is where a passenger-facing screen does the most damage when it guesses.
+ */
+
+function segment(overrides: Partial<PassengerSegmentOut> = {}): PassengerSegmentOut {
   return {
-    segment_ref: 'seg-1',
+    segment_id: 1,
+    segment_order: 1,
+    flight_id: 1,
     flight_number: '6E 2134',
-    origin_iata: 'BLR',
-    destination_iata: 'DEL',
-    scheduled_departure: '2026-08-20T16:10:00Z',
-    revised_departure: null,
-    scheduled_arrival: '2026-08-20T18:55:00Z',
-    revised_arrival: null,
-    status: 'on_time',
-    delay_minutes: null,
+    origin_icao: 'VOBL',
+    destination_icao: 'VIDP',
+    scheduled_departure: '2026-08-20T15:40:00Z',
+    scheduled_arrival: '2026-08-20T18:25:00Z',
+    estimated_departure: '2026-08-20T22:40:00Z',
+    delay_minutes: 420,
+    status: 'delayed',
     gate: null,
-    is_disrupted: false,
+    is_disrupted: true,
+    ...overrides,
+  };
+}
+
+function view(overrides: Partial<PassengerDisruptionResponse> = {}): PassengerDisruptionResponse {
+  return {
+    booking_ref: 'QT7HJ2',
+    passenger_reference: 'PAX-00001',
+    cabin: 'economy',
+    tier: 'gold',
+    has_special_needs: false,
+    trip: { origin_icao: 'VOBL', destination_icao: 'VOBL', segments: [segment()] },
+    disruption: {
+      incident_reference: 'INC-2026-0820-VOBL-01',
+      group_reference: 'GRP-2026-0820-VOBL',
+      flight_id: 1,
+      flight_number: '6E 2134',
+      airport_icao: 'VOBL',
+      cause_category: 'weather',
+      severity: 'high',
+      state: 'detected',
+      opened_at: '2026-08-20T15:36:00Z',
+      closed_at: null,
+    },
+    connection: null,
+    priority: null,
+    options: [],
+    actions: [],
+    next_step: { state: 'monitoring', driven_by_action_type: null, respond_by: null },
+    unassessed_factors: [],
+    basis: 'recorded_rows',
+    note: 'Read from recorded rows for this booking only.',
+    provenance: { kind: 'synthetic', provider: 'booking_records', source_ref: 'booking:1' },
+    ...overrides,
+  };
+}
+
+function action(overrides: Partial<PassengerAction> = {}): PassengerAction {
+  return {
+    action_type: 'check_connections',
+    state: 'succeeded',
+    applies_to: 'incident',
+    at: '2026-08-20T15:45:00Z',
+    reason_code: null,
+    approval_scope: null,
+    awaiting_human: false,
     ...overrides,
   };
 }
 
 function option(overrides: Partial<PassengerOption> = {}): PassengerOption {
   return {
-    option_ref: 'opt-1',
-    kind: 'rebook',
-    label: 'Rebook',
-    detail: 'Take the next service.',
-    available: true,
-    unavailable_reason: null,
-    requires_agent: false,
+    kind: 'alternative_flight',
+    label: 'AI 305 VIDP to VOBL',
+    basis: 'schedule_feasible_only',
+    flight_id: 3,
+    flight_number: 'AI 305',
+    scheduled_departure: '2026-08-21T05:00:00Z',
+    hotel_name: null,
+    nights: null,
+    requires_agent: true,
     ...overrides,
   };
 }
 
-function action(overrides: Partial<PassengerActionRecord> = {}): PassengerActionRecord {
-  return {
-    action_ref: 'act-1',
-    label: 'Checked your connection',
-    state: 'succeeded',
-    at: '2026-08-20T15:41:00Z',
-    detail: 'Compared arrival against the onward departure.',
-    ...overrides,
-  };
-}
-
-function view(overrides: Partial<PassengerDisruptionResponse> = {}): PassengerDisruptionResponse {
-  return { ...PASSENGER_SAMPLE, ...overrides };
-}
+// ---------------------------------------------------------------- trip status
 
 describe('deriveTripStatus', () => {
-  it('reports the worst segment, not the first', () => {
-    /*
-     * The defect this rule prevents: a trip whose first leg is fine and whose second is cancelled is
-     * not an on-time trip, and a first-wins rule would tell the passenger it was.
-     */
+  it('reports the worst status across the trip, not the first', () => {
     const status = deriveTripStatus(
       view({
         trip: {
-          origin_iata: 'BLR',
-          destination_iata: 'JFK',
+          origin_icao: 'VOBL',
+          destination_icao: 'VOBL',
           segments: [
-            segment({ segment_ref: 'a', status: 'on_time' }),
-            segment({ segment_ref: 'b', status: 'cancelled', flight_number: 'AI 101' }),
+            segment({ segment_id: 1, status: 'on_time', delay_minutes: 0, is_disrupted: false }),
+            segment({ segment_id: 2, status: 'cancelled', is_disrupted: true }),
           ],
         },
       }),
     );
+
     expect(status.token).toBe('cancelled');
-    expect(status.drivenBy?.flight_number).toBe('AI 101');
+    expect(status.drivenBy?.segment_id).toBe(2);
   });
 
-  it('ranks delayed above at risk, and at risk above scheduled', () => {
-    const of = (statuses: PassengerSegment['status'][]) =>
-      deriveTripStatus(
-        view({
-          trip: {
-            origin_iata: 'BLR',
-            destination_iata: 'JFK',
-            segments: statuses.map((status, index) =>
-              segment({ segment_ref: `s${index}`, status }),
-            ),
-          },
-        }),
-      ).token;
-
-    expect(of(['at_risk', 'delayed'])).toBe('delayed');
-    expect(of(['scheduled', 'at_risk'])).toBe('at_risk');
-    expect(of(['on_time', 'scheduled'])).toBe('scheduled');
-    expect(of(['on_time', 'on_time'])).toBe('on_time');
+  it('carries a word alongside the token so colour is never the only signal', () => {
+    expect(deriveTripStatus(view()).label).toBe('running late');
   });
 
-  it('names which segment set the status, so the screen can point at it', () => {
-    const status = deriveTripStatus(view());
-    expect(status.drivenBy).not.toBeNull();
-    expect(status.token).toBe('delayed');
-    expect(status.drivenBy?.flight_number).toBe('6E 2134');
-  });
+  it('counts only the legs an incident was opened against', () => {
+    const status = deriveTripStatus(
+      view({
+        trip: {
+          origin_icao: 'VOBL',
+          destination_icao: 'VOBL',
+          segments: [
+            segment({ segment_id: 1, is_disrupted: true }),
+            segment({ segment_id: 2, is_disrupted: false }),
+          ],
+        },
+      }),
+    );
 
-  it('counts segments and disrupted segments from the returned array only', () => {
-    const status = deriveTripStatus(view());
-    expect(status.totalSegments).toBe(2);
     expect(status.disruptedSegments).toBe(1);
+    expect(status.totalSegments).toBe(2);
   });
 
-  it('always carries a word, so colour is never the only signal', () => {
-    const status = deriveTripStatus(view());
-    expect(status.label.trim().length).toBeGreaterThan(0);
+  it('treats an empty trip as on time rather than throwing', () => {
+    const status = deriveTripStatus(
+      view({ trip: { origin_icao: '', destination_icao: '', segments: [] } }),
+    );
+
+    expect(status.token).toBe('on_time');
+    expect(status.drivenBy).toBeNull();
   });
 });
 
+// ---------------------------------------------------------------- delay
+
 describe('formatDelay', () => {
-  it('tells an unpublished delay apart from an on-time flight', () => {
-    // The whole point: null means nothing is known, 0 means it is running to schedule.
+  it('distinguishes an unpublished delay from an on-time flight', () => {
     expect(formatDelay(null)).toBeNull();
     expect(formatDelay(0)).toBe('on time');
   });
 
-  it('reads minutes and hours the way a person would say them', () => {
-    expect(formatDelay(15)).toBe('15m late');
-    expect(formatDelay(60)).toBe('1h late');
-    expect(formatDelay(195)).toBe('3h 15m late');
+  it('formats hours and minutes', () => {
+    expect(formatDelay(420)).toBe('7h late');
+    expect(formatDelay(95)).toBe('1h 35m late');
+    expect(formatDelay(20)).toBe('20m late');
   });
 
-  it('handles a flight running early without calling it late', () => {
-    expect(formatDelay(-20)).toBe('20m early');
-    expect(formatDelay(-90)).toBe('1h 30m early');
-  });
-
-  it('never returns an empty string for a real number', () => {
-    for (const minutes of [-1, 0, 1, 59, 60, 61, 1440]) {
-      expect(formatDelay(minutes)?.trim().length ?? 0).toBeGreaterThan(0);
-    }
+  it('names an early revision as early rather than negative', () => {
+    expect(formatDelay(-15)).toBe('15m early');
   });
 });
 
 describe('hasRevisedTime', () => {
-  it('is false only when neither end has been revised', () => {
-    expect(hasRevisedTime(segment())).toBe(false);
-    expect(hasRevisedTime(segment({ revised_departure: '2026-08-20T19:25:00Z' }))).toBe(true);
-    expect(hasRevisedTime(segment({ revised_arrival: '2026-08-20T22:10:00Z' }))).toBe(true);
+  it('is false when no estimate is published', () => {
+    expect(hasRevisedTime(segment({ estimated_departure: null }))).toBe(false);
+  });
+
+  it('is true once an estimate exists', () => {
+    expect(hasRevisedTime(segment())).toBe(true);
   });
 });
 
-describe('summariseOptions', () => {
-  it('partitions available from unavailable and self-service from agent-assisted', () => {
-    const summary = summariseOptions([
-      option({ option_ref: 'a' }),
-      option({ option_ref: 'b', requires_agent: true }),
-      option({
-        option_ref: 'c',
-        available: false,
-        unavailable_reason: 'Beyond the ground-transport limit.',
-      }),
-    ]);
-    expect(summary.total).toBe(3);
-    expect(summary.available.map((entry) => entry.option_ref)).toEqual(['a', 'b']);
-    expect(summary.unavailable.map((entry) => entry.option_ref)).toEqual(['c']);
-    expect(summary.selfService.map((entry) => entry.option_ref)).toEqual(['a']);
-    expect(summary.needsAgent.map((entry) => entry.option_ref)).toEqual(['b']);
+// ---------------------------------------------------------------- consequences
+
+describe('deriveConsequences', () => {
+  it('returns nothing when no finding is recorded', () => {
+    /* The change this test exists for: the old screen listed three invented consequences here. */
+    expect(deriveConsequences(view())).toEqual([]);
   });
 
-  it('surfaces an unavailable option that failed to say why', () => {
-    /*
-     * A greyed row with no reason reads as a broken page rather than a fact about the trip, so the
-     * contract defect is reported rather than rendered as a dead row.
-     */
-    const summary = summariseOptions([
-      option({ option_ref: 'x', available: false, unavailable_reason: null }),
-      option({ option_ref: 'y', available: false, unavailable_reason: '   ' }),
-      option({ option_ref: 'z', available: false, unavailable_reason: 'Not on this route.' }),
-    ]);
-    expect(summary.missingReason.map((entry) => entry.option_ref)).toEqual(['x', 'y']);
-  });
-
-  it('is empty and consistent for no options', () => {
-    const summary = summariseOptions([]);
-    expect(summary).toMatchObject({ total: 0 });
-    expect(summary.available).toEqual([]);
-    expect(summary.missingReason).toEqual([]);
-  });
-
-  it('finds no missing reasons in the shipped sample', () => {
-    expect(summariseOptions(PASSENGER_SAMPLE.options).missingReason).toEqual([]);
-  });
-});
-
-describe('deriveActionProgress', () => {
-  it('counts each state from the returned array', () => {
-    const progress = deriveActionProgress([
-      action({ action_ref: '1', state: 'succeeded' }),
-      action({ action_ref: '2', state: 'succeeded' }),
-      action({ action_ref: '3', state: 'executing' }),
-      action({ action_ref: '4', state: 'awaiting_approval' }),
-      action({ action_ref: '5', state: 'pending', at: null }),
-    ]);
-    expect(progress).toMatchObject({
-      done: 2,
-      inFlight: 1,
-      awaitingApproval: 1,
-      pending: 1,
-      total: 5,
-      blockedOnPerson: true,
-    });
-  });
-
-  it('puts a decision waiting on a person ahead of anything running', () => {
-    /*
-     * A passenger told "sending your confirmation" while a human has not approved the rebooking has
-     * been told the wrong thing about their trip, so awaiting_approval wins.
-     */
-    const progress = deriveActionProgress([
-      action({ action_ref: 'run', state: 'executing' }),
-      action({ action_ref: 'wait', state: 'awaiting_approval' }),
-    ]);
-    expect(progress.current?.action_ref).toBe('wait');
-    expect(progress.blockedOnPerson).toBe(true);
-  });
-
-  it('falls through to running, then to queued', () => {
-    expect(
-      deriveActionProgress([
-        action({ action_ref: 'done', state: 'succeeded' }),
-        action({ action_ref: 'run', state: 'executing' }),
-        action({ action_ref: 'next', state: 'pending', at: null }),
-      ]).current?.action_ref,
-    ).toBe('run');
-
-    expect(
-      deriveActionProgress([
-        action({ action_ref: 'done', state: 'succeeded' }),
-        action({ action_ref: 'next', state: 'pending', at: null }),
-      ]).current?.action_ref,
-    ).toBe('next');
-  });
-
-  it('reports nothing current once everything has finished', () => {
-    const progress = deriveActionProgress([action({ state: 'succeeded' })]);
-    expect(progress.current).toBeNull();
-    expect(progress.blockedOnPerson).toBe(false);
-  });
-
-  it('handles an empty ledger without inventing a state', () => {
-    expect(deriveActionProgress([])).toMatchObject({
-      done: 0,
-      total: 0,
-      current: null,
-      blockedOnPerson: false,
-    });
-  });
-});
-
-describe('deriveNextStep', () => {
-  it('keeps an unapproved plan reading as unapproved', () => {
-    const step = deriveNextStep(view());
-    expect(step.token).toBe('awaiting_approval');
-    expect(step.awaitingDecision).toBe(true);
-    expect(step.passengerMustAct).toBe(false);
-  });
-
-  it('maps action_required onto a token the badge already knows', () => {
-    const step = deriveNextStep(
+  it('states the recorded connection break with the recorded numbers', () => {
+    const consequences = deriveConsequences(
       view({
-        next_step: {
-          state: 'action_required',
-          headline: 'Choose an option',
-          detail: 'Pick a rebooking or a refund.',
-          respond_by: '2026-08-20T21:00:00Z',
+        connection: {
+          inbound_flight_number: '6E 2134',
+          onward_flight_number: 'AI 101',
+          connection_airport_icao: 'VIDP',
+          inbound_scheduled_arrival: '2026-08-20T18:25:00Z',
+          inbound_revised_arrival: '2026-08-20T22:45:00Z',
+          onward_scheduled_departure: '2026-08-20T20:40:00Z',
+          minimum_connection_minutes: 45,
+          shortfall_minutes: -170,
+          recovered_by_onward_delay: false,
+          established_by_action_id: 7,
         },
       }),
     );
-    // No new status vocabulary: `needs_human` already exists in the shared badge map.
-    expect(step.token).toBe('needs_human');
-    expect(step.passengerMustAct).toBe(true);
-    expect(step.awaitingDecision).toBe(false);
-    expect(step.respondBy).toBe('2026-08-20T21:00:00Z');
+
+    expect(consequences).toHaveLength(1);
+    const [broken] = consequences;
+    expect(broken?.label).toContain('AI 101');
+    expect(broken?.label).toContain('VIDP');
+    expect(broken?.detail).toContain('170');
+    expect(broken?.detail).toContain('45');
   });
 
-  it('maps monitoring onto scheduled and resolves cleanly', () => {
-    expect(
-      deriveNextStep(
-        view({
-          next_step: {
-            state: 'monitoring',
-            headline: 'Watching',
-            detail: 'No action.',
-            respond_by: null,
-          },
-        }),
-      ).token,
-    ).toBe('scheduled');
+  it('does not treat an onward delay as a fix', () => {
+    const consequences = deriveConsequences(
+      view({
+        connection: {
+          inbound_flight_number: '6E 2134',
+          onward_flight_number: 'AI 101',
+          connection_airport_icao: 'VIDP',
+          inbound_scheduled_arrival: '2026-08-20T18:25:00Z',
+          inbound_revised_arrival: '2026-08-20T22:45:00Z',
+          onward_scheduled_departure: '2026-08-20T20:40:00Z',
+          minimum_connection_minutes: 45,
+          shortfall_minutes: -170,
+          recovered_by_onward_delay: true,
+          established_by_action_id: 7,
+        },
+      }),
+    );
 
-    const resolved = deriveNextStep(
+    expect(consequences.every((entry) => !entry.resolved)).toBe(true);
+    expect(consequences.some((entry) => entry.key === 'connection-onward-delay')).toBe(true);
+  });
+
+  it('lists recorded priority factors without re-weighting them', () => {
+    const consequences = deriveConsequences(
+      view({
+        priority: {
+          priority_index: 52,
+          priority_band: 'high',
+          factors: [
+            { factor: 'special_needs_recorded', weight: 20, source: 'passenger' },
+            { factor: 'unreachable_contact', weight: 15, source: 'booking' },
+          ],
+          rule_version: 'passenger-impact-v1',
+          ruleset_hash: 'abc123',
+        },
+      }),
+    );
+
+    expect(consequences.map((entry) => entry.key)).toEqual([
+      'factor-special_needs_recorded',
+      'factor-unreachable_contact',
+    ]);
+    /* No score reaches the passenger: the index orders resources, it does not describe the person. */
+    expect(JSON.stringify(consequences)).not.toContain('52');
+  });
+
+  it('does not state the connection twice when it is also a priority factor', () => {
+    const consequences = deriveConsequences(
+      view({
+        connection: {
+          inbound_flight_number: '6E 2134',
+          onward_flight_number: 'AI 101',
+          connection_airport_icao: 'VIDP',
+          inbound_scheduled_arrival: '2026-08-20T18:25:00Z',
+          inbound_revised_arrival: '2026-08-20T22:45:00Z',
+          onward_scheduled_departure: '2026-08-20T20:40:00Z',
+          minimum_connection_minutes: 45,
+          shortfall_minutes: -170,
+          recovered_by_onward_delay: false,
+          established_by_action_id: 7,
+        },
+        priority: {
+          priority_index: 52,
+          priority_band: 'high',
+          factors: [{ factor: 'broken_connection', weight: 30, source: 'connection' }],
+          rule_version: 'passenger-impact-v1',
+          ruleset_hash: 'abc123',
+        },
+      }),
+    );
+
+    expect(consequences.filter((entry) => entry.label.includes('AI 101'))).toHaveLength(1);
+  });
+});
+
+describe('openConsequenceCount', () => {
+  it('counts the unresolved entries only', () => {
+    expect(
+      openConsequenceCount([
+        { key: 'a', label: 'a', detail: 'a', resolved: false },
+        { key: 'b', label: 'b', detail: 'b', resolved: true },
+      ]),
+    ).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------- options
+
+describe('summariseOptions', () => {
+  it('partitions by recorded kind', () => {
+    const summary = summariseOptions([
+      option(),
+      option({ kind: 'hotel_room', hotel_name: 'Airport Inn', nights: 1, flight_id: null }),
+    ]);
+
+    expect(summary.flights).toHaveLength(1);
+    expect(summary.rooms).toHaveLength(1);
+    expect(summary.total).toBe(2);
+  });
+
+  it('treats anything short of a recorded reservation as provisional', () => {
+    const summary = summariseOptions([
+      option(),
+      option({ kind: 'hotel_room', basis: 'simulated_reservation' }),
+      option({ kind: 'hotel_room', basis: 'recorded_reservation' }),
+    ]);
+
+    expect(summary.provisional).toHaveLength(2);
+  });
+
+  it('is empty for a booking with nothing recorded', () => {
+    expect(summariseOptions([]).total).toBe(0);
+  });
+});
+
+describe('optionBasisNote', () => {
+  it('never describes a reachable departure as an available seat', () => {
+    const note = optionBasisNote(option());
+
+    expect(note.toLowerCase()).toContain('no seat');
+    expect(note.toLowerCase()).not.toContain('available seat');
+  });
+
+  it('marks a simulated hold as not confirmed', () => {
+    expect(optionBasisNote(option({ basis: 'simulated_reservation' })).toLowerCase()).toContain(
+      'simulated',
+    );
+  });
+
+  it('states a real reservation plainly', () => {
+    expect(optionBasisNote(option({ basis: 'recorded_reservation' })).toLowerCase()).toContain(
+      'recorded',
+    );
+  });
+});
+
+// ---------------------------------------------------------------- actions
+
+describe('deriveActionProgress', () => {
+  it('counts each recorded state separately', () => {
+    const progress = deriveActionProgress([
+      action(),
+      action({ state: 'executing', awaiting_human: false }),
+      action({ state: 'awaiting_approval', awaiting_human: true, at: null }),
+      action({ state: 'pending', at: null }),
+      action({ state: 'needs_human', reason_code: 'SERVICE_NOT_IMPLEMENTED' }),
+    ]);
+
+    expect(progress.done).toBe(1);
+    expect(progress.inFlight).toBe(1);
+    expect(progress.awaitingApproval).toBe(1);
+    expect(progress.pending).toBe(1);
+    expect(progress.refused).toBe(1);
+    expect(progress.total).toBe(5);
+  });
+
+  it('does not count a refusal as progress', () => {
+    const progress = deriveActionProgress([action({ state: 'failed' })]);
+
+    expect(progress.done).toBe(0);
+    expect(progress.refused).toBe(1);
+  });
+
+  it('surfaces the human-blocked action ahead of anything running', () => {
+    const progress = deriveActionProgress([
+      action({ action_type: 'notify_passengers', state: 'executing' }),
+      action({
+        action_type: 'rebook_passengers',
+        state: 'awaiting_approval',
+        awaiting_human: true,
+      }),
+    ]);
+
+    expect(progress.current?.action_type).toBe('rebook_passengers');
+    expect(progress.blockedOnPerson).toBe(true);
+  });
+
+  it('reports nothing current once everything has finished', () => {
+    const progress = deriveActionProgress([action(), action({ action_type: 'notify_passengers' })]);
+
+    expect(progress.current).toBeNull();
+    expect(progress.blockedOnPerson).toBe(false);
+  });
+});
+
+describe('actionLabel', () => {
+  it('uses passenger wording for a known action type', () => {
+    expect(actionLabel(action())).toBe('Checked your connection');
+  });
+
+  it('falls back to the recorded token rather than inventing a label', () => {
+    expect(actionLabel(action({ action_type: 'some_new_service' }))).toBe('some new service');
+  });
+});
+
+// ---------------------------------------------------------------- next step
+
+describe('deriveNextStep', () => {
+  it('says nothing has changed while a person is deciding', () => {
+    const step = deriveNextStep(
       view({
         next_step: {
-          state: 'resolved',
-          headline: 'Sorted',
-          detail: 'You are rebooked.',
+          state: 'awaiting_approval',
+          driven_by_action_type: 'rebook_passengers',
           respond_by: null,
         },
       }),
     );
-    expect(resolved.token).toBe('resolved');
-    expect(resolved.awaitingDecision).toBe(false);
-    expect(resolved.passengerMustAct).toBe(false);
+
+    expect(step.token).toBe('awaiting_approval');
+    expect(step.awaitingDecision).toBe(true);
+    expect(step.detail.toLowerCase()).toContain('nothing has changed');
   });
 
-  it('carries no deadline when the contract published none', () => {
-    expect(deriveNextStep(view()).respondBy).toBeNull();
+  it('never implies a confirmed rebooking while awaiting approval', () => {
+    const step = deriveNextStep(
+      view({
+        next_step: { state: 'awaiting_approval', driven_by_action_type: null, respond_by: null },
+      }),
+    );
+
+    const copy = `${step.headline} ${step.detail}`.toLowerCase();
+    expect(copy).not.toContain('confirmed');
+    expect(copy).not.toContain('rebooked');
+  });
+
+  it('maps monitoring onto a neutral badge token', () => {
+    expect(deriveNextStep(view()).token).toBe('scheduled');
+  });
+
+  it('reports an undisrupted trip as running as booked', () => {
+    const step = deriveNextStep(
+      view({
+        disruption: null,
+        next_step: { state: 'no_disruption', driven_by_action_type: null, respond_by: null },
+      }),
+    );
+
+    expect(step.token).toBe('scheduled');
+    expect(step.awaitingDecision).toBe(false);
+    expect(step.headline.toLowerCase()).toContain('as booked');
+  });
+
+  it('reports a closed disruption as closed', () => {
+    const step = deriveNextStep(
+      view({ next_step: { state: 'resolved', driven_by_action_type: null, respond_by: null } }),
+    );
+
+    expect(step.token).toBe('resolved');
+  });
+
+  it('never produces a deadline, because none is recorded', () => {
+    for (const state of ['awaiting_approval', 'executing', 'resolved', 'monitoring'] as const) {
+      const step = deriveNextStep(
+        view({ next_step: { state, driven_by_action_type: null, respond_by: null } }),
+      );
+      expect(step.respondBy).toBeNull();
+    }
   });
 });
 
-describe('impacts', () => {
-  it('puts unresolved consequences first, keeping order within each group', () => {
-    const ordered = orderImpacts([
-      { impact_ref: 'a', label: 'A', detail: '', resolved: true },
-      { impact_ref: 'b', label: 'B', detail: '', resolved: false },
-      { impact_ref: 'c', label: 'C', detail: '', resolved: true },
-      { impact_ref: 'd', label: 'D', detail: '', resolved: false },
-    ]);
-    expect(ordered.map((impact) => impact.impact_ref)).toEqual(['b', 'd', 'a', 'c']);
+// ---------------------------------------------------------------- the fake state is gone
+
+describe('the screen no longer carries a hardcoded passenger', () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+  it('the speculative contract module is deleted', () => {
+    expect(() => read('./passengerContracts.ts')).toThrow();
   });
 
-  it('counts only what is still open', () => {
-    expect(openImpactCount(PASSENGER_SAMPLE.impacts)).toBe(2);
-    expect(openImpactCount([])).toBe(0);
-  });
-});
+  it('the screen reads the real endpoint', () => {
+    const source = read('./PassengerDisruptionView.tsx');
 
-describe('the sample payload keeps the promises the screen relies on', () => {
-  it('states no monetary amount anywhere', () => {
+    expect(source).toContain('api.passengerDisruption');
+    expect(source).not.toContain('PASSENGER_SAMPLE');
+  });
+
+  it('neither the screen nor the derivations name a passenger', () => {
     /*
-     * An entitlement is computed by the policy engine from a reviewed pack. A rupee figure rendered
-     * from this sample would be a locally computed entitlement, which the design system forbids and
-     * which this screen is the worst possible place to get wrong.
+     * The endpoint has no name field, so the only way one could reach this screen is a literal.
+     * Pinned because a friendly-looking greeting is exactly the change someone would make later.
      */
-    const serialised = JSON.stringify(PASSENGER_SAMPLE);
-    expect(serialised).not.toMatch(/inr/i);
-    expect(serialised).not.toMatch(/\u20b9/);
-    expect(serialised).not.toMatch(/amount/i);
-    expect(serialised).not.toMatch(/compensation_/i);
-  });
-
-  it('states no percentage or probability', () => {
-    const serialised = JSON.stringify(PASSENGER_SAMPLE);
-    expect(serialised).not.toMatch(/%/);
-    expect(serialised).not.toMatch(/probability|likelihood|confidence/i);
-  });
-
-  it('points at the policy surface for entitlements rather than asserting one', () => {
-    expect(PASSENGER_SAMPLE.entitlement_note.trim().length).toBeGreaterThan(0);
-    expect(PASSENGER_SAMPLE.entitlement_note.toLowerCase()).toContain('airline');
-    expect(PASSENGER_SAMPLE.entitlement_note.toLowerCase()).not.toContain('current law');
-  });
-
-  it('uses none of the words the browser gate treats as an unbuilt screen', () => {
-    // `verify-console.mjs` fails a route whose DOM matches /not yet built|placeholder/i.
-    const reserved = /not yet built|placeholder/i;
-    const serialised = JSON.stringify(PASSENGER_SAMPLE);
-    expect(serialised).not.toMatch(reserved);
-  });
-
-  it('marks itself as not coming from a service', () => {
-    expect(passengerApi.isLive).toBe(false);
-    expect(PASSENGER_SAMPLE.provenance.kind).toBe('synthetic');
-    expect(passengerApi.endpoint).toMatch(/^GET /);
-  });
-
-  it('gives every unavailable option a reason', () => {
-    for (const entry of PASSENGER_SAMPLE.options.filter((candidate) => !candidate.available)) {
-      expect(entry.unavailable_reason?.trim().length ?? 0, entry.option_ref).toBeGreaterThan(0);
+    for (const path of ['./PassengerDisruptionView.tsx', './passengerView.ts']) {
+      expect(read(path)).not.toContain('passenger_name');
     }
   });
 
-  it('never publishes a revised time without a matching status change', () => {
-    for (const entry of PASSENGER_SAMPLE.trip.segments) {
-      if (hasRevisedTime(entry)) {
-        expect(entry.status, entry.segment_ref).not.toBe('on_time');
-      }
+  it('the derivations state no money figure', () => {
+    const source = read('./passengerView.ts');
+
+    expect(source).not.toContain('inr');
+    expect(source).not.toContain('₹');
+  });
+});
+
+describe('a finished workflow is never presented as a changed booking', () => {
+  /*
+   * Absorbed from `passengerJourney.ts`, which derived this warning from the GROUP record and is
+   * superseded by the per-booking endpoint. The guarantee it existed to hold is the one thing on
+   * this screen that would do real harm if it slipped, so it is re-asserted here rather than
+   * retired with the module: "the recovery workflow finished" must never read as "your ticket
+   * changed".
+   */
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+  it('resolved copy claims only that the recorded steps finished', () => {
+    const step = deriveNextStep(
+      view({ next_step: { state: 'resolved', driven_by_action_type: null, respond_by: null } }),
+    );
+
+    const copy = `${step.headline} ${step.detail}`.toLowerCase();
+    expect(copy).toContain('recorded');
+    for (const overclaim of ['rebooked', 'confirmed', 'ticketed', 'refunded', 'your new flight']) {
+      expect(copy).not.toContain(overclaim);
+    }
+  });
+
+  it('the screen states that no confirmed booking change is published', () => {
+    const source = read('./PassengerDisruptionView.tsx');
+
+    expect(source).toContain('No confirmed booking change is published');
+    expect(source).toContain('does not mean your');
+  });
+
+  it('the screen names what no contract records, so absence is explicit', () => {
+    const source = read('./PassengerDisruptionView.tsx');
+
+    for (const absent of ['rebooking', 'seat', 'refund', 'entitlement amount']) {
+      expect(source).toContain(absent);
     }
   });
 });

@@ -24,6 +24,7 @@ import type {
   IncidentGroupDetail,
   IncidentGroupsResponse,
   IncidentGroupSummary,
+  PassengerDisruptionResponse,
   PlanApprovalResponse,
   PolicyResponse,
   ReadyStatus,
@@ -147,6 +148,18 @@ export const api = {
   /** Phase 3: natural-language explanation from the Explainer agent. */
   explanation: (incidentId: string) =>
     request<ExplanationResponse>(`/incidents/${incidentId}/explanation`),
+
+  /**
+   * Phase 5: one booking's disruption, read from recorded rows.
+   *
+   * Deliberately not in `FIXTURE_MAP`. Every other route has a committed fixture so the console
+   * can be built before the endpoint exists; this one is the opposite case — the screen existed
+   * first, against a local sample, and a fixture here would let it keep passing while the real
+   * join was broken. In fixture mode the call fails loudly and the screen says the service is
+   * unavailable, which is true.
+   */
+  passengerDisruption: (bookingRef: string) =>
+    request<PassengerDisruptionResponse>(`/passenger/${encodeURIComponent(bookingRef)}/disruption`),
 
   /**
    * Advance the workflow. Stopping at `awaiting_approval` is a SUCCESS response with
