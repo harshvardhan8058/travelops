@@ -199,9 +199,24 @@ class Settings(BaseSettings):
     #: part-way and the union rollups report 13 connections and 5 pairings instead of 22 and 9 —
     #: not wrong arithmetic, just fewer incidents having finished.
     #:
-    #: 20s is comfortably above a healthy live planner call (a few seconds) and bounds the whole
-    #: eight-incident cascade to 160s even if every model call hangs.
+    #: 20s is comfortably above an ordinary warm live call and bounds seven non-primary members
+    #: to 140s even if every model call hangs. The primary demo incident has a separate allowance
+    #: below, because Windows live runs show first-call latency without showing larger prompts or
+    #: different planner work for that incident.
     planner_candidate_budget_seconds: float = Field(default=20.0, gt=0, le=180)
+
+    #: Wall-clock ceiling for the optional Planner candidate on the declared primary flight in the
+    #: configured demo dataset. This is deliberately separate from the ordinary per-incident
+    #: budget: raising 20s globally spends the increase eight times because group members advance
+    #: sequentially. A 40s primary allowance plus seven 20s ordinary allowances is 180s, leaving
+    #: 120s inside `verify_phase2.py`'s unchanged 300s request budget for deterministic services,
+    #: assurance, persistence and the cascade projection.
+    #:
+    #: The role comes from `incident_group_flight.role`, never an incident-reference convention;
+    #: the dataset check prevents a production primary from silently receiving demo tuning. A
+    #: timeout still follows the existing `PLANNER_AGENT_UNAVAILABLE` route, so the selected
+    #: playbook remains the deterministic recovery path.
+    primary_demo_planner_candidate_budget_seconds: float = Field(default=40.0, gt=0, le=120)
 
     #: Plan-level (group-scoped) assurance config. A SEPARATE setting on purpose.
     #:
