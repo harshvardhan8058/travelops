@@ -196,10 +196,10 @@ export function ReplayScreen() {
         }
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 2xl:grid-cols-[minmax(0,1fr)_440px]">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_440px]">
         <Panel
           title="Records"
-          className="flex min-h-0 flex-col overflow-hidden"
+          className="flex min-w-0 flex-col"
           actions={
             <div className="flex items-center gap-2">
               <MonoValue muted className="text-caption">
@@ -352,7 +352,7 @@ export function ReplayScreen() {
           ) : (
             <ol
               ref={keyboard.containerRef as React.RefObject<HTMLOListElement>}
-              className="min-h-0 flex-1 overflow-y-auto"
+              className="min-w-0"
               onKeyDown={keyboard.onKeyDown}
               aria-label="Recorded events"
             >
@@ -371,7 +371,7 @@ export function ReplayScreen() {
           )}
         </Panel>
 
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        <div className="flex min-w-0 flex-col gap-3">
           <Panel
             title="State at cursor"
             actions={

@@ -99,7 +99,7 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
   return (
     <Panel
       title="Evidence"
-      className="flex min-h-0 flex-col overflow-hidden"
+      className="flex min-w-0 flex-col"
       actions={
         <ProvenanceDot
           kind={incident.provenance.kind}
@@ -108,7 +108,7 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
         />
       }
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-w-0">
         <PanelSection title="Weather observation used">
           {!weather ? (
             <p className="text-caption text-fg-muted">

@@ -683,7 +683,7 @@ export function Panel({
 }) {
   return (
     <section
-      className={clsx('rounded border border-border-subtle bg-surface', className)}
+      className={clsx('min-w-0 rounded border border-border-subtle bg-surface', className)}
       aria-label={title}
     >
       {title && (

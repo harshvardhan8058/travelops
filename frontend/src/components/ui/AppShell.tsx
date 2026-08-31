@@ -153,7 +153,7 @@ export function AppShell({
   const degradations = mode?.degradations ?? [];
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-base text-fg">
+    <div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden bg-base text-fg">
       <Rail />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -171,11 +171,11 @@ export function AppShell({
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1">
           <main className="min-w-0 flex-1 overflow-auto p-3">{children}</main>
           <aside
             aria-label="Decision timeline"
-            className="hidden w-timeline shrink-0 overflow-auto border-l border-border-subtle bg-surface xl:block"
+            className="hidden min-h-0 w-timeline shrink-0 overflow-hidden border-l border-border-subtle bg-surface 2xl:block"
           >
             {timeline}
           </aside>

@@ -251,7 +251,7 @@ export function PlanColumn({
    */
   if (!plan) {
     return (
-      <Panel title="Plan" className="flex min-h-0 flex-col overflow-hidden">
+      <Panel title="Plan" className="flex min-w-0 flex-col">
         <EmptyState
           title="No plan proposed yet"
           description={
@@ -265,7 +265,7 @@ export function PlanColumn({
   }
 
   return (
-    <Panel title="Plan" className="flex min-h-0 flex-col overflow-hidden">
+    <Panel title="Plan" className="flex min-w-0 flex-col">
       {/*
        * How the plan presents itself: who authored it, why, what it is made of.
        *
@@ -309,7 +309,7 @@ export function PlanColumn({
         )}
       </div>
 
-      <ol className="min-h-0 flex-1 overflow-y-auto">
+      <ol className="min-w-0">
         {plan.tasks.map((task) => (
           <TaskRowContainer
             key={task.id}
