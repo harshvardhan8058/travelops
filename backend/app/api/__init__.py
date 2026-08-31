@@ -43,6 +43,7 @@ from app.api import (
     policy,
     reasoning,
     replay,
+    scenarios,
 )
 
 router = APIRouter()
@@ -56,6 +57,7 @@ router.include_router(plans.router)
 router.include_router(policy.router)
 router.include_router(replay.router)
 router.include_router(reasoning.router)
+router.include_router(scenarios.router)
 
 # Fixture-backed remainder. Each owning stream replaces its section in place, keeping the
 # response shape identical so the frontend never has to change.

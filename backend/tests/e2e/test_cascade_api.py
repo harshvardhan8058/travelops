@@ -115,7 +115,10 @@ class TestGroupList:
         assert group["rollups"]["passengers_affected"] == 2
         assert group["provenance"]["kind"] == "derived"
 
-    def test_the_current_group_is_addressable(self, client, cascade):
+    def test_the_current_group_is_addressable_after_opening(self, client, cascade):
+        opened = client.post(f"{PREFIX}/incident-groups/{cascade}/open")
+        assert opened.status_code == 200
+
         response = client.get(f"{PREFIX}/incident-groups/current")
         assert response.status_code == 200
         assert response.json()["reference"] == GROUP_REF
