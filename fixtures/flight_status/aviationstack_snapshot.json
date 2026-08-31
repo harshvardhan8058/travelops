@@ -1,0 +1,149 @@
+{
+  "source": {
+    "provider": "aviationstack",
+    "endpoint": "https://api.aviationstack.com/v1/flights",
+    "licence": "AviationStack free/developer tier; redistribution of a small illustrative sample for offline fixture replay. Not for production use.",
+    "retrieved_at": "2026-08-21T10:30:00+00:00",
+    "note": "SHAPED-LIKE-CAPTURE. These rows mirror the AviationStack /v1/flights response so the live and fixture providers share one normalisation path. `_fixture.flight_id` maps each row to the domain flight id and is not part of the vendor payload. Timestamps are chosen relative to the retrieved_at clock so `is_stale` is reproducible.",
+    "pagination_example": {
+      "limit": 100,
+      "offset": 0,
+      "count": 4,
+      "total": 4
+    }
+  },
+  "data": [
+    {
+      "_fixture": {
+        "flight_id": 5001,
+        "scenario": "on_time",
+        "note": "Departs on schedule, no delay. Baseline that a healthy connection is judged against."
+      },
+      "flight_date": "2026-08-21",
+      "flight_status": "active",
+      "departure": {
+        "airport": "Kempegowda International",
+        "iata": "BLR",
+        "icao": "VOBL",
+        "scheduled": "2026-08-21T10:28:00+00:00",
+        "estimated": "2026-08-21T10:28:00+00:00",
+        "actual": "2026-08-21T10:28:00+00:00",
+        "delay": null,
+        "terminal": "2",
+        "gate": "12"
+      },
+      "arrival": {
+        "airport": "Indira Gandhi International",
+        "iata": "DEL",
+        "icao": "VIDP",
+        "scheduled": "2026-08-21T13:05:00+00:00",
+        "estimated": "2026-08-21T13:05:00+00:00",
+        "actual": null,
+        "delay": null,
+        "terminal": "3",
+        "gate": "22"
+      },
+      "airline": { "name": "Air India", "iata": "AI", "icao": "AIC" },
+      "flight": { "number": "2811", "iata": "AI2811", "icao": "AIC2811" }
+    },
+    {
+      "_fixture": {
+        "flight_id": 5002,
+        "scenario": "delayed",
+        "note": "Vendor reports a 95-minute departure delay. Exercises the endpoint `delay` field and a revised departure."
+      },
+      "flight_date": "2026-08-21",
+      "flight_status": "active",
+      "departure": {
+        "airport": "Kempegowda International",
+        "iata": "BLR",
+        "icao": "VOBL",
+        "scheduled": "2026-08-21T10:29:00+00:00",
+        "estimated": "2026-08-21T12:04:00+00:00",
+        "actual": null,
+        "delay": 95,
+        "terminal": "2",
+        "gate": "15"
+      },
+      "arrival": {
+        "airport": "Chhatrapati Shivaji Maharaj International",
+        "iata": "BOM",
+        "icao": "VABB",
+        "scheduled": "2026-08-21T12:10:00+00:00",
+        "estimated": "2026-08-21T13:45:00+00:00",
+        "actual": null,
+        "delay": 95,
+        "terminal": "2",
+        "gate": "41"
+      },
+      "airline": { "name": "IndiGo", "iata": "6E", "icao": "IGO" },
+      "flight": { "number": "512", "iata": "6E512", "icao": "IGO512" }
+    },
+    {
+      "_fixture": {
+        "flight_id": 5003,
+        "scenario": "delay_derived_from_times",
+        "note": "Vendor omits `delay`; the estimated departure is 40 minutes past scheduled, so the delay is derived from the timestamps."
+      },
+      "flight_date": "2026-08-21",
+      "flight_status": "active",
+      "departure": {
+        "airport": "Chennai International",
+        "iata": "MAA",
+        "icao": "VOMM",
+        "scheduled": "2026-08-21T10:20:00+00:00",
+        "estimated": "2026-08-21T11:00:00+00:00",
+        "actual": null,
+        "delay": null,
+        "terminal": "1",
+        "gate": "7"
+      },
+      "arrival": {
+        "airport": "Kempegowda International",
+        "iata": "BLR",
+        "icao": "VOBL",
+        "scheduled": "2026-08-21T11:25:00+00:00",
+        "estimated": "2026-08-21T12:05:00+00:00",
+        "actual": null,
+        "delay": null,
+        "terminal": "2",
+        "gate": "9"
+      },
+      "airline": { "name": "Air India", "iata": "AI", "icao": "AIC" },
+      "flight": { "number": "440", "iata": "AI440", "icao": "AIC440" }
+    },
+    {
+      "_fixture": {
+        "flight_id": 5004,
+        "scenario": "cancelled",
+        "note": "A cancellation is not a delay. The ingest mapper must refuse to build a delayed segment for this."
+      },
+      "flight_date": "2026-08-21",
+      "flight_status": "cancelled",
+      "departure": {
+        "airport": "Kempegowda International",
+        "iata": "BLR",
+        "icao": "VOBL",
+        "scheduled": "2026-08-21T10:15:00+00:00",
+        "estimated": null,
+        "actual": null,
+        "delay": null,
+        "terminal": "2",
+        "gate": null
+      },
+      "arrival": {
+        "airport": "Cochin International",
+        "iata": "COK",
+        "icao": "VOCI",
+        "scheduled": "2026-08-21T11:35:00+00:00",
+        "estimated": null,
+        "actual": null,
+        "delay": null,
+        "terminal": "3",
+        "gate": null
+      },
+      "airline": { "name": "IndiGo", "iata": "6E", "icao": "IGO" },
+      "flight": { "number": "779", "iata": "6E779", "icao": "IGO779" }
+    }
+  ]
+}
