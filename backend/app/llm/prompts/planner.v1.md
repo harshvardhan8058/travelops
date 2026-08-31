@@ -24,7 +24,6 @@ Return a JSON object matching this exact schema:
     {
       "action": "check_connections",
       "target_refs": ["flight:42"],
-      "inputs": {},
       "depends_on": []
     }
   ]
@@ -63,7 +62,10 @@ Return a JSON object matching this exact schema:
 - Do not invent action types not in the list above.
 - Do not include confidence scores or probabilities.
 - Do not add any field that is not in the schema above, at the top level or inside a task. The
-  schema has exactly four keys per task: `action`, `target_refs`, `inputs`, `depends_on`.
+  schema has exactly three keys per task: `action`, `target_refs`, `depends_on`. In particular
+  there is no `inputs` key: a task's inputs are read from recorded data, never proposed here.
+- Do not wrap the object in another object. The five keys above are the TOP LEVEL of your answer;
+  a response nested under a key such as `final`, `result` or `response` is refused in full.
 - Do not include explanations inside the tasks — use `reason` for that.
 - Keep `reason` to one sentence, under 300 characters.
 - Do not wrap the JSON in markdown fences, prose or commentary.

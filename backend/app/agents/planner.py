@@ -22,7 +22,7 @@ from typing import Any
 import structlog
 
 from app.agents.contract import ModelCallAudit, PlannerResponse
-from app.llm.client import LLMClient
+from app.llm.client import PLANNER_WIRE_SCHEMA, LLMClient
 
 log = structlog.get_logger(__name__)
 
@@ -144,6 +144,12 @@ class PlannerAgent:
             prompt_version=PROMPT_VERSION,
             scenario_key=scenario_key,
             budget_seconds=budget_seconds,
+            # Ask the provider to constrain its output to the planner shape, rather than only to
+            # valid JSON. `response_schema` above is unchanged and still validates whatever comes
+            # back: this narrows what a cooperating provider can emit, it does not decide what is
+            # accepted. A live 200/`stop` response of `{"final": {...}}` was the defect that made
+            # the distinction matter.
+            wire_schema=PLANNER_WIRE_SCHEMA,
         )
         log.info(
             "planner_agent_succeeded",

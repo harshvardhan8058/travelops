@@ -189,6 +189,101 @@ class TestTheContractItselfIsUnchanged:
             await _propose(json.dumps(_plan(reason="R" * 2500)), monkeypatch)
 
 
+#: The wrappers a chatty or agentic model actually reaches for. `final` is the one observed live.
+WRAPPER_KEYS = ["final", "result", "response", "output", "plan", "data"]
+
+
+class TestAWrappedPlanIsRefusedRatherThanUnwrapped:
+    """The Phase 5 live failure, pinned as a rejection.
+
+    `openai/gpt-oss-120b` answered HTTP 200 with `finish_reason=stop` and a complete, otherwise
+    valid plan nested under a `final` key. The request had asked only for `json_object`, so this
+    was a legal answer to the question that was actually asked — and the fix is upstream, in the
+    strict wire schema now sent with the request (`PLANNER_WIRE_SCHEMA` in `app/llm/client.py`).
+
+    What must NOT happen is the tempting local repair: reaching into the payload for the one key
+    that looks like a plan. `_validate_tolerating_decoration` drops keys nothing reads, and only
+    when EVERY error is an undeclared key; a wrapper fails as `missing` on three required root
+    fields as well, so the payload stays refused. These tests exist so that stays true — an
+    "unwrap whatever the model sent" shortcut would accept an arbitrary envelope from an untrusted
+    author and hand its contents to the assurance gate as a plan.
+    """
+
+    @pytest.mark.parametrize("wrapper", WRAPPER_KEYS)
+    async def test_a_plan_nested_under_a_wrapper_key_is_refused(
+        self, live, monkeypatch, wrapper: str
+    ):
+        with pytest.raises(LLMUnavailable) as caught:
+            await _propose(json.dumps({wrapper: _plan()}), monkeypatch)
+
+        assert "PlannerResponse" in str(caught.value)
+
+    async def test_the_refusal_names_the_wrapper_and_the_missing_roots(self, live, monkeypatch):
+        """The diagnostic an operator reads. Field NAMES only, never model-supplied values."""
+        with pytest.raises(LLMUnavailable) as caught:
+            await _propose(json.dumps({"final": _plan()}), monkeypatch)
+
+        message = str(caught.value)
+        for field in ("status", "reason", "tasks", "final"):
+            assert field in message
+
+    async def test_the_wrapper_is_refused_at_the_schema_boundary_not_the_transport(
+        self, live, monkeypatch
+    ):
+        """A 200 that parses as JSON must not be reported as a transport or truncation fault.
+
+        `phase` is what tells an operator whether to look at the network, the budget or the
+        contract. A wrapper is a contract failure, and it is terminal rather than retried: the
+        same prompt produces the same shape, so repeating it spends the incident's budget to
+        learn nothing.
+        """
+        with pytest.raises(LLMUnavailable) as caught:
+            await _propose(json.dumps({"final": _plan()}), monkeypatch)
+
+        assert caught.value.phase == "response_schema"
+        assert caught.value.status_code == 200
+        assert caught.value.finish_reason == "stop"
+
+    async def test_a_wrapped_plan_is_not_retried(self, live, monkeypatch):
+        """One request, not three. A shape failure is deterministic; repeating it proves nothing.
+
+        Asserted because the transient-failure path retries up to three times, and a wrapper that
+        went down it would spend the incident's whole planner budget before failing anyway.
+        """
+        stub = RecordingTransport().returns(json.dumps({"final": _plan()})).install(monkeypatch)
+
+        with pytest.raises(LLMUnavailable):
+            await LLMClient().call(
+                prompt="plan the recovery",
+                system="You are the Recovery Planner. Return JSON.",
+                response_schema=PlannerResponse,
+                agent_name="planner",
+                prompt_version="planner.v1",
+            )
+
+        assert stub.calls == 1
+
+    async def test_the_root_plan_wins_when_a_wrapper_sits_beside_it(self, live, monkeypatch):
+        """A complete root plan AND a duplicate under `final`.
+
+        This one is NOT a wrapper failure: the root is a valid plan and `final` is an undeclared
+        key, so the existing decoration rule applies and drops it — the same treatment
+        `confidence` gets. Pinned here so the distinction stays visible: dropping a key nothing
+        reads is not the same act as promoting a nested object to be the plan, and only the first
+        one is permitted. The tasks that survive are the ROOT's.
+        """
+        payload = _plan()
+        payload["final"] = _plan(tasks=[{"action": "reassign_gate", "target_refs": REFS}])
+
+        parsed, _audit, _stub = await _propose(json.dumps(payload), monkeypatch)
+
+        assert [task.action.value for task in parsed.tasks] == [
+            "check_connections",
+            "assess_crew_impact",
+        ], "the nested copy must not have replaced the root plan"
+        assert not hasattr(parsed, "final")
+
+
 class TestAFailureNowNamesItself:
     """`errors=N` alone is why this needed a second investigation round."""
 
