@@ -1,7 +1,6 @@
 # This pack is built from TWO official DGCA primary documents, because Part IV Para 3.3.5
-# defers refund of the air ticket to Part II. Both are recorded with full identity; one is
-# archived in this directory with a real SHA-256 and one is not, and the difference is stated
-# rather than smoothed over.
+# defers refund of the air ticket to Part II. Both original PDF binaries are archived in this
+# directory with SHA-256 digests computed from their exact repository bytes.
 
 title: >-
   Civil Aviation Requirements, Section 3 — Air Transport, Series 'M' Part IV:
@@ -32,45 +31,25 @@ pages: 8
 
 provided_by: team
 received_at: 2026-08-28
-extraction_method: attachment_text_extraction
-
+source_form: original_pdf_binary
+repository_original_path: policy_packs/D3M-M4(R4_Jan2023).pdf
 official_url: https://www.dgca.gov.in/digigov-portal/
 
-# ---------------------------------------------------------------------------
-# WHY THE PRIMARY HASH IS PENDING.
-#
-# The upload delivered extracted TEXT of Part IV, not the PDF file, and the DGCA
-# portal's public page is a JavaScript shell that does not expose the document's
-# attachment id, so the binary could not be retrieved to hash it.
-#
-# ATTEMPT LOG — the binary has been sought twice and obtained neither time.
-#   2026-08-31  First request. Extracted text only. Portal listing is a JS shell;
-#               `digigov-portal/api/dgca/getCarList` returns 404.
-#   2026-08-21  Second request, naming the file `D3M-M4(R4_Jan2023).pdf`. The named
-#               file was not present anywhere in the working environment (full
-#               filesystem scan by name and by %PDF magic bytes found only
-#               source-part-ii.pdf). Direct retrieval was retried against
-#               `/cars/D3M-M4(R4_Jan2023).pdf`, `Upload/<filename>` and
-#               `viewPDF?attachId=<filename>`: all 404. The portal CAR index was
-#               additionally rendered in a headless browser; it returns the generic
-#               DGCA home shell and exposes no Series M Part IV anchor.
-#   => `content_sha256` stays PENDING_ARCHIVAL. No digest has been computed over
-#      anything, and none has been guessed.
-#
-# A SHA-256 can only be computed over bytes. Hashing the extracted text would be
-# worse than leaving this pending: it would produce a value that looks like
-# provenance, would satisfy `verify_source_document`, and would attest to a
-# document nobody holds. The extracted text is not the legal source; the archived
-# original is.
-#
-# To complete: place the exact PDF at `source.pdf` in this directory, run
-# `sha256sum source.pdf`, record the digest below and set `archived: true`.
-# `verify_source_document` then checks the file against the recorded value on every
-# load and refuses a verified load if they disagree.
-# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------- archive integrity
+# `source.pdf` is the exact Git blob committed by the team at the repository path above. The
+# digest below was computed from those PDF bytes, not from extracted text or rendered pages.
+# `verify_source_document` recomputes it whenever this pack is loaded.
 local_path: source.pdf
-content_sha256: PENDING_ARCHIVAL
-archived: false
+content_sha256: "3b4b50844edc6a46099cce3b94626d29b03f90ccc61318aa1aa2db6d0fa3ff4a"
+size_bytes: 285108
+archived: true
+archived_at: 2026-08-31
+archived_from_commit: f24eae4f26a987d4f83e6c15858d945a7e601bc8
+verification_method: sha256_and_exact_byte_comparison_to_repository_original
+verification_caveat: >-
+  Byte identity and PDF archival are verified. They do not establish that Rev. 4 remains current,
+  resolve its cross-reference to the later Part II revision, or substitute for SME review of the
+  rule encoding. Those remain explicit promotion blockers.
 
 self_declared_scope: >-
   Para 1.6 states the CAR is issued under Rule 133A of the Aircraft Rules 1937 with the approval
@@ -103,22 +82,21 @@ referenced_instruments:
     referenced_by: "car:3m4:rev4:3.3.5"
     official_url: "https://www.dgca.gov.in/digigov-portal/Upload?attachId=cuYJ%2FdQQ6Gx93z%2Fwchd5xw%3D%3D&flag=iframeAttachView"
     local_path: source-part-ii.pdf
-    # Real SHA-256 of the file archived in this directory, computed with sha256sum after
-    # downloading from the official_url above. Verified by
-    # tests/unit/policy/test_dgca_car_pack.py, so the value is checked rather than decorative.
+    repository_original_path: policy_packs/CAR 3M2 Feb26.pdf
+    # Real SHA-256 computed from the repository PDF bytes. The archived file is byte-identical to
+    # the team-provided original and is re-hashed by tests/unit/policy/test_dgca_car_pack.py.
     content_sha256: "558ecee1d535b63023dd8bd37f0de10d08e7eb82a37ec48817ec1d613ff09281"
     size_bytes: 2754578
     archived: true
+    archived_at: 2026-08-31
+    archived_from_commit: f24eae4f26a987d4f83e6c15858d945a7e601bc8
     retrieved_at: 2026-08-31
     retrieved_from: official DGCA portal attachment URL supplied by the team
-    # The PDF is a three-page scan with no embedded text layer, so its content could not be
-    # confirmed programmatically. Correspondence with the supplied attachment was established by
-    # the source URL, the page count, and the visible cover page, revision date, effective date,
-    # file number and signatory. Not by OCR.
-    verification_method: url_provenance_and_page_count_and_visual_correspondence
+    verification_method: sha256_and_exact_byte_comparison_to_repository_original
     verification_caveat: >-
-      Scanned image PDF, no text layer. A reviewer must confirm the archived file is the document
-      they read before this pack is promoted.
+      This PDF is a three-page scan with no embedded text layer. Byte identity and PDF archival
+      are verified; interpretation and currentness still require the external review recorded in
+      review.yaml.
 
 # Checked 2026-08-31. Recorded as evidence that the check was performed, not as a substitute for
 # confirming the revision on the DGCA portal on the day of promotion.
@@ -207,8 +185,8 @@ redistribution:
     Source: Directorate General of Civil Aviation, Government of India. Reproduced from the
     official DGCA portal without alteration.
   note: >-
-    On that basis the Part II PDF is archived here unaltered. Part IV will be archived on the
-    same basis once the binary is obtained.
+    On that basis both original DGCA PDF binaries are archived here unaltered. Their recorded
+    SHA-256 values are recomputed from the archive files by the G1 tests.
 
 # Content is paraphrased in rules.yaml with exact clause references rather than reproduced at
 # length. Full clause text must be read from the archived originals.

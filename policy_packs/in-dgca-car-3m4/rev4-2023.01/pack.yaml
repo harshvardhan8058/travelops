@@ -18,22 +18,22 @@ currency: INR
 # Rules 1937, with the approval of the Ministry of Civil Aviation, signed by the
 # Director General. Every figure below is read from it directly.
 #
-# Two things are nevertheless missing, and both are recorded rather than assumed:
+# Two things are nevertheless still missing, and both are recorded rather than assumed:
 #
 #   1. NO AUTHORISED SME HAS REVIEWED THIS ENCODING. `review.yaml` names no
 #      reviewer and records no approval, because none exists. The loader refuses
 #      an `approved` pack without one, which is why `status` below is not
 #      `approved` and why verified mode remains unreachable.
-#   2. THE SOURCE PDF IS NOT ARCHIVED IN THIS REPOSITORY. Only extracted text was
-#      supplied, so `content_sha256` is PENDING_ARCHIVAL and `archived` is false.
-#      `verify_source_document` refuses a verified load on exactly that, and no
-#      hash was invented to make it pass.
+#   2. CURRENTNESS HAS NOT BEEN PROVED. Both original PDF binaries are now archived
+#      with byte-derived SHA-256 values, but archival does not establish that Part IV
+#      Rev. 4 remains current or resolve its cross-reference to the later Part II
+#      Rev. 3. RQ-9 keeps that external review explicit.
 #
 # `status: official_guidance_dated` is the honest rung. Its permissions are the
 # ones that fit — the pack may compute, behind a visible dated label, and may
-# never be called current law — even though its source quality is better than the
-# rung's description, because the rung above requires review this encoding has not
-# had. Promotion to `approved` is data and review, not code: see review.yaml.
+# never be called current law — even though both sources now pass integrity checks,
+# because the rung above requires review and currentness evidence this encoding has
+# not had. Promotion to `approved` is data and review, not code: see review.yaml.
 # ---------------------------------------------------------------------------
 status: official_guidance_dated
 
@@ -41,17 +41,14 @@ verified_mode_eligible: false
 ui_label: "DGCA CAR 3/M/IV · REV. 4 · EFFECTIVE 15 FEB 2023 · PENDING SME REVIEW"
 
 blocks_verified_mode_until:
-  - the Part IV PDF is archived at source.pdf with its real SHA-256, computed with sha256sum over
-    the file's bytes, recorded in source-metadata.yaml and archived set to true. Requested twice
-    and not received either time; see the attempt log in source-metadata.yaml
   - authorised aviation/legal SME review recorded in review.yaml with per-rule sign-off
-  - the ten open review questions in review.yaml answered
+  - the nine open review questions in review.yaml answered
   - >-
     RQ-9 answered — confirmation from the DGCA portal that Rev. 4 is still the current revision of
     Part IV on the day of promotion, plus a reading of Para 3.3.5's cross-reference given that the
     archived Part II (Rev. 3, 24 Feb 2026) postdates this Part IV revision
-  # Part II itself is no longer a blocker: it is archived in this directory with a real,
-  # test-verified SHA-256. Only its currentness relative to Part IV is open, under RQ-9.
+  # Both original PDFs are archived with real, test-verified SHA-256 values. Source integrity is
+  # complete, but it does not satisfy the independent review and currentness prerequisites above.
 
 precedence:
   # No global "most favourable to passenger" rule is assumed. This pack overlaps the charter

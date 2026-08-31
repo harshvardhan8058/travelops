@@ -7,11 +7,11 @@ Series 'M' Part II Rev. 3 (24 Feb 2026, effective 26 Mar 2026).
 Three groups of assertion:
 
   * the pack's own 32 executable cases, run through the real engine;
-  * the provenance guards — the archived Part II PDF must still hash to the value recorded in
-    `source-metadata.yaml`, so that hash is checked rather than decorative;
-  * the approval guards — this pack must NOT be loadable in verified mode, must not claim current
-    law, and must carry no reviewer or approval, because none exists. If someone fills those in
-    without an SME, these tests are what should stop them.
+  * the provenance guards — both archived original PDFs must still hash to the values recorded in
+    `source-metadata.yaml`, so those hashes are checked rather than decorative;
+  * the approval guards — valid source integrity must NOT promote this pack: it remains unavailable
+    in verified mode, must not claim current law, and carries no reviewer or approval because none
+    exists. If someone fills those in without an SME, these tests are what should stop them.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from app.config import PolicyMode
 from app.errors import PackNotVerifiedEligible, PolicyPackUnavailable
 from app.models.enums import PolicyPackStatus
 from app.policy.engine import evaluate
-from app.policy.loader import PENDING_ARCHIVAL, load_pack, load_test_cases
+from app.policy.loader import load_pack, load_test_cases
 
 PACKS_ROOT = Path(__file__).resolve().parents[4] / "policy_packs"
 PACK_ID = "in-dgca-car-3m4"
@@ -154,27 +154,57 @@ class TestSourceProvenance:
         assert part_ii["file_number"] == "23-16/2016-AED"
         assert part_ii["referenced_by"] == "car:3m4:rev4:3.3.5"
 
-    def test_the_archived_part_ii_pdf_matches_its_recorded_hash(self, source_metadata):
-        """The recorded hash is checked, so it cannot quietly stop describing the file."""
-        [part_ii] = source_metadata["referenced_instruments"]
-        archived = PACK_DIR / part_ii["local_path"]
-        assert archived.is_file(), "the referenced instrument must be archived in the pack"
+    @pytest.mark.parametrize(
+        ("metadata_key", "expected_sha256", "expected_size"),
+        [
+            (
+                None,
+                "3b4b50844edc6a46099cce3b94626d29b03f90ccc61318aa1aa2db6d0fa3ff4a",
+                285108,
+            ),
+            (
+                "part_ii",
+                "558ecee1d535b63023dd8bd37f0de10d08e7eb82a37ec48817ec1d613ff09281",
+                2754578,
+            ),
+        ],
+    )
+    def test_archived_pdf_matches_its_recorded_hash(
+        self, source_metadata, metadata_key, expected_sha256, expected_size
+    ):
+        """Both digests are recomputed from the archived PDF bytes on every run."""
+        metadata = source_metadata
+        if metadata_key == "part_ii":
+            [metadata] = source_metadata["referenced_instruments"]
+
+        archived = PACK_DIR / metadata["local_path"]
+        assert archived.is_file(), "the source PDF must be archived in the pack"
+        assert archived.read_bytes()[:5] == b"%PDF-"
 
         digest = hashlib.sha256(archived.read_bytes()).hexdigest()
-        assert digest == part_ii["content_sha256"]
-        assert archived.stat().st_size == part_ii["size_bytes"]
-        assert part_ii["archived"] is True
+        assert digest == metadata["content_sha256"] == expected_sha256
+        assert archived.stat().st_size == metadata["size_bytes"] == expected_size
+        assert metadata["archived"] is True
 
-    def test_the_archived_file_is_a_pdf(self, source_metadata):
+    def test_archived_pdfs_are_exact_copies_of_the_repository_originals(self, source_metadata):
         [part_ii] = source_metadata["referenced_instruments"]
-        assert (PACK_DIR / part_ii["local_path"]).read_bytes()[:5] == b"%PDF-"
+        pairs = [
+            (source_metadata, PACKS_ROOT / "D3M-M4(R4_Jan2023).pdf"),
+            (part_ii, PACKS_ROOT / "CAR 3M2 Feb26.pdf"),
+        ]
+        for metadata, original in pairs:
+            archived = PACK_DIR / metadata["local_path"]
+            assert original.is_file()
+            assert archived.read_bytes() == original.read_bytes()
 
-    def test_part_iv_is_honestly_recorded_as_unarchived(self, source_metadata, pack):
-        """Only extracted text was supplied, so no hash was invented to make verified pass."""
-        assert source_metadata["archived"] is False
-        assert source_metadata["content_sha256"] == PENDING_ARCHIVAL
-        assert pack.source_document_verified is False
-        assert pack.source_integrity_reason is not None
+    def test_primary_source_integrity_passes_without_promoting_the_pack(
+        self, source_metadata, pack
+    ):
+        assert source_metadata["archived"] is True
+        assert pack.source_document_verified is True
+        assert pack.source_integrity_reason is None
+        assert pack.status is PolicyPackStatus.official_guidance_dated
+        assert pack.verified_mode_eligible is False
 
     def test_a_supersession_check_is_recorded_for_both_documents(self, source_metadata):
         check = source_metadata["supersession_check"]
@@ -222,7 +252,8 @@ class TestApprovalIsGenuinelyPending:
         assert pack.verified_mode_eligible is False
 
     def test_it_may_not_be_called_current_law(self, pack):
-        """Two independent reasons: no SME review, and no archived primary document."""
+        """Archived sources do not replace status, currentness evidence or SME approval."""
+        assert pack.source_document_verified is True
         assert pack.may_be_called_current_law is False
 
     def test_verified_mode_refuses_it(self):
@@ -245,7 +276,8 @@ class TestApprovalIsGenuinelyPending:
         manifest = yaml.safe_load((PACK_DIR / "pack.yaml").read_text(encoding="utf-8"))
         blockers = " ".join(manifest["blocks_verified_mode_until"]).lower()
         assert "sme" in blockers
-        assert "sha-256" in blockers or "sha256" in blockers
+        assert "current revision" in blockers
+        assert "source.pdf" not in blockers
 
 
 # ------------------------------------------------- differences against the charter pack
