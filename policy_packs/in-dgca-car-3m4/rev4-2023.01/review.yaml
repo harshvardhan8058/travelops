@@ -1,172 +1,200 @@
 pack: in-dgca-car-3m4
 version: "rev4-2023.01"
 
-# ---------------------------------------------------------------------------
-# NOTHING HERE IS FILLED IN, AND THAT IS THE POINT.
-#
-# The encoding was produced from the primary document. It has NOT been reviewed by
-# an authorised aviation, legal or compliance SME. Filling any field below without
-# that review — including a placeholder name, a team member's name, or an
-# "approved by engineering" — is the single most damaging thing anyone could do to
-# this project's credibility, because `may_be_called_current_law` and
-# POLICY_MODE=verified both key off it.
-#
-# The loader enforces this: an `approved` pack without `reviewer_name` and
-# `approval` is refused with POLICY_PACK_UNAVAILABLE.
-# ---------------------------------------------------------------------------
-review_status: pending
-reviewer_name: null
-reviewer_role: null
+# PROJECT POLICY-PACK APPROVAL ONLY.
+# This records the project owner's explicit decision in the authenticated project session on
+# 2026-08-21. It is not DGCA endorsement, regulator approval, external legal advice, or proof
+# that these instruments remain current. Those distinctions are enforced by the false verified
+# eligibility flag and by tests.
+review_status: approved_for_project_use_with_limitations
+reviewer_name: "Project owner (project-provided approver)"
+reviewer_role: "Project owner and policy-pack approver"
 reviewer_organisation: null
-reviewed_at: null
-approval: null
+reviewed_at: 2026-08-21
+approval:
+  decision: approved_for_project_use_with_limitations
+  approved_by: "Project owner (project-provided approver)"
+  approved_at: 2026-08-21
+  scope: project_policy_artifact
+  permits:
+    - charter_mode_calculation_with_disclosed_operational_gates
+  does_not_assert:
+    - DGCA endorsement or approval
+    - external legal or aviation SME approval
+    - currentness or absence of supersession
+    - legal certainty for unresolved interpretations
+  verified_mode_eligible: false
+  basis: >-
+    Explicit project-owner approval to promote the pack as a project artifact while preserving
+    unresolved regulatory facts as fail-closed human-review requirements or accepted external
+    risk. Approval does not convert those unknowns into facts.
 
 reviewer_instructions: >-
-  For each rule in rules.yaml, confirm or correct four things: the clause reference, the
-  paraphrased interpretation, the input facts the rule requires, and the computed output.
-  Confirm the expected outcomes in test_cases.yaml. Mark each rule approved, corrected or
-  rejected in rule_signoff below. Where a provision is not expressible in the rule DSL, say so
-  rather than approving an approximation.
+  The project approval below covers use of the encoded rules with their runtime gates. It does
+  not answer RQ-3, RQ-4 or RQ-5 as legal interpretations and does not resolve RQ-9 currentness.
+  A future verified-mode promotion must supply authoritative evidence for those blockers and
+  create a new pack hash.
 
-# Questions where the encoding is a judgement call rather than a direct reading. Each names the
-# clause and the test case that depends on the answer.
 open_review_questions:
-
   - id: RQ-1
     clause: "3.4.3"
-    question: >-
-      Para 3.4.3 makes hotel accommodation available when total delay exceeds 24 hours, or
-      exceeds 6 hours for a flight scheduled to depart between 2000 and 0300 hrs. Unlike the
-      2019 charter booklet, it attaches NO advance-communication condition. Is the hotel
-      entitlement genuinely independent of whether the airline gave more than 24 hours' notice?
-    why_it_matters: >-
-      The charter pack encoded a >24h notice precondition and flagged it as RQ-3 there. The
-      primary text does not contain it. If this reading is right, the charter pack under-served
-      passengers and its rule should be corrected against this one.
-    status: unanswered
-    test_case: dgca_delay_night_window_hotel_without_advance_notice
+    affected_rule: delay.care.hotel.long_or_night_window
+    status: resolved_project_decision
+    decision: Keep the rule as encoded; no advance-notice condition applies to Para 3.4.3.
+    basis: The complete archived clause contains no communication or notice condition.
 
   - id: RQ-2
-    clause: "3.4.4"
-    question: >-
-      Para 3.4.4 says an operating airline is not obliged to adhere to Para 3.8 where the delay
-      is caused by extraordinary circumstances under Paras 1.4/1.5. Read literally this excuses
-      the CARE facilities themselves — meals and hotel — not merely a cash payment. Is that the
-      intended effect?
-    why_it_matters: >-
-      It is a materially harsher reading than the charter encoding, which preserved duty of care
-      through an exemption. Getting it wrong in either direction misstates what a passenger is
-      owed during a weather event, which is the demo scenario.
-    status: unanswered
-    test_case: dgca_delay_exemption_suppresses_facilities
+    clause: "3.4.4, 3.8.1"
+    affected_rule: delay.exemption.extraordinary_circumstances
+    status: resolved_project_decision
+    decision: Keep suppression of meals and hotel facilities as encoded.
+    basis: >-
+      Para 3.4.4 excuses adherence to Para 3.8; Para 3.8.1 contains meals and hotel. Para 3.4
+      contains no INR figure, percentage or cash-compensation provision.
 
   - id: RQ-3
     clause: "3.3.2"
-    question: >-
-      Para 3.3.2 offers the airline a choice: provide an alternate flight acceptable to the
-      passenger OR pay compensation in addition to a full refund. This pack computes the
-      compensation branch. Should an accepted alternate flight suppress the cash entitlement,
-      and if so what evidence establishes acceptance?
-    why_it_matters: Determines whether a cancellation figure is owed at all.
-    status: unanswered
+    affected_rules:
+      - cancellation.compensation.block_upto_60
+      - cancellation.compensation.block_60_to_120
+      - cancellation.compensation.block_over_120
+    status: operational_scope_required
+    operational_disposition: needs_human
+    required_fact: cancellation.compensation_branch_confirmed_by_project_reviewer
+    decision: >-
+      No regulatory interpretation is adopted. A cancellation cash rule may compute only after
+      a project reviewer explicitly confirms that the compensation branch is the branch being
+      evaluated. Missing confirmation is needs_human.
 
   - id: RQ-4
-    clause: "3.3.2, 3.2.2"
-    question: >-
-      Confirm the definitions of "booked one-way basic fare" and "airline fuel charge", and that
-      no other fare component enters the lesser-of and percentage calculations.
-    why_it_matters: Determines every cancellation and denied-boarding figure in the system.
-    status: unanswered
+    clause: "3.2.2, 3.3.2"
+    affected_rules:
+      - denied_boarding.alternate_within_24h
+      - denied_boarding.alternate_beyond_24h
+      - denied_boarding.no_alternate_taken
+      - cancellation.compensation.block_upto_60
+      - cancellation.compensation.block_60_to_120
+      - cancellation.compensation.block_over_120
+    status: operational_scope_required
+    operational_disposition: needs_human
+    required_fact: fare.component_definition_confirmed_by_project_reviewer
+    decision: >-
+      No definition is invented. Supplying two numbers does not prove their legal composition;
+      fare-based cash may compute only after a project reviewer confirms the supplied components
+      correspond to booked one-way basic fare and airline fuel charge.
 
   - id: RQ-5
     clause: "1.4, 1.5, 3.3.4, 3.4.4"
-    question: >-
-      What evidence is sufficient to establish that a circumstance was beyond the airline's
-      control AND could not have been avoided even if all reasonable measures had been taken?
-      Paras 1.4/1.5 name categories including meteorological conditions and ATC decisions, but
-      the "all reasonable measures" limb is a factual test.
-    why_it_matters: >-
-      The engine deliberately refuses to treat a weather trigger as an automatic exemption. The
-      evidence standard decides how often a real operator can satisfy it.
-    status: unanswered
-    test_case: dgca_cancellation_weather_without_reasonable_measures_evidence
+    affected_rules:
+      - cancellation.exemption.extraordinary_circumstances
+      - delay.exemption.extraordinary_circumstances
+    status: operational_scope_required
+    operational_disposition: needs_human
+    required_facts:
+      - cause_evidence.external_to_carrier
+      - cause_evidence.unavoidable_despite_reasonable_measures
+      - cause_evidence.evidence_refs
+    decision: >-
+      No universal evidentiary standard is invented. The exemption remains unavailable unless a
+      human evidence assessment supplies both legal limbs and evidence references; partial
+      evidence remains needs_human.
 
   - id: RQ-6
     clause: "3.6.1"
-    question: >-
-      Para 3.6.1 states a foreign carrier's compensation shall be as in its country-of-origin
-      regulations OR as given in Paras 3.2.2/3.3.2/3.5.1. Who chooses, and on what basis?
-    why_it_matters: >-
-      conflict_rules_defined is false, so this pack refuses rather than choosing. A reviewed
-      precedence rule would let it compute.
-    status: unanswered
+    affected_rule: foreign_carrier.compensation_basis
+    status: resolved_project_decision
+    decision: Preserve fail-closed deferral; no precedence between the two alternatives is chosen.
 
   - id: RQ-7
     clause: "3.2.3"
-    question: >-
-      Para 3.2.3 compensates a passenger on connecting flights via the first airline under
-      3.2.2, where denied boarding at the departure station caused arrival at the final
-      destination at least three hours late. Confirm the encoding is left informational rather
-      than computed, given it needs an arrival-delay fact and a cross-reference the rule DSL
-      does not express.
-    why_it_matters: An uncomputed provision must be visibly uncomputed, not silently absent.
-    status: unanswered
+    affected_rule: denied_boarding.connecting_flight_first_leg
+    status: resolved_project_decision
+    decision: Keep informational and out of MVP scope until the required arrival-delay fact and cross-rule support exist.
 
   - id: RQ-8
     clause: "3.5.1"
-    question: >-
-      Para 3.5.1 pays 75% of ticket cost including taxes for a domestic involuntary downgrade,
-      and 30/50/75% by distance band internationally. These are recorded as informational and
-      out of MVP scope because the rule DSL has no ticket-cost formula and no distance fact.
-      Confirm that omission is acceptable for now, or require the formula.
-    why_it_matters: >-
-      A provision that exists in law and not in the engine must be recorded as such, so nobody
-      concludes from silence that nothing is owed.
-    status: unanswered
-
-  # RQ-9 is not an interpretation question the repository can settle internally. It remains here
-  # so currentness and the cross-instrument revision issue cannot be quietly assumed away.
+    affected_rule: downgrading.involuntary.reimbursement
+    status: resolved_project_decision
+    decision: Keep informational and out of MVP scope; do not invent a ticket-cost formula or distance fact.
 
   - id: RQ-9
     clause: "1.1, 3.3.5"
-    question: >-
-      Is Rev. 4 dated 25 January 2023 still the current revision of Series M Part IV, and has it
-      been amended or superseded since? Related and more pressing: Part IV Rev. 4 (2023) defers
-      ticket refunds to Part II, and the Part II archived in this pack is Rev. 3 dated
-      24 February 2026 — a revision issued AFTER Part IV. A reviewer with portal access must
-      confirm on the day of promotion (a) that no later Part IV revision exists, and (b) that
-      Part IV's cross-reference is to be read as pointing at the 2026 Part II rather than at
-      whichever Part II was current in 2023.
-    why_it_matters: >-
-      This pack could not resolve it. The DGCA portal CAR listing is a JavaScript shell with no
-      server-rendered index and `digigov-portal/api/dgca/getCarList` returns 404, so revisions
-      could not be enumerated to prove currentness. Currentness was therefore NOT assumed: the
-      pack is `official_guidance_dated` and `may_be_called_current_law` is false. If a later
-      revision exists, every figure in rules.yaml is suspect.
-    status: unanswered
-    external_dependency: DGCA portal access on the day of promotion
+    status: accepted_external_risk
+    accepted_by: "Project owner (project-provided approver)"
+    accepted_at: 2026-08-21
+    acceptance_scope: project_policy_artifact_charter_mode_only
+    currentness_asserted: false
+    blocks_verified_mode: true
+    external_dependency: authoritative DGCA currentness and supersession evidence
+    decision: >-
+      The project accepts the disclosed risk for project-artifact use only. No assertion is made
+      that Part IV Rev. 4 is current or that its cross-reference conclusively selects Part II
+      Rev. 3 dated 24 February 2026.
 
-  # RQ-10 is intentionally absent. It asked a reviewer to confirm the archived Part IV PDF was
-  # byte-identical to the document they read, and it was retired when the team committed the
-  # original PDF and its SHA-256 was recorded and made test-verified. The number is not reused,
-  # so the history stays auditable rather than looking renumbered.
-
+  # RQ-10 was retired when the original Part IV PDF became byte-archived and hash-verified.
   - id: RQ-11
     clause: "car:3m2:rev3:3(e)"
-    question: >-
-      Part II Para 3(e) makes the 48-hour look-in option unavailable where departure is under
-      seven days for a domestic flight or fifteen days for an international flight. The rule
-      encodes the seven-day domestic threshold only, because the engine holds no
-      domestic/international fact on a cancellation or amendment `request`. Confirm that an
-      international look-in claim must be routed to a human, or specify the fact the engine should
-      require so the fifteen-day threshold can be applied deterministically.
-    why_it_matters: >-
-      As encoded, an international booking between seven and fifteen days from departure would be
-      treated as eligible for a free look-in cancellation when Para 3(e) says it is not. The rule
-      is therefore narrower than the clause in one direction and wider in another, and only a
-      reviewer can decide whether to gate it, widen the fact set, or accept the limitation.
-    status: unanswered
-    affected_rule: refund.look_in_option_48h
+    affected_rules:
+      - refund.look_in_option_48h
+      - refund.look_in_option.international_requires_human
+    status: resolved_project_decision
+    decision: >-
+      Keep deterministic evaluation to the domestic seven-day branch. Route the international
+      fifteen-day branch to explicit project human review rather than guessing.
 
-# Per-rule sign-off. Reviewer fills status and notes. Empty until reviewed.
-rule_signoff: []
+# Every rule is signed off for PROJECT use only, under the limitations above. This is not a
+# regulatory or external-SME sign-off. The IDs are checked against rules.yaml by tests.
+rule_signoff:
+  decision: approved_for_project_use_with_limitations
+  approved_by: "Project owner (project-provided approver)"
+  approved_at: 2026-08-21
+  regulatory_approval: false
+  applies_to_rule_ids:
+    - denied_boarding.volunteers_first
+    - denied_boarding.alternate_within_1h.no_compensation
+    - denied_boarding.alternate_within_24h
+    - denied_boarding.alternate_beyond_24h
+    - denied_boarding.no_alternate_taken
+    - denied_boarding.connecting_flight_first_leg
+    - cancellation.notice.two_weeks_or_more
+    - cancellation.notice.under_two_weeks_to_24h
+    - cancellation.compensation.block_upto_60
+    - cancellation.compensation.block_60_to_120
+    - cancellation.compensation.block_over_120
+    - cancellation.care.facilities_while_waiting
+    - cancellation.exemption.no_contact_info
+    - cancellation.exemption.extraordinary_circumstances
+    - delay.care.facilities.block_upto_150
+    - delay.care.facilities.block_150_to_300
+    - delay.care.facilities.block_over_300
+    - delay.domestic.over_6h.alternate_or_refund
+    - delay.care.hotel.long_or_night_window
+    - delay.exemption.extraordinary_circumstances
+    - delay.no_cash_compensation
+    - delay.burden_of_proof_on_airline
+    - downgrading.involuntary.reimbursement
+    - foreign_carrier.compensation_basis
+    - compensation.mode
+    - facilities.reduced_mobility
+    - general.alternate_airport_transfer_cost
+    - information.flights_and_reservations
+    - information.display_and_grievance
+    - redressal.escalation_path
+    - refund.timing.credit_card_7_days
+    - refund.timing.cash_immediate
+    - refund.timing.travel_agent_14_working_days
+    - refund.statutory_charges_always_refundable
+    - refund.look_in_option_48h
+    - refund.look_in_option.international_requires_human
+    - refund.credit_shell_is_passenger_option
+    - refund.cancellation_charge_ceiling
+    - refund.no_processing_charge
+    - refund.foreign_carrier_country_of_origin
+    - refund.name_correction_free_within_24h
+    - refund.medical_emergency
+    - refund.disclosure_obligations
+    - refund.applicability
+  conditions:
+    - RQ-3, RQ-4 and RQ-5 runtime human-review gates remain authoritative
+    - RQ-9 remains accepted external risk and blocks verified mode
+    - Part II visual-review limitation remains disclosed

@@ -1,21 +1,18 @@
-"""G1 review readiness — the artefacts a reviewer is handed must stay true.
+"""G1 limited-approval readiness — review artefacts must stay internally true.
 
-Archiving the two source PDFs closed the source-integrity precondition. It closed nothing else,
-and the danger now is the opposite of the earlier one: not a missing hash, but a pack that looks
-finished. These tests hold the review artefacts to the same standard as the rules.
+The two source PDFs are byte-verified and every rule remains mapped to its archived clause. The
+project owner has approved the pack only as a project artifact with explicit operational gates;
+that approval is not DGCA endorsement, external SME sign-off, proof of currentness, or permission
+to load the pack in verified mode.
 
-Three things are enforced:
+This suite enforces three boundaries:
 
-  * `clause-verification.yaml` describes every rule in `rules.yaml`, exactly once, and its claim
-    about each rule is no stronger than the archived document supports. Part II is a scan with no
-    text layer, so a rule reading Part II may never be recorded as machine-verified.
-  * `review-readiness.md` and `review.yaml` agree on which questions are open. A reviewer must not
-    be able to read a summary that has drifted from the authoritative record.
-  * verification is not approval. Source integrity now passes, so these assert that the pack still
-    refuses verified mode and still may not be called current law.
+  * `clause-verification.yaml` describes every rule exactly once and makes no machine-verification
+    claim for scanned Part II;
+  * `review-readiness.md`, `review.yaml`, the runtime gates, and per-rule sign-off agree;
+  * approved project status cannot imply current-law standing while verified eligibility is false.
 
-Deliberately free of any PDF library: the extraction was performed against the archived bytes and
-its findings were written down, so this suite checks the record rather than re-running the tool.
+Deliberately free of any PDF library: the extraction findings are checked as a durable record.
 """
 
 from __future__ import annotations
@@ -99,9 +96,9 @@ class TestClauseVerificationCoversEveryRule:
         summary = verification["summary"]
         text = sum(1 for e in entries if e["verification"] == TEXT_VERIFIED)
         visual = sum(1 for e in entries if e["verification"] == VISUAL_REQUIRED)
-        assert summary[TEXT_VERIFIED] == text
-        assert summary[VISUAL_REQUIRED] == visual
-        assert text + visual == summary["rules_total"] == len(entries)
+        assert summary[TEXT_VERIFIED] == text == 30
+        assert summary[VISUAL_REQUIRED] == visual == 14
+        assert text + visual == summary["rules_total"] == len(entries) == 44
 
     def test_no_clause_ref_or_figure_is_left_unresolved(self, verification):
         assert verification["summary"]["clause_refs_unresolved"] == 0
@@ -200,28 +197,41 @@ class TestReviewReadinessMatchesReviewYaml:
         assert "RQ-10" not in ids, "RQ-10 was retired; reusing the number hides the history"
         assert "RQ-11" in ids
 
-    def test_every_question_is_still_unanswered(self, review):
-        for question in review["open_review_questions"]:
-            assert question["status"] == "unanswered", question["id"]
+    def test_question_dispositions_match_limited_approval(self, review):
+        dispositions = {
+            question["id"]: question["status"] for question in review["open_review_questions"]
+        }
+        assert dispositions == {
+            "RQ-1": "resolved_project_decision",
+            "RQ-2": "resolved_project_decision",
+            "RQ-3": "operational_scope_required",
+            "RQ-4": "operational_scope_required",
+            "RQ-5": "operational_scope_required",
+            "RQ-6": "resolved_project_decision",
+            "RQ-7": "resolved_project_decision",
+            "RQ-8": "resolved_project_decision",
+            "RQ-9": "accepted_external_risk",
+            "RQ-11": "resolved_project_decision",
+        }
 
     def test_every_question_names_a_clause(self, review):
         for question in review["open_review_questions"]:
             assert question.get("clause"), question["id"]
 
-    def test_questions_naming_a_rule_name_one_that_exists(self, review, rules):
+    def test_questions_naming_rules_name_ones_that_exist(self, review, rules):
         known = {rule["id"] for rule in rules}
         for question in review["open_review_questions"]:
-            for key in ("affected_rule", "test_case"):
-                value = question.get(key)
-                if key == "affected_rule" and value:
-                    assert value in known, f"{question['id']} names unknown rule {value}"
+            named = []
+            if question.get("affected_rule"):
+                named.append(question["affected_rule"])
+            named.extend(question.get("affected_rules") or [])
+            for rule_id in named:
+                assert rule_id in known, f"{question['id']} names unknown rule {rule_id}"
 
-    def test_the_promotion_blockers_agree_on_the_question_count(self, review):
-        """`pack.yaml` tells a reviewer how many questions to expect; it must not drift."""
+    def test_verified_blockers_name_only_the_unresolved_rqs(self, review):
         blockers = " ".join(_yaml("pack.yaml")["blocks_verified_mode_until"])
-        count = len(review["open_review_questions"])
-        assert "RQ-1 to RQ-9 and RQ-11" in blockers
-        assert count == 10, f"the blocker text names ten questions but review.yaml has {count}"
+        assert {"RQ-3", "RQ-4", "RQ-5", "RQ-9"} == set(re.findall(r"\bRQ-\d+\b", blockers))
+        assert len(review["open_review_questions"]) == 10
 
 
 class TestNoDanglingReviewReferences:
@@ -243,16 +253,16 @@ class TestNoDanglingReviewReferences:
         assert "RQ-9" not in note
 
 
-# ------------------------------------------------- verification is not approval
+# ------------------------------------------ project approval is not verified standing
 
 
-class TestReadinessIsNotApproval:
+class TestLimitedApprovalIsNotVerifiedStanding:
     def test_source_integrity_passes_now(self, pack):
         assert pack.source_document_verified is True
         assert pack.source_integrity_reason is None
 
-    def test_and_the_pack_is_still_not_verified_eligible(self, pack):
-        assert pack.status is PolicyPackStatus.official_guidance_dated
+    def test_project_approval_does_not_make_the_pack_verified_eligible(self, pack):
+        assert pack.status is PolicyPackStatus.approved
         assert pack.verified_mode_eligible is False
         assert pack.may_be_called_current_law is False
 
@@ -266,15 +276,58 @@ class TestReadinessIsNotApproval:
             )
         assert raised.value.code == "PACK_NOT_VERIFIED_ELIGIBLE"
 
-    def test_the_remaining_preconditions_are_the_human_ones(self, review):
-        """Exactly what the loader checks, and nothing this pack cannot honestly claim."""
-        assert review["review_status"] == "pending"
-        assert review["reviewer_name"] is None
-        assert review["approval"] is None
-        assert review["rule_signoff"] == []
+    def test_project_approval_identity_and_scope_are_explicit(self, review):
+        assert review["review_status"] == "approved_for_project_use_with_limitations"
+        assert review["reviewer_name"] == "Project owner (project-provided approver)"
+        assert review["approval"]["scope"] == "project_policy_artifact"
+        assert review["approval"]["verified_mode_eligible"] is False
+        assert str(review["approval"]["approved_at"]) == "2026-08-21"
 
-    def test_the_readiness_note_does_not_claim_approval(self, readiness):
+    def test_all_rules_are_signed_off_only_for_limited_project_use(self, review, rules):
+        signoff = review["rule_signoff"]
+        ids = signoff["applies_to_rule_ids"]
+        assert len(ids) == len(set(ids)) == 44
+        assert set(ids) == {rule["id"] for rule in rules}
+        assert signoff["decision"] == "approved_for_project_use_with_limitations"
+        assert signoff["regulatory_approval"] is False
+
+    def test_operational_questions_are_fail_closed(self, review):
+        by_id = {question["id"]: question for question in review["open_review_questions"]}
+        assert by_id["RQ-3"]["required_fact"] == (
+            "cancellation.compensation_branch_confirmed_by_project_reviewer"
+        )
+        assert by_id["RQ-4"]["required_fact"] == (
+            "fare.component_definition_confirmed_by_project_reviewer"
+        )
+        assert by_id["RQ-5"]["required_facts"] == [
+            "cause_evidence.external_to_carrier",
+            "cause_evidence.unavoidable_despite_reasonable_measures",
+            "cause_evidence.evidence_refs",
+        ]
+        assert all(
+            by_id[rq]["operational_disposition"] == "needs_human" for rq in ("RQ-3", "RQ-4", "RQ-5")
+        )
+
+    def test_rq_9_is_accepted_risk_without_a_currentness_claim(self, review):
+        rq_9 = next(q for q in review["open_review_questions"] if q["id"] == "RQ-9")
+        assert rq_9["status"] == "accepted_external_risk"
+        assert rq_9["acceptance_scope"] == "project_policy_artifact_charter_mode_only"
+        assert rq_9["currentness_asserted"] is False
+        assert rq_9["blocks_verified_mode"] is True
+
+    def test_readiness_note_draws_the_non_regulatory_boundary(self, readiness):
         lowered = readiness.lower()
-        assert "not reviewed, not approved, and not current law" in lowered
-        for forbidden in ("approved by", "signed off by", "sme approval granted"):
+        for required in (
+            "approved only as a project policy artifact with limitations",
+            "not dgca-approved",
+            "not regulator-endorsed",
+            "not verified as current law",
+        ):
+            assert required in lowered
+        for forbidden in (
+            "approved by dgca",
+            "dgca endorsement granted",
+            "regulatory approval granted",
+            "external sme approval granted",
+        ):
             assert forbidden not in lowered

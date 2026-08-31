@@ -91,6 +91,15 @@ class TestTriStateConditions:
         )
         assert value is False
 
+    @pytest.mark.parametrize("value", [False, None])
+    def test_confirmation_requires_literal_true(self, value):
+        outcome, unknowns, _ = evaluate_condition(
+            {"fact": "review.confirmed", "op": "confirmed"},
+            {"review": {"confirmed": value}},
+        )
+        assert outcome is UNKNOWN
+        assert unknowns == ["review.confirmed"]
+
     def test_conjunction_is_false_when_one_conjunct_is_false(self):
         """This is what stops a cancellation rule blocking a delay evaluation."""
         node = {
@@ -520,6 +529,20 @@ class TestProvenance:
 
     def test_a_dated_pack_may_never_be_presented_as_current_law(self, pack):
         assert evaluate(facts=_facts(), pack=pack).may_be_presented_as_current_law is False
+
+    def test_project_approval_without_verified_eligibility_is_not_current_law(self, pack):
+        limited = pack.model_copy(
+            update={
+                "status": "approved",
+                "verified_mode_eligible": False,
+                "source_document_verified": True,
+            }
+        )
+        result = evaluate(facts=_facts(), pack=limited)
+        assert result.pack_status == "approved"
+        assert result.verified_mode_eligible is False
+        assert result.source_document_verified is True
+        assert result.may_be_presented_as_current_law is False
 
     def test_every_fired_rule_contributes_its_clause_refs(self, pack):
         result = evaluate(facts=_facts(), pack=pack)

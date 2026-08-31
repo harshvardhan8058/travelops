@@ -1,133 +1,70 @@
-# G1 review readiness — DGCA CAR Section 3, Series 'M', Parts IV and II
+# G1 limited project approval — DGCA CAR Section 3, Series 'M', Parts IV and II
 
-This pack is **ready to be reviewed**. It is not reviewed, not approved, and not current law.
-
-`review.yaml` is the authoritative record of what is open. This file is a reviewer's map onto it:
-it separates what the documents establish from what nobody has yet decided, so a reviewer never
-has to guess which is which.
+This pack is **approved only as a project policy artifact with limitations**. It is not DGCA-approved, not regulator-endorsed, not external legal or aviation-SME advice, and not verified as current law. `review.yaml` is the authoritative approval and question record.
 
 | Field | Value |
 | --- | --- |
-| `status` | `official_guidance_dated` |
+| `status` | `approved` |
 | `verified_mode_eligible` | `false` |
-| `review_status` | `pending` |
-| `pack_hash` | `7c45e7b15ae54f6e` |
+| `review_status` | `approved_for_project_use_with_limitations` |
+| `pack_hash` | `c0e80df6298080e6` |
 | `source_document_verified` | `true` |
 | `may_be_called_current_law` | `false` |
+| Project approver | `Project owner (project-provided approver)` |
+| Approval date and scope | `2026-08-21`; `project_policy_artifact` |
 
-## 1. Facts established by the archived DGCA documents
+## 1. Archived-source verification
 
-Machine-checked against the archived bytes in this directory. The per-rule record is
-`clause-verification.yaml`; the counts below come from it.
+The real archived PDF bytes and provenance are unchanged:
 
-| | Count |
-| --- | --- |
-| Rules total | 43 |
-| Citing Part IV, clause and figures located in the archived text layer | 30 |
-| Citing Part II, clause-mapped but **not** machine-verifiable | 13 |
-| Computational rules lacking a clause reference | 0 |
+| Source | SHA-256 | Bytes | Verification record |
+| --- | --- | ---: | --- |
+| Part IV `source.pdf` | `3b4b50844edc6a46099cce3b94626d29b03f90ccc61318aa1aa2db6d0fa3ff4a` | 285108 | text layer available |
+| Part II `source-part-ii.pdf` | `558ecee1d535b63023dd8bd37f0de10d08e7eb82a37ec48817ec1d613ff09281` | 2754578 | scan; visual review required |
 
-Part IV (`source.pdf`) carries a real text layer, so every clause number and every literal figure
-was confirmed by string match against the archived file. Part II (`source-part-ii.pdf`) is a scan
-with no text layer, so its 13 rules are mapped to clauses but **must be read visually** by the
-reviewer. That asymmetry is a property of the documents, not a gap in the work.
+`clause-verification.yaml` covers all 44 rules exactly once: 30 Part IV rules are recorded as `text_layer_verified`; 14 Part II rules are `visual_review_required`; no computational rule lacks a clause reference. The new international look-in guard cites the same Part II Para 3(e) branch as the domestic rule and does not invent an entitlement.
 
-Figures confirmed verbatim from the archived Part IV bytes:
+Source integrity proves that the archived bytes match their recorded hashes. It does **not** prove currentness, absence of supersession, DGCA endorsement, or legal correctness of an interpretation.
 
-- **Denied boarding, Para 3.2.2** — no compensation if the alternate departs within one hour;
-  otherwise 200% of booked one-way basic fare plus airline fuel charge capped at INR 10,000
-  (alternate within 24 h), 400% capped at INR 20,000 (alternate beyond 24 h), and 400% capped at
-  INR 20,000 plus full ticket refund where no alternate is taken.
-- **Cancellation, Para 3.3.2** — the lesser of INR 5,000 / 7,500 / 10,000 and basic fare plus fuel
-  charge, at block times up to 1 h, over 1 h to 2 h, and over 2 h.
-- **Delay, Para 3.4.1** — facilities at 2 h for block time up to 2½ h, 3 h for over 2½ h to 5 h,
-  4 h otherwise. **Para 3.4.2** — domestic delay over 6 h gives a choice of an alternate within
-  6 hours or a full refund. **Para 3.4.3** — hotel under Para 3.8.1(b) when total delay exceeds
-  24 h, or exceeds 6 h for a departure scheduled between 2000 and 0300 hrs.
-- **Downgrading, Para 3.5.1** — 75% of ticket cost including taxes domestically; 30% / 50% / 75%
-  internationally at the 1500 km and 3500 km bands.
-- **Alternate airport, Para 3.10.1** — the airline bears the transfer cost unless it gave at least
-  6 hours' notice.
+## 2. RQ dispositions
 
-Two findings worth the reviewer's attention, because both were verified as **negative** facts —
-things the regulation does *not* say:
-
-- **Para 3.4.3 contains no advance-notice condition at all.** The full clause was extracted and
-  read; there is no communication precondition on hotel accommodation. The 2019 booklet the
-  charter pack was built from described one. This is RQ-1.
-- **The entire Para 3.4 delay section contains no INR figure, no percentage and not one
-  occurrence of the word "compensation."** So when Para 3.4.4 excuses adherence to "Para 3.8", it
-  cannot be excusing a cash payment — there is none in Para 3.4 to excuse. It is excusing the
-  Para 3.8.1 facilities themselves: meals and refreshments, and hotel including transfers. This is
-  RQ-2, and it is materially harsher than the charter encoding.
-
-## 2. Unresolved supersession and currentness questions
-
-Neither can be settled from inside this repository. Both are recorded as **unanswered**.
-
-| Question | What is unresolved | Why the repository cannot close it |
-| --- | --- | --- |
-| RQ-9 | Whether Rev. 4 of 25 Jan 2023 is still the current revision of Part IV | The DGCA portal CAR listing is a JavaScript shell with no server-rendered index, and `digigov-portal/api/dgca/getCarList` returns 404, so revisions cannot be enumerated |
-| RQ-9 | How Para 3.3.5's refund cross-reference should be read, given the archived Part II (Rev. 3, 24 Feb 2026) **postdates** Part IV Rev. 4 (25 Jan 2023) | A cross-instrument question about legislative intent, not a lookup |
-
-Absence of evidence of a later revision is recorded in `source-metadata.yaml` under
-`supersession_check`, alongside its own caveat. It is **not** treated as proof of currentness, and
-that is why `may_be_called_current_law` is `false` regardless of source integrity being verified.
-
-## 3. Human SME / legal decisions required
-
-| RQ | Affected rule(s) | Source clause | Decision required | Status |
+| RQ | Affected rule(s) | Source clause | Project disposition | Runtime or scope consequence |
 | --- | --- | --- | --- | --- |
-| RQ-1 | `delay.care.hotel.long_or_night_window` | `3.4.3` | Is hotel accommodation genuinely independent of advance notice? If yes, the charter pack under-served passengers and should be corrected against this pack | unanswered |
-| RQ-2 | `delay.exemption.extraordinary_circumstances` | `3.4.4`, `1.4`, `1.5` | Does the exemption suppress the Para 3.8 facilities themselves — meals *and* hotel — or only a cash payment? | unanswered |
-| RQ-3 | `cancellation.compensation.block_upto_60`, `.block_60_to_120`, `.block_over_120` | `3.3.2` | Para 3.3.2 is disjunctive: alternate flight **or** compensation plus refund. Should an accepted alternate suppress the cash entitlement, and what evidence establishes acceptance? | unanswered |
-| RQ-4 | all six `denied_boarding.*` and `cancellation.compensation.*` cash rules | `3.2.2`, `3.3.2` | Confirm the definitions of "booked one-way basic fare" and "airline fuel charge", and that no other fare component enters the lesser-of and percentage calculations | unanswered |
-| RQ-5 | `cancellation.exemption.extraordinary_circumstances`, `delay.exemption.extraordinary_circumstances` | `1.4`, `1.5`, `3.3.4`, `3.4.4` | What evidence satisfies the "could not have been avoided even if all reasonable measures had been taken" limb? The engine refuses to treat a weather trigger as an automatic exemption | unanswered |
-| RQ-6 | `foreign_carrier.compensation_basis` | `3.6.1` | Para 3.6.1 offers country-of-origin regulations **or** this CAR's figures without stating precedence. Who chooses, on what basis? | unanswered |
-| RQ-7 | `denied_boarding.connecting_flight_first_leg` | `3.2.3` | Confirm the provision stays informational and uncomputed, given it needs an arrival-delay fact and a rule-to-rule cross-reference the DSL cannot express | unanswered |
-| RQ-8 | `downgrading.involuntary.reimbursement` | `3.5.1` | Accept the omission, or require a ticket-cost formula and a sector-distance fact so the 75% / 30-50-75% bands can compute | unanswered |
-| RQ-9 | every rule in the pack | `1.1`, `3.3.5` | Currentness and the Part IV → later Part II cross-reference (section 2 above) | unanswered |
-| RQ-11 | `refund.look_in_option_48h` | `car:3m2:rev3:3(e)` | The rule encodes only the seven-day domestic threshold. Route international look-in claims to a human, or specify the fact that lets the fifteen-day threshold compute | unanswered |
+| RQ-1 | `delay.care.hotel.long_or_night_window` | `3.4.3` | `resolved_project_decision` | Keep the encoded hotel rule without an advance-notice condition; the archived clause contains none. |
+| RQ-2 | `delay.exemption.extraordinary_circumstances` | `3.4.4`, `3.8.1` | `resolved_project_decision` | Keep suppression of the Para 3.8 meals and hotel facilities when the exemption is fully evidenced. |
+| RQ-3 | three `cancellation.compensation.*` cash rules | `3.3.2` | `operational_scope_required` | No alternate-versus-compensation interpretation is invented. Missing `cancellation.compensation_branch_confirmed_by_project_reviewer` returns `needs_human`. |
+| RQ-4 | six denied-boarding/cancellation cash rules | `3.2.2`, `3.3.2` | `operational_scope_required` | No fare-component definition is invented. Missing `fare.component_definition_confirmed_by_project_reviewer` returns `needs_human`. |
+| RQ-5 | cancellation and delay extraordinary-circumstance exemptions | `1.4`, `1.5`, `3.3.4`, `3.4.4` | `operational_scope_required` | No universal evidence standard is invented. Partial evidence across `external_to_carrier`, `unavoidable_despite_reasonable_measures`, and `evidence_refs` returns `needs_human`. |
+| RQ-6 | `foreign_carrier.compensation_basis` | `3.6.1` | `resolved_project_decision` | Preserve fail-closed jurisdiction deferral; choose no precedence. |
+| RQ-7 | `denied_boarding.connecting_flight_first_leg` | `3.2.3` | `resolved_project_decision` | Keep informational and outside MVP computation. |
+| RQ-8 | `downgrading.involuntary.reimbursement` | `3.5.1` | `resolved_project_decision` | Keep informational and outside MVP computation; invent no ticket-cost formula or distance fact. |
+| RQ-9 | every rule | `1.1`, `3.3.5` | `accepted_external_risk` | Charter-mode project use accepts the disclosed risk only. `currentness_asserted: false`; this item blocks verified mode. |
+| RQ-11 | domestic and international `refund.look_in_option*` rules | Part II `3(e)` | `resolved_project_decision` | Domestic seven-day branch remains deterministic; international fifteen-day branch requires `request.international_look_in_decision_confirmed_by_project_reviewer`. |
 
-RQ-10 is deliberately absent. It asked a reviewer to confirm the archived Part IV PDF matched the
-document they read, and it was retired when the original PDF was committed and its SHA-256 became
-test-verified. The number is not reused so the history stays auditable.
+RQ-10 remains retired because the original Part IV PDF is byte-archived and hash-verified; its identifier is not reused.
 
-## 4. What an SME must supply to satisfy the loader
+## 3. Exact verified-mode blockers
 
-The loader enforces six preconditions before `POLICY_MODE=verified` will load this pack. Three are
-already satisfied by the encoding; three require human evidence and nothing else.
+`status: approved` records the project owner's artifact approval. It does not make the pack verified-eligible. `verified_mode_eligible` remains `false` for these exact reasons:
 
-| # | Precondition | Enforced by | State |
-| --- | --- | --- | --- |
-| 1 | `pack.yaml` `status: approved` | `_reject_for_mode` → `PACK_NOT_VERIFIED_ELIGIBLE` | **human decision** |
-| 2 | `pack.yaml` `verified_mode_eligible: true` | `_reject_for_mode` → `PACK_NOT_VERIFIED_ELIGIBLE` | **human decision** |
-| 3 | `review.yaml` `reviewer_name` **and** `approval` both non-empty | `_validate_rules` → `POLICY_PACK_UNAVAILABLE` | **human evidence** |
-| 4 | Archived source verified: `archived: true`, `content_sha256` lowercase 64-hex, `local_path` present on disk, digest matches | `verify_source_document` → `SOURCE_DOCUMENT_UNVERIFIED` | satisfied |
-| 5 | Every computational rule carries `source_clause_refs` | `_validate_rules` → `POLICY_PACK_UNAVAILABLE` | satisfied, 0 uncited |
-| 6 | No rule marked `approved` inside a non-approved pack; no `superseded_suspected` rule left un-excluded | `_validate_rules` → `POLICY_PACK_UNAVAILABLE` | satisfied, 0 and 0 |
+1. **RQ-3 — unresolved external interpretation:** no external aviation/legal SME decision establishes when an accepted alternate suppresses or selects the Para 3.3.2 compensation branch. The project gate permits case-by-case charter-mode review but does not resolve the interpretation.
+2. **RQ-4 — unresolved external definitions:** no external aviation/legal SME evidence defines the legally valid composition of “booked one-way basic fare” and “airline fuel charge.” The project gate validates case inputs operationally but does not create those definitions.
+3. **RQ-5 — unresolved external evidentiary standard:** no external aviation/legal SME standard establishes what proves that an event could not have been avoided despite reasonable measures. The existing evidence facts fail closed but are not a legal standard.
+4. **RQ-9 — authoritative currentness/supersession evidence absent:** no authoritative DGCA evidence establishes that Part IV Rev. 4 remains current or conclusively resolves the Para 3.3.5 cross-reference after later Part II Rev. 3. The project accepted this external risk only for charter-mode artifact use and explicitly did not assert currentness.
+5. After those facts exist, a later explicit project decision and new pack hash must set `verified_mode_eligible: true`.
 
-Precisely what the loader reads, and what it does not:
+The loader therefore rejects this pack in `POLICY_MODE=verified` with `PACK_NOT_VERIFIED_ELIGIBLE`. The current-law standing check also remains false because it requires all three conditions: approved status, verified eligibility, and verified source bytes.
 
-- It checks **only** `reviewer_name` and `approval`. `reviewer_role`, `reviewer_organisation`,
-  `reviewed_at` and `rule_signoff` are this pack's own conventions, enforced by its tests rather
-  than by the loader. A reviewer should still complete them — but nobody should believe the loader
-  is checking them.
-- `may_be_called_current_law` is `status == approved` **and** `verified_mode_eligible` **and**
-  `source_document_verified`. The third is now true, so the property turns on items 1–3 alone.
+## 4. Promotion controls now satisfied
 
-Two consequences of promotion that are easy to miss:
+| Control | State |
+| --- | --- |
+| Project artifact approval recorded with non-regulatory scope | satisfied |
+| `reviewer_name` and `approval` non-empty for approved status | satisfied |
+| Rule sign-off IDs exactly cover all 44 rules | satisfied for project use with limitations; `regulatory_approval: false` |
+| Archived source path, size, SHA-256 and byte integrity | satisfied for both PDFs |
+| Every computational rule carries `source_clause_refs` | satisfied |
+| No unexcluded `superseded_suspected` rule | satisfied |
+| Verified eligibility | intentionally unsatisfied for the blockers in section 3 |
 
-- **Signing off changes the pack identity.** `review.yaml` is inside the pack hash, so recording a
-  reviewer moves `pack_hash` away from `7c45e7b15ae54f6e`. Evaluations pinned to the current hash
-  will refer to the pre-sign-off pack. Archiving the PDF did *not* have this effect, because
-  `source-metadata.yaml` is deliberately outside the hash.
-- **Some tests are meant to fail at that moment.**
-  `tests/unit/policy/test_dgca_car_pack.py::TestApprovalIsGenuinelyPending` asserts that
-  `review_status` is `pending`, that `reviewer_name` and `approval` are null, and that
-  `rule_signoff` is empty. They exist to stop an accidental or unauthorised sign-off. When a real
-  SME signs off, those assertions must be updated deliberately, in the same change, by someone who
-  can point at the approval.
-
-Answering RQ-1 through RQ-11 is not the same as satisfying items 1–3. A reviewer could answer every
-question and still decline to approve.
+Any future verified promotion must add real evidence rather than relabel this approval. It must not replace the project approver with an invented regulator or SME identity and must not describe this project decision as DGCA endorsement or legal certainty.

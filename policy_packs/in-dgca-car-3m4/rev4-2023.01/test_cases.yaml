@@ -28,7 +28,7 @@ cases:
       operating_carrier: { id: AI }
       event: { type: denied_boarding }
       alternate_flight: { minutes_after_original_scheduled: 780 }
-      fare: { one_way_basic_fare_inr: 3000, airline_fuel_charge_inr: 500 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 3000, airline_fuel_charge_inr: 500 }
       passenger: { opted_for_alternate: true }
     expect:
       cash_inr: 7000
@@ -40,7 +40,7 @@ cases:
       operating_carrier: { id: AI }
       event: { type: denied_boarding }
       alternate_flight: { minutes_after_original_scheduled: 600 }
-      fare: { one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
       passenger: { opted_for_alternate: true }
     expect:
       cash_inr: 10000
@@ -53,7 +53,7 @@ cases:
       operating_carrier: { id: AI }
       event: { type: denied_boarding }
       alternate_flight: { minutes_after_original_scheduled: 1800 }
-      fare: { one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
       passenger: { opted_for_alternate: true }
     expect:
       cash_inr: 20000
@@ -66,7 +66,7 @@ cases:
       operating_carrier: { id: AI }
       event: { type: denied_boarding }
       passenger: { opted_for_alternate: false }
-      fare: { one_way_basic_fare_inr: 2000, airline_fuel_charge_inr: 500 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 2000, airline_fuel_charge_inr: 500 }
     expect:
       cash_inr: 10000
       plus: full_ticket_value_refund
@@ -81,9 +81,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 95 }
-      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
       passenger:
         contact_info_provided_at_booking: true
         reported_for_original_flight: true
@@ -108,9 +108,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 200 }
-      fare: { one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
       passenger: { contact_info_provided_at_booking: true }
     expect:
       cash_inr: 10000
@@ -122,9 +122,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 0 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 55 }
-      fare: { one_way_basic_fare_inr: 9000, airline_fuel_charge_inr: 900 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 9000, airline_fuel_charge_inr: 900 }
       passenger: { contact_info_provided_at_booking: true }
     expect:
       cash_inr: 5000
@@ -149,9 +149,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 200 }
-      fare: { one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
       passenger: { contact_info_provided_at_booking: false }
     expect:
       cash_inr: 0
@@ -166,9 +166,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 95 }
-      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
       passenger:
         contact_info_provided_at_booking: true
         reported_for_original_flight: true
@@ -194,9 +194,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 95 }
-      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
       passenger: { contact_info_provided_at_booking: true }
       cause_evidence:
         operational_cause: meteorological
@@ -353,7 +353,7 @@ cases:
       amendment window is 48 hours, not 24, and applies only to a direct website booking at least
       seven days before departure.
     facts:
-      itinerary: { origin_country: IN, destination_country: IN }
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
       operating_carrier: { id: AI }
       event: { type: passenger_cancellation }
       request: { type: cancellation, minutes_after_booking: 600 }
@@ -364,7 +364,7 @@ cases:
 
   - id: dgca_refund_look_in_expired_after_48h
     facts:
-      itinerary: { origin_country: IN, destination_country: IN }
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
       operating_carrier: { id: AI }
       event: { type: passenger_cancellation }
       request: { type: cancellation, minutes_after_booking: 3000 }
@@ -376,7 +376,7 @@ cases:
   - id: dgca_refund_look_in_unavailable_close_to_departure
     description: Part II Para 3(e) — under seven days to departure, the option is unavailable.
     facts:
-      itinerary: { origin_country: IN, destination_country: IN }
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
       operating_carrier: { id: AI }
       event: { type: passenger_cancellation }
       request: { type: cancellation, minutes_after_booking: 600 }
@@ -430,14 +430,52 @@ cases:
       rules_fired: [refund.name_correction_free_within_24h]
 
   # ------------------------------------------------------------- fail-closed behaviour
+  - id: dgca_cancellation_without_project_branch_decision_blocks
+    description: RQ-3 — no interpretation is invented; the compensation branch needs review.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      missing_facts: [cancellation.compensation_branch_confirmed_by_project_reviewer]
+
+  - id: dgca_cash_without_fare_definition_review_blocks
+    description: RQ-4 — supplied numbers do not prove their legal composition.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 780 }
+      fare: { one_way_basic_fare_inr: 3000, airline_fuel_charge_inr: 500 }
+    expect:
+      decision: needs_human
+      missing_facts: [fare.component_definition_confirmed_by_project_reviewer]
+
+  - id: dgca_international_look_in_requires_project_review
+    description: RQ-11 — international fifteen-day branch is routed to a human.
+    facts:
+      itinerary: { origin_country: IN, destination_country: SG, is_domestic: false }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      request: { type: cancellation, minutes_after_booking: 600 }
+      booking: { channel: airline_website, days_before_first_leg: 20 }
+    expect:
+      decision: needs_human
+      missing_facts: [request.international_look_in_decision_confirmed_by_project_reviewer]
+
   - id: dgca_missing_block_time_blocks_cancellation_cash
     description: Para 3.3.2 bands on block time. Without it the engine must not guess a band.
     facts:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
-      fare: { one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
       passenger: { contact_info_provided_at_booking: true }
     expect:
       decision: needs_human
@@ -448,8 +486,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: IN }
       operating_carrier: { id: AI, is_foreign: false }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true }
       passenger: { contact_info_provided_at_booking: true }
     expect:
       decision: needs_human
@@ -464,9 +503,9 @@ cases:
       itinerary: { origin_country: IN, destination_country: SG }
       operating_carrier: { id: SQ, is_foreign: true, country: SG }
       event: { type: cancellation, notice_minutes: 600 }
-      cancellation: { notice_obligation_met: false }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
       flight: { block_time_minutes: 200 }
-      fare: { one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
       passenger: { contact_info_provided_at_booking: true }
     expect:
       decision: needs_human

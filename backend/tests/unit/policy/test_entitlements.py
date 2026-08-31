@@ -89,6 +89,25 @@ class TestTheNumberArrivesWithItsDerivation:
         assert result.pack_ui_label == pack.ui_label
         assert result.policy_mode == "charter"
 
+    def test_project_approval_without_verified_eligibility_stays_non_current(self, pack):
+        limited = pack.model_copy(
+            update={
+                "status": "approved",
+                "verified_mode_eligible": False,
+                "source_document_verified": True,
+            }
+        )
+        result = calculate(
+            facts=FULL_FACTS,
+            pack=limited,
+            settings=_settings(),
+            resolve_applicability=False,
+        )
+        assert result.pack_status == "approved"
+        assert result.verified_mode_eligible is False
+        assert result.source_document_verified is True
+        assert result.may_be_presented_as_current_law is False
+
     def test_applicability_is_reported_alongside_the_figure(self, pack):
         result = calculate(facts=FULL_FACTS, pack=pack, settings=_settings())
         assert result.applicability

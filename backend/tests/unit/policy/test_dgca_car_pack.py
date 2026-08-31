@@ -6,12 +6,12 @@ Series 'M' Part II Rev. 3 (24 Feb 2026, effective 26 Mar 2026).
 
 Three groups of assertion:
 
-  * the pack's own 32 executable cases, run through the real engine;
+  * the pack's own 35 executable cases, run through the real engine;
   * the provenance guards — both archived original PDFs must still hash to the values recorded in
     `source-metadata.yaml`, so those hashes are checked rather than decorative;
-  * the approval guards — valid source integrity must NOT promote this pack: it remains unavailable
-    in verified mode, must not claim current law, and carries no reviewer or approval because none
-    exists. If someone fills those in without an SME, these tests are what should stop them.
+  * the limited-approval guards — project approval is recorded without being mistaken for DGCA
+    endorsement, verified eligibility, currentness, or legal certainty. Verified mode must still
+    reject the pack while RQ-3/4/5 and RQ-9 remain explicit blockers.
 """
 
 from __future__ import annotations
@@ -57,7 +57,50 @@ def source_metadata() -> dict[str, Any]:
 
 class TestPackCases:
     def test_the_pack_declares_its_cases(self):
-        assert len(CASES) == 32
+        assert len(CASES) == 35
+
+    @pytest.mark.parametrize("confirmation", [False, None])
+    def test_rq_4_unconfirmed_fare_definition_blocks(self, pack, confirmation):
+        result = evaluate(
+            facts={
+                "event": {"type": "denied_boarding"},
+                "alternate_flight": {"minutes_after_original_scheduled": 780},
+                "fare": {
+                    "component_definition_confirmed_by_project_reviewer": confirmation,
+                    "one_way_basic_fare_inr": 3000,
+                    "airline_fuel_charge_inr": 500,
+                },
+            },
+            pack=pack,
+        )
+        assert result.outcome == "needs_human"
+        assert "fare.component_definition_confirmed_by_project_reviewer" in result.missing_facts
+        assert result.cash_inr is None
+
+    @pytest.mark.parametrize("confirmation", [False, None])
+    def test_rq_3_unconfirmed_compensation_branch_blocks(self, pack, confirmation):
+        result = evaluate(
+            facts={
+                "event": {"type": "cancellation", "notice_minutes": 600},
+                "cancellation": {
+                    "notice_obligation_met": False,
+                    "compensation_branch_confirmed_by_project_reviewer": confirmation,
+                },
+                "flight": {"block_time_minutes": 95},
+                "fare": {
+                    "component_definition_confirmed_by_project_reviewer": True,
+                    "one_way_basic_fare_inr": 4200,
+                    "airline_fuel_charge_inr": 800,
+                },
+                "passenger": {"contact_info_provided_at_booking": True},
+            },
+            pack=pack,
+        )
+        assert result.outcome == "needs_human"
+        assert (
+            "cancellation.compensation_branch_confirmed_by_project_reviewer" in result.missing_facts
+        )
+        assert result.cash_inr is None
 
     @pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
     def test_case(self, case: dict[str, Any], pack):
@@ -197,14 +240,15 @@ class TestSourceProvenance:
             assert original.is_file()
             assert archived.read_bytes() == original.read_bytes()
 
-    def test_primary_source_integrity_passes_without_promoting_the_pack(
+    def test_primary_source_integrity_survives_limited_project_approval(
         self, source_metadata, pack
     ):
         assert source_metadata["archived"] is True
         assert pack.source_document_verified is True
         assert pack.source_integrity_reason is None
-        assert pack.status is PolicyPackStatus.official_guidance_dated
+        assert pack.status is PolicyPackStatus.approved
         assert pack.verified_mode_eligible is False
+        assert pack.may_be_called_current_law is False
 
     def test_a_supersession_check_is_recorded_for_both_documents(self, source_metadata):
         check = source_metadata["supersession_check"]
@@ -229,30 +273,69 @@ class TestSourceProvenance:
         assert any(ref.startswith("car:3m2:rev3:") for ref in refs)
 
 
-# ------------------------------------------------------------------- approval is pending
+# ----------------------------------------------------------- limited project approval
 
 
-class TestApprovalIsGenuinelyPending:
-    def test_no_reviewer_or_approval_is_recorded(self):
-        review = yaml.safe_load((PACK_DIR / "review.yaml").read_text(encoding="utf-8"))
-        assert review["review_status"] == "pending"
-        assert review["reviewer_name"] is None
-        assert review["approval"] is None
-        assert review["rule_signoff"] == []
+class TestLimitedProjectApproval:
+    @pytest.fixture(scope="class")
+    @classmethod
+    def review(cls):
+        return yaml.safe_load((PACK_DIR / "review.yaml").read_text(encoding="utf-8"))
 
-    def test_open_review_questions_are_recorded_and_unanswered(self):
-        review = yaml.safe_load((PACK_DIR / "review.yaml").read_text(encoding="utf-8"))
-        questions = review["open_review_questions"]
-        assert len(questions) >= 8
-        assert all(question["status"] == "unanswered" for question in questions)
-        assert all(question.get("clause") for question in questions)
+    def test_project_approval_is_recorded_with_its_real_scope(self, review):
+        assert review["review_status"] == "approved_for_project_use_with_limitations"
+        assert review["reviewer_name"] == "Project owner (project-provided approver)"
+        approval = review["approval"]
+        assert approval["decision"] == "approved_for_project_use_with_limitations"
+        assert approval["approved_by"] == review["reviewer_name"]
+        assert str(approval["approved_at"]) == "2026-08-21"
+        assert approval["scope"] == "project_policy_artifact"
+        assert approval["verified_mode_eligible"] is False
+        excluded_claims = " ".join(approval["does_not_assert"]).lower()
+        assert "dgca endorsement" in excluded_claims
+        assert "currentness" in excluded_claims
+        assert "legal certainty" in excluded_claims
 
-    def test_the_pack_is_not_approved_and_not_verified_eligible(self, pack):
-        assert pack.status is PolicyPackStatus.official_guidance_dated
+    def test_question_dispositions_preserve_unresolved_facts(self, review):
+        dispositions = {
+            question["id"]: question["status"] for question in review["open_review_questions"]
+        }
+        assert dispositions == {
+            "RQ-1": "resolved_project_decision",
+            "RQ-2": "resolved_project_decision",
+            "RQ-3": "operational_scope_required",
+            "RQ-4": "operational_scope_required",
+            "RQ-5": "operational_scope_required",
+            "RQ-6": "resolved_project_decision",
+            "RQ-7": "resolved_project_decision",
+            "RQ-8": "resolved_project_decision",
+            "RQ-9": "accepted_external_risk",
+            "RQ-11": "resolved_project_decision",
+        }
+        by_id = {question["id"]: question for question in review["open_review_questions"]}
+        assert by_id["RQ-3"]["required_fact"] == (
+            "cancellation.compensation_branch_confirmed_by_project_reviewer"
+        )
+        assert by_id["RQ-4"]["required_fact"] == (
+            "fare.component_definition_confirmed_by_project_reviewer"
+        )
+        assert by_id["RQ-5"]["operational_disposition"] == "needs_human"
+        assert by_id["RQ-9"]["currentness_asserted"] is False
+        assert by_id["RQ-9"]["blocks_verified_mode"] is True
+
+    def test_rule_signoff_covers_every_rule_for_project_use_only(self, review, pack):
+        signoff = review["rule_signoff"]
+        assert signoff["decision"] == "approved_for_project_use_with_limitations"
+        assert signoff["regulatory_approval"] is False
+        assert set(signoff["applies_to_rule_ids"]) == {rule.id for rule in pack.rules}
+        assert len(signoff["applies_to_rule_ids"]) == len(pack.rules) == 44
+
+    def test_the_pack_is_project_approved_but_not_verified_eligible(self, pack):
+        assert pack.status is PolicyPackStatus.approved
         assert pack.verified_mode_eligible is False
 
     def test_it_may_not_be_called_current_law(self, pack):
-        """Archived sources do not replace status, currentness evidence or SME approval."""
+        """Project approval plus source integrity is insufficient without verified eligibility."""
         assert pack.source_document_verified is True
         assert pack.may_be_called_current_law is False
 
@@ -266,17 +349,18 @@ class TestApprovalIsGenuinelyPending:
             )
         assert raised.value.code == "PACK_NOT_VERIFIED_ELIGIBLE"
 
-    def test_no_rule_claims_approved(self, pack):
-        assert not [rule.id for rule in pack.rules if rule.status == "approved"]
+    def test_the_badge_distinguishes_project_approval_from_current_law(self, pack):
+        label = pack.ui_label.upper()
+        assert "PROJECT-APPROVED" in label
+        assert "NOT VERIFIED CURRENT LAW" in label
 
-    def test_the_badge_says_review_is_pending(self, pack):
-        assert "PENDING SME REVIEW" in pack.ui_label.upper()
-
-    def test_promotion_preconditions_are_written_down(self):
+    def test_verified_blockers_are_exact_and_source_integrity_is_not_one(self):
         manifest = yaml.safe_load((PACK_DIR / "pack.yaml").read_text(encoding="utf-8"))
         blockers = " ".join(manifest["blocks_verified_mode_until"]).lower()
-        assert "sme" in blockers
-        assert "current revision" in blockers
+        for rq in ("rq-3", "rq-4", "rq-5", "rq-9"):
+            assert rq in blockers
+        assert "authoritative dgca evidence" in blockers
+        assert "external aviation/legal sme" in blockers
         assert "source.pdf" not in blockers
 
 

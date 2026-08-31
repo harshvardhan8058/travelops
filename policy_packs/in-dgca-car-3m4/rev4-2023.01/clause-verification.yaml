@@ -347,6 +347,13 @@ rules:
     verification: visual_review_required
     computed: true
 
+  - id: refund.look_in_option.international_requires_human
+    status_in_pack: draft
+    source_clause_refs:
+      - "car:3m2:rev3:3(e)"
+    verification: visual_review_required
+    computed: true
+
   - id: refund.credit_shell_is_passenger_option
     status_in_pack: draft
     source_clause_refs:
@@ -407,9 +414,9 @@ rules:
     reason_not_computed: informational_obligation_only
 
 summary:
-  rules_total: 43
+  rules_total: 44
   text_layer_verified: 30
-  visual_review_required: 13
+  visual_review_required: 14
   clause_refs_unresolved: 0
   figures_not_located_in_archived_text: 0
   note: >-

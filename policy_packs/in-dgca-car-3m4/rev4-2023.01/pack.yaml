@@ -10,45 +10,37 @@ document_date: 2023-01-25
 currency: INR
 
 # ---------------------------------------------------------------------------
-# THIS IS THE PRIMARY REGULATION. IT IS STILL NOT `approved`.
+# THIS PRIMARY-SOURCE ENCODING IS PROJECT-APPROVED WITH LIMITATIONS.
 #
-# The charter pack (`in-moca-charter-2019`) was official but SECONDARY — a
-# public-information booklet that itself points readers to this CAR. This pack is
-# the instrument the booklet points to: issued under Rule 133A of the Aircraft
-# Rules 1937, with the approval of the Ministry of Civil Aviation, signed by the
-# Director General. Every figure below is read from it directly.
+# Approval was explicitly granted by the project owner on 21 August 2026 for use as a project
+# policy artifact in charter mode. It is not DGCA endorsement, regulator approval, external legal
+# advice, or proof of currentness. RQ-3/4/5 remain fail-closed operational review requirements;
+# RQ-9 is an accepted external risk and blocks verified mode.
 #
-# Two things are nevertheless still missing, and both are recorded rather than assumed:
-#
-#   1. NO AUTHORISED SME HAS REVIEWED THIS ENCODING. `review.yaml` names no
-#      reviewer and records no approval, because none exists. The loader refuses
-#      an `approved` pack without one, which is why `status` below is not
-#      `approved` and why verified mode remains unreachable.
-#   2. CURRENTNESS HAS NOT BEEN PROVED. Both original PDF binaries are now archived
-#      with byte-derived SHA-256 values, but archival does not establish that Part IV
-#      Rev. 4 remains current or resolve its cross-reference to the later Part II
-#      Rev. 3. RQ-9 keeps that external review explicit.
-#
-# `status: official_guidance_dated` is the honest rung. Its permissions are the
-# ones that fit — the pack may compute, behind a visible dated label, and may
-# never be called current law — even though both sources now pass integrity checks,
-# because the rung above requires review and currentness evidence this encoding has
-# not had. Promotion to `approved` is data and review, not code: see review.yaml.
+# `status: approved` means the project accepted this encoded artifact under review.yaml. The
+# separate `verified_mode_eligible: false` is authoritative: neither this pack nor any downstream
+# citation may call it current law until the listed blockers are genuinely resolved.
 # ---------------------------------------------------------------------------
-status: official_guidance_dated
+status: approved
 
 verified_mode_eligible: false
-ui_label: "DGCA CAR 3/M/IV · REV. 4 · EFFECTIVE 15 FEB 2023 · PENDING SME REVIEW"
+ui_label: "PROJECT-APPROVED DGCA CAR 3/M/IV · DATED SOURCES · NOT VERIFIED CURRENT LAW"
 
 blocks_verified_mode_until:
-  - authorised aviation/legal SME review recorded in review.yaml with per-rule sign-off
-  - the ten open review questions in review.yaml answered (RQ-1 to RQ-9 and RQ-11)
   - >-
-    RQ-9 answered — confirmation from the DGCA portal that Rev. 4 is still the current revision of
-    Part IV on the day of promotion, plus a reading of Para 3.3.5's cross-reference given that the
-    archived Part II (Rev. 3, 24 Feb 2026) postdates this Part IV revision
-  # Both original PDFs are archived with real, test-verified SHA-256 values. Source integrity is
-  # complete, but it does not satisfy the independent review and currentness prerequisites above.
+    RQ-9 resolved with authoritative DGCA evidence that Part IV Rev. 4 remains current and a
+    reviewed reading of Para 3.3.5 given that Part II Rev. 3 postdates this Part IV revision
+  - >-
+    RQ-3 resolved by an external aviation/legal SME interpretation of the alternate-flight versus
+    compensation branch; until then each evaluation requires a project human decision
+  - >-
+    RQ-4 resolved by an external aviation/legal SME definition of booked one-way basic fare and
+    airline fuel charge; until then every fare-based cash calculation requires project review
+  - >-
+    RQ-5 resolved by an external aviation/legal SME evidentiary standard for reasonable measures;
+    until then the existing evidence facts and needs_human gate remain authoritative
+  - an explicit later project decision setting verified_mode_eligible true after those facts exist
+  # Source integrity is complete. Both original PDFs are archived with test-verified SHA-256.
 
 precedence:
   # No global "most favourable to passenger" rule is assumed. This pack overlaps the charter

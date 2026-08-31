@@ -74,6 +74,9 @@ rules:
         - { fact: event.type, op: eq, value: denied_boarding }
         - { fact: alternate_flight.minutes_after_original_scheduled, op: gt, value: 60 }
         - { fact: alternate_flight.minutes_after_original_scheduled, op: lte, value: 1440 }
+        - { fact: fare.component_definition_confirmed_by_project_reviewer, op: confirmed }
+    requires_facts: [fare.component_definition_confirmed_by_project_reviewer]
+    on_missing_required_fact: needs_human
     entitlement:
       type: cash
       cash: true
@@ -93,6 +96,9 @@ rules:
       all:
         - { fact: event.type, op: eq, value: denied_boarding }
         - { fact: alternate_flight.minutes_after_original_scheduled, op: gt, value: 1440 }
+        - { fact: fare.component_definition_confirmed_by_project_reviewer, op: confirmed }
+    requires_facts: [fare.component_definition_confirmed_by_project_reviewer]
+    on_missing_required_fact: needs_human
     entitlement:
       type: cash
       cash: true
@@ -112,6 +118,9 @@ rules:
       all:
         - { fact: event.type, op: eq, value: denied_boarding }
         - { fact: passenger.opted_for_alternate, op: eq, value: false }
+        - { fact: fare.component_definition_confirmed_by_project_reviewer, op: confirmed }
+    requires_facts: [fare.component_definition_confirmed_by_project_reviewer]
+    on_missing_required_fact: needs_human
     entitlement:
       type: cash
       cash: true
@@ -185,6 +194,12 @@ rules:
         - { fact: cancellation.notice_obligation_met, op: eq, value: false }
         - { fact: flight.block_time_minutes, op: lte, value: 60 }
         - { fact: passenger.contact_info_provided_at_booking, op: eq, value: true }
+        - { fact: cancellation.compensation_branch_confirmed_by_project_reviewer, op: confirmed }
+        - { fact: fare.component_definition_confirmed_by_project_reviewer, op: confirmed }
+    requires_facts:
+      - cancellation.compensation_branch_confirmed_by_project_reviewer
+      - fare.component_definition_confirmed_by_project_reviewer
+    on_missing_required_fact: needs_human
     entitlement:
       type: cash
       cash: true
@@ -206,6 +221,12 @@ rules:
         - { fact: flight.block_time_minutes, op: gt, value: 60 }
         - { fact: flight.block_time_minutes, op: lte, value: 120 }
         - { fact: passenger.contact_info_provided_at_booking, op: eq, value: true }
+        - { fact: cancellation.compensation_branch_confirmed_by_project_reviewer, op: confirmed }
+        - { fact: fare.component_definition_confirmed_by_project_reviewer, op: confirmed }
+    requires_facts:
+      - cancellation.compensation_branch_confirmed_by_project_reviewer
+      - fare.component_definition_confirmed_by_project_reviewer
+    on_missing_required_fact: needs_human
     entitlement:
       type: cash
       cash: true
@@ -226,6 +247,12 @@ rules:
         - { fact: cancellation.notice_obligation_met, op: eq, value: false }
         - { fact: flight.block_time_minutes, op: gt, value: 120 }
         - { fact: passenger.contact_info_provided_at_booking, op: eq, value: true }
+        - { fact: cancellation.compensation_branch_confirmed_by_project_reviewer, op: confirmed }
+        - { fact: fare.component_definition_confirmed_by_project_reviewer, op: confirmed }
+    requires_facts:
+      - cancellation.compensation_branch_confirmed_by_project_reviewer
+      - fare.component_definition_confirmed_by_project_reviewer
+    on_missing_required_fact: needs_human
     entitlement:
       type: cash
       cash: true
@@ -666,18 +693,47 @@ rules:
     # and NOT excluded: the supersession question is answered by the primary source.
     when:
       all:
+        - { fact: event.type, op: eq, value: passenger_cancellation }
         - { fact: request.type, op: in, value: [cancellation, amendment] }
         - { fact: request.minutes_after_booking, op: lte, value: 2880 }
         - { fact: booking.channel, op: eq, value: airline_website }
+        - { fact: itinerary.is_domestic, op: eq, value: true }
         - { fact: booking.days_before_first_leg, op: gte, value: 7 }
+    requires_facts: [request.type, itinerary.is_domestic]
+    on_missing_required_fact: needs_human
     entitlement:
       type: fee_prohibition
       cash: false
       excludes: prevailing_fare_difference_on_amendment
       note: >-
         The seven-day condition encoded here is the domestic threshold. An international booking
-        requires fifteen days; the engine has no domestic/international fact on a `request`, so an
-        international look-in claim must be resolved by a human. RQ-11.
+        requires fifteen days and is always routed to the explicit human-review rule below rather
+        than inferred from the domestic branch. RQ-11.
+
+  - id: refund.look_in_option.international_requires_human
+    status: draft
+    scope: international
+    source_clause_refs: ["car:3m2:rev3:3(e)"]
+    interpretation: >-
+      Part II Para 3(e) has a separate fifteen-day threshold for international flights. The
+      project has not adopted an automated interpretation for that branch. An international
+      cancellation or amendment request therefore requires an explicit project-review decision;
+      absence of that decision is needs_human rather than a guessed entitlement.
+    when:
+      all:
+        - { fact: event.type, op: eq, value: passenger_cancellation }
+        - { fact: request.type, op: in, value: [cancellation, amendment] }
+        - { fact: itinerary.is_domestic, op: eq, value: false }
+        - fact: request.international_look_in_decision_confirmed_by_project_reviewer
+          op: confirmed
+    requires_facts:
+      - request.type
+      - itinerary.is_domestic
+      - request.international_look_in_decision_confirmed_by_project_reviewer
+    on_missing_required_fact: needs_human
+    effect:
+      requires_human_review: true
+      reason_code: INTERNATIONAL_LOOK_IN_PROJECT_REVIEW
 
   - id: refund.credit_shell_is_passenger_option
     status: draft
