@@ -42,7 +42,7 @@ ui_label: "DGCA CAR 3/M/IV · REV. 4 · EFFECTIVE 15 FEB 2023 · PENDING SME REV
 
 blocks_verified_mode_until:
   - authorised aviation/legal SME review recorded in review.yaml with per-rule sign-off
-  - the nine open review questions in review.yaml answered
+  - the ten open review questions in review.yaml answered (RQ-1 to RQ-9 and RQ-11)
   - >-
     RQ-9 answered — confirmation from the DGCA portal that Rev. 4 is still the current revision of
     Part IV on the day of promotion, plus a reading of Para 3.3.5's cross-reference given that the

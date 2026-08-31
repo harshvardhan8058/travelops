@@ -146,5 +146,27 @@ open_review_questions:
     status: unanswered
     external_dependency: DGCA portal access on the day of promotion
 
+  # RQ-10 is intentionally absent. It asked a reviewer to confirm the archived Part IV PDF was
+  # byte-identical to the document they read, and it was retired when the team committed the
+  # original PDF and its SHA-256 was recorded and made test-verified. The number is not reused,
+  # so the history stays auditable rather than looking renumbered.
+
+  - id: RQ-11
+    clause: "car:3m2:rev3:3(e)"
+    question: >-
+      Part II Para 3(e) makes the 48-hour look-in option unavailable where departure is under
+      seven days for a domestic flight or fifteen days for an international flight. The rule
+      encodes the seven-day domestic threshold only, because the engine holds no
+      domestic/international fact on a cancellation or amendment `request`. Confirm that an
+      international look-in claim must be routed to a human, or specify the fact the engine should
+      require so the fifteen-day threshold can be applied deterministically.
+    why_it_matters: >-
+      As encoded, an international booking between seven and fifteen days from departure would be
+      treated as eligible for a free look-in cancellation when Para 3(e) says it is not. The rule
+      is therefore narrower than the clause in one direction and wider in another, and only a
+      reviewer can decide whether to gate it, widen the fact set, or accept the limitation.
+    status: unanswered
+    affected_rule: refund.look_in_option_48h
+
 # Per-rule sign-off. Reviewer fills status and notes. Empty until reviewed.
 rule_signoff: []

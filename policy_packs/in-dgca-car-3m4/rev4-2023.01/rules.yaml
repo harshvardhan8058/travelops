@@ -677,7 +677,7 @@ rules:
       note: >-
         The seven-day condition encoded here is the domestic threshold. An international booking
         requires fifteen days; the engine has no domestic/international fact on a `request`, so an
-        international look-in claim must be resolved by a human. RQ-9.
+        international look-in claim must be resolved by a human. RQ-11.
 
   - id: refund.credit_shell_is_passenger_option
     status: draft
