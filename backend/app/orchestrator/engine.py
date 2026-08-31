@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contract import PlanTask
 from app.assurance.contract import AssuranceResult
-from app.config import ResolvedModes, Settings, get_modes, get_settings
+from app.config import LLMMode, ResolvedModes, Settings, get_modes, get_settings
 from app.db.scenario_queries import load_delay_risk_inputs
 from app.errors import AssuranceBlocked, EntityNotFound, WorkflowLimitExceeded
 from app.events.types import (
@@ -101,6 +101,31 @@ STAGE_ASSURE = "assure"
 STAGE_EXECUTE = "execute"
 STAGE_RESOLVE = "resolve"
 
+#: Smallest shared-pool slice worth starting a live planner call with. Below this the call would be
+#: abandoned before a provider could realistically answer, so it is skipped and recorded instead —
+#: spending the cascade's remaining time to manufacture a timeout helps nobody.
+MIN_PLANNER_SLICE_SECONDS = 5.0
+
+#: Grace added to the allowance when arming the orchestrator's hard backstop.
+#:
+#: The allowance is enforced INSIDE the client, which can size attempts and refuse a retry that
+#: will not fit. `asyncio.wait_for` stays as a backstop against a client that ignores its budget,
+#: but it is armed slightly later so that in every ordinary case the client's own honest diagnosis —
+#: the provider's status, phase and finish reason — is what reaches the decision log, instead of an
+#: opaque cancellation that only names the orchestrator's timer.
+PLANNER_BACKSTOP_GRACE_SECONDS = 5.0
+
+#: The grace is also capped at this fraction of the allowance, so a deliberately tight allowance
+#: still produces a tight hard bound rather than one dominated by a fixed margin.
+_PLANNER_BACKSTOP_GRACE_FRACTION = 0.2
+
+
+def planner_backstop_seconds(budget_seconds: float) -> float:
+    """The hard `wait_for` bound for a planner allowance. Always above the allowance itself."""
+    grace = min(PLANNER_BACKSTOP_GRACE_SECONDS, budget_seconds * _PLANNER_BACKSTOP_GRACE_FRACTION)
+    return budget_seconds + grace
+
+
 #: Task states that no longer need work.
 _TASK_SETTLED = frozenset(
     {TaskState.succeeded, TaskState.failed, TaskState.skipped, TaskState.rejected}
@@ -154,6 +179,29 @@ class _AssuranceOutcome:
     gathered: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class PlannerAllowance:
+    """How much wall-clock this incident's optional planner candidate may spend, and from where.
+
+    Three sources, and the difference between them is the whole point:
+
+    * the declared demo primary holds a **reserved** allowance that no other member can consume;
+    * every other live member draws a slice from a **shared pool** charged by actual elapsed time,
+      so a healthy warm call costs the few seconds it took rather than a 20-second reservation;
+    * fixture and off mode are unpooled and unchanged.
+    """
+
+    seconds: float
+    #: The declared primary of the configured demo dataset, on its reserved allowance.
+    primary_demo: bool
+    #: Drawn from the shared non-primary pool, and therefore charged back to it.
+    pooled: bool
+    #: Pool left before this allowance was taken. `None` when the pool does not apply.
+    pool_remaining: float | None
+    #: False when the pool cannot fund a viable call. The candidate is skipped, never faked.
+    attempt: bool
+
+
 @dataclass
 class ExecutionOutcome:
     """Result of one guarded dispatch, plus the rows that authorise it."""
@@ -189,6 +237,14 @@ class Orchestrator:
         # Transient diagnostic only. Set after the candidate and PLAN_PROPOSED journal are staged,
         # then consumed by `advance()` after the transaction commit makes both durable.
         self._pending_planner_plan_id: int | None = None
+        # Shared non-primary live planner pool, in seconds, lazily filled on first use.
+        #
+        # Scoped to this Orchestrator instance, which is exactly the right scope:
+        # `GroupOrchestrator` builds one and reuses it for every member of a run, and each HTTP
+        # request builds its own — so the pool bounds precisely the thing the 300-second request
+        # budget applies to, and a single-incident `POST /incidents/{ref}/run` is unaffected by
+        # what another request spent.
+        self._planner_pool_seconds: float | None = None
 
     @property
     def modes(self) -> ResolvedModes:
@@ -549,27 +605,22 @@ class Orchestrator:
             refs.append(f"flight:{ctx.flight_id}")
         return refs
 
-    async def _planner_candidate_budget(self, incident: Incident | None) -> tuple[float, bool]:
-        """Return the bounded model-call allowance and whether primary-demo tuning applied.
-
-        Windows live runs show the first (primary) demo incident crossing the ordinary 20-second
-        ceiling while later calls to the same provider and planner succeed. The code sends no
-        larger prompt and performs no different schema/reflection work for that incident, so this
-        is first-call provider latency, not a reason to widen every member's budget.
+    async def _is_declared_demo_primary(self, incident: Incident | None) -> bool:
+        """True for the declared primary member of the configured demo dataset.
 
         Primary is recorded data, not a reference convention: the inbound VAAH member also ends in
-        ``-01``. The additional allowance therefore requires both the configured demo dataset id
-        and the unique ``incident_group_flight.role = 'primary'`` row. A direct incident run and a
-        group run make the same decision because both read the persisted membership.
+        ``-01``. It therefore requires both the configured demo dataset id and the unique
+        ``incident_group_flight.role = 'primary'`` row. A direct incident run and a group run make
+        the same decision because both read the same persisted membership. The dataset check keeps
+        a production primary from silently receiving demo tuning.
         """
-        ordinary = self._settings.planner_candidate_budget_seconds
         if (
             incident is None
             or incident.group_id is None
             or incident.flight_id is None
             or incident.demo_dataset_id != self._settings.demo_dataset_id
         ):
-            return ordinary, False
+            return False
 
         # Imported lazily with the other Phase 2/3 paths. This is a read of existing declared
         # membership, not a second role model and not a schema change.
@@ -581,9 +632,77 @@ class Orchestrator:
                 IncidentGroupFlight.flight_id == incident.flight_id,
             )
         )
-        if role == "primary":
-            return self._settings.primary_demo_planner_candidate_budget_seconds, True
-        return ordinary, False
+        return role == "primary"
+
+    async def _planner_candidate_allowance(self, incident: Incident | None) -> PlannerAllowance:
+        """Decide this incident's planner allowance: reserved for the primary, pooled for the rest.
+
+        The failure this replaces was an allocation failure, not a number that was merely too
+        small. Members advance sequentially and the planner runs only while an incident is
+        ``planning``, so the primary's single opportunity is always the coldest call of the run —
+        and it was being handed a ceiling *below* the transport's own 60-second per-attempt ceiling.
+        It therefore got less than one complete provider attempt and no usable retry, while the
+        warm members behind it succeeded on their smaller budgets. Raising every member's ceiling
+        instead would have multiplied the cost by eight.
+
+        So the primary's allowance is reserved and large enough for a complete attempt, and the
+        non-primary members share a pool charged by the time they actually use. A healthy warm call
+        costs single-digit seconds, so in practice all seven still get candidates; a pathological
+        run exhausts the pool and the remaining members skip their model call with a recorded
+        reason, leaving the deterministic playbook — already persisted and selected — in charge.
+        """
+        ordinary = self._settings.planner_candidate_budget_seconds
+
+        if await self._is_declared_demo_primary(incident):
+            return PlannerAllowance(
+                seconds=self._settings.primary_demo_planner_candidate_budget_seconds,
+                primary_demo=True,
+                pooled=False,
+                pool_remaining=None,
+                attempt=True,
+            )
+
+        # Fixture replay is deterministic and costs no wall-clock, and off mode never reaches here.
+        # Pooling either would add nondeterminism to paths whose whole value is being repeatable.
+        if self.modes.llm is not LLMMode.live:
+            return PlannerAllowance(
+                seconds=ordinary,
+                primary_demo=False,
+                pooled=False,
+                pool_remaining=None,
+                attempt=True,
+            )
+
+        if self._planner_pool_seconds is None:
+            self._planner_pool_seconds = self._settings.planner_group_pool_seconds
+        remaining = self._planner_pool_seconds
+
+        if remaining < MIN_PLANNER_SLICE_SECONDS:
+            return PlannerAllowance(
+                seconds=0.0,
+                primary_demo=False,
+                pooled=True,
+                pool_remaining=remaining,
+                attempt=False,
+            )
+
+        return PlannerAllowance(
+            seconds=min(ordinary, remaining),
+            primary_demo=False,
+            pooled=True,
+            pool_remaining=remaining,
+            attempt=True,
+        )
+
+    def _charge_planner_pool(self, allowance: PlannerAllowance, elapsed: float) -> None:
+        """Debit the shared pool by the time actually spent, never by the nominal allowance.
+
+        Charging the allowance would make seven fast calls cost 140 seconds of budget they never
+        used, which is the accounting error that left nothing spare for the member that mattered.
+        """
+        if not allowance.pooled or self._planner_pool_seconds is None:
+            return
+        self._planner_pool_seconds = max(0.0, self._planner_pool_seconds - max(0.0, elapsed))
 
     async def _propose_planner_candidate(self, ctx: WorkflowContext) -> None:
         """Phase 3: produce a second candidate plan from the Planner reasoning agent.
@@ -610,6 +729,11 @@ class Orchestrator:
             return
 
         phase = "context"
+        # Bound before the try, so the diagnostics in the handlers below are always reportable even
+        # when the failure happens while gathering context — earlier than any allowance is decided.
+        allowance: PlannerAllowance | None = None
+        budget: float | None = None
+        primary_demo_budget = False
         log.info(
             "planner_candidate_started",
             incident_reference=ctx.incident_reference,
@@ -640,28 +764,47 @@ class Orchestrator:
             # Get flight info for prompt context
             flight = await self._session.get(Flight, ctx.flight_id) if ctx.flight_id else None
 
-            budget, primary_demo_budget = await self._planner_candidate_budget(incident)
+            phase = "allocation"
+            allowance = await self._planner_candidate_allowance(incident)
+            budget = allowance.seconds
+            primary_demo_budget = allowance.primary_demo
             log.info(
                 "planner_candidate_budget_selected",
                 incident_reference=ctx.incident_reference,
                 budget_seconds=budget,
                 primary_demo_budget=primary_demo_budget,
+                pooled=allowance.pooled,
+                pool_remaining_seconds=allowance.pool_remaining,
+                attempted=allowance.attempt,
             )
+            if not allowance.attempt:
+                # The shared pool is spent. Said plainly rather than dressed up as a provider
+                # fault: nothing was asked of the model, so nothing about the model is reported.
+                raise LLMUnavailable(
+                    "The shared planner allowance for this run was already spent by earlier "
+                    "incidents, so no model call was attempted for this one.",
+                    phase="orchestrator_pool_exhausted",
+                )
+
             agent = PlannerAgent()
             phase = "request"
-            # Bound the model call itself, and nothing else.
+            # The allowance is enforced INSIDE the client, and `wait_for` is only a backstop.
             #
-            # Phase 3's contract is that a model failure never blocks recovery. That was only
-            # half-true: a *failing* call was handled by the `LLMUnavailable` path below, a *slow*
-            # one was not. The client's own budget is 60s per attempt with two retries plus
-            # backoff, so a single hung call can hold an incident open for ~184s. Group runs
-            # advance their members sequentially, so two such incidents are enough to exceed the
-            # caller's request budget and truncate the cascade part-way.
+            # It used to be the other way round, and that inverted the two ceilings: the
+            # orchestrator's allowance was smaller than the client's own 60-second per-attempt
+            # timeout, so a healthy-but-slow call was cancelled mid-flight before it could finish
+            # or be retried. Cancelling from outside can only ever destroy an in-flight attempt —
+            # it cannot make the provider faster, and it reports our timer instead of the
+            # provider's behaviour. Handing the budget down lets the client size each attempt to
+            # the time left and refuse a retry that cannot fit, so the outcome is always a real
+            # one: an answer, a named provider failure, or an explicit exhausted budget.
             #
-            # Only the `await` is wrapped: every DB write in this method happens after it, so a
-            # cancelled call cannot leave the session mid-flush. The timeout is converted into the
-            # one existing skip route rather than a new one — a model that never answers is
-            # unavailable, which is exactly what that path already means.
+            # `wait_for` stays, armed a few seconds later, so a client that ignored its budget
+            # still cannot hold the cascade open. Only the `await` is wrapped: every DB write in
+            # this method happens after it, so a cancelled call cannot leave the session
+            # mid-flush. Either bound converts into the one existing skip route rather than a new
+            # one — a model that never answers is unavailable, which is what that path means.
+            started = asyncio.get_running_loop().time()
             try:
                 planner_response, audit = await asyncio.wait_for(
                     agent.propose(
@@ -676,14 +819,19 @@ class Orchestrator:
                         severity=severity,
                         airport_icao=airport_icao,
                         precedents=[p.to_dict() for p in precedents],
+                        budget_seconds=budget,
                     ),
-                    timeout=budget,
+                    timeout=planner_backstop_seconds(budget),
                 )
             except TimeoutError as exc:
                 raise LLMUnavailable(
                     f"The planner agent did not answer within its {budget:g}s budget.",
                     phase="orchestrator_budget",
                 ) from exc
+            finally:
+                # Charged on every route out — success, provider failure or backstop — because the
+                # cascade spent that time either way and the members behind this one must see it.
+                self._charge_planner_pool(allowance, asyncio.get_running_loop().time() - started)
 
             # Reflect before persisting. The agent proposes; this narrows to what can actually be
             # executed and records every drop with its reason.
@@ -818,6 +966,8 @@ class Orchestrator:
                 content_length=getattr(exc, "content_length", None),
                 budget_seconds=budget,
                 primary_demo_budget=primary_demo_budget,
+                pooled=allowance.pooled if allowance else None,
+                pool_remaining_seconds=(self._planner_pool_seconds if allowance else None),
                 reason=str(exc)[:200],
             )
             await self._journal(
@@ -839,6 +989,8 @@ class Orchestrator:
                     "content_length": getattr(exc, "content_length", None),
                     "budget_seconds": budget,
                     "primary_demo_budget": primary_demo_budget,
+                    "pooled": allowance.pooled if allowance else None,
+                    "pool_remaining_seconds": (self._planner_pool_seconds if allowance else None),
                 },
             )
         except Exception as exc:
