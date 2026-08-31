@@ -148,8 +148,10 @@ class GroupOrchestrator:
     ) -> GroupContext:
         """Open one incident per declared member flight. Idempotent by construction.
 
-        Re-running opens nothing new: `open_incident` returns the existing active incident for
-        a flight, so a repeated inject cannot double the cascade.
+        Re-running opens nothing new, in any member state: a flight that already carries an
+        incident in this group is reused rather than re-opened, so a repeated inject cannot double
+        the cascade. `open_incident`'s own deduplication is not sufficient here — it is scoped to
+        ACTIVE incidents — and the loop below says why.
 
         `opened_incident_ids` reports only the incidents this call actually created. It previously
         listed every member incident, so a second click told the operator it had opened eight
@@ -177,10 +179,39 @@ class GroupOrchestrator:
         correlation = correlation_id or f"group-{group.reference}"
         opened: list[int] = []
         outcomes: list[MemberOutcome] = []
-        # Which flights already carried an incident before this call, so "opened" can mean opened.
-        already_open = {member.flight_id for member in members if member.incident_id is not None}
 
         for member in members:
+            if member.incident_id is not None:
+                # This flight already carries an incident *in this group*, so there is nothing to
+                # open — whatever state it is in.
+                #
+                # Delegating the decision to `open_incident` was not enough. Its deduplication is
+                # `uq_incident_active_per_flight`, which is partial over ACTIVE states, so a
+                # terminal member has released the slot and a second call opens a second incident
+                # for the same flight. Re-opening a cascade whose members had finished therefore
+                # doubled it: sixteen incidents in an eight-flight group, `awaiting_approval_count`
+                # counting duplicates the flight list does not show, and a derived state that can
+                # never be `resolved` again because the copies have to resolve too. On a terminal
+                # group it also failed the transition afterwards, so every later run answered 409
+                # while the duplicates it had already committed stayed behind.
+                #
+                # `run_group` carries the same warning and deliberately does not open. This is that
+                # rule applied where the opening actually happens, which is what makes the
+                # docstring's "idempotent by construction" true rather than aspirational.
+                incident = await self._session.get(Incident, member.incident_id)
+                if incident is not None:
+                    outcomes.append(
+                        MemberOutcome(
+                            flight_id=member.flight_id,
+                            flight_number=member.flight_number,
+                            incident_id=incident.id,
+                            incident_reference=incident.reference,
+                            state=IncidentState(incident.state),
+                            role=member.role,
+                        )
+                    )
+                    continue
+
             ctx = await self._orchestrator.open_incident(
                 member.flight_id,
                 group.root_cause,
@@ -190,7 +221,7 @@ class GroupOrchestrator:
                 demo_dataset_id=group.demo_dataset_id,
                 opened_at=opened_at or group.opened_at,
             )
-            if ctx.incident_id not in opened and member.flight_id not in already_open:
+            if ctx.incident_id not in opened:
                 opened.append(ctx.incident_id)
             outcomes.append(
                 MemberOutcome(
