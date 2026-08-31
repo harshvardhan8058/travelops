@@ -30,6 +30,7 @@ import { useKeyboardList } from '@/hooks/useKeyboardList';
 import { edgeConnectsNode, layoutServerGraph, type CascadeEdge } from './layout';
 import { BlastRadius, PairingTable } from './BlastRadius';
 import { GroupRunControl } from './GroupRunControl';
+import { loadCascade } from './loadCascade';
 import { WhatIfPanel } from './WhatIfPanel';
 
 const ROLLUP_TILES = [
@@ -87,12 +88,12 @@ export function CascadeExplorer() {
 
   const groupQuery = useQuery({
     queryKey: ['incident-group', groupId],
-    queryFn: () => api.incidentGroup(groupId),
+    queryFn: () => loadCascade(api, groupId),
   });
   // Only source of a flight -> incident link today: the flight board's own rows.
   const flightsQuery = useQuery({ queryKey: ['flights'], queryFn: api.flights });
 
-  const group = groupQuery.data;
+  const group = groupQuery.data?.detail;
 
   /**
    * The server's projection is the only graph source. There is no client-side fallback, and that

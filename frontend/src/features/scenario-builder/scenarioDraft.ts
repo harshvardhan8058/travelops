@@ -12,9 +12,8 @@
  *   1. **Nothing is computed that only the engine can know.** No passenger counts, no connection
  *      counts, no entitlement figures. The preview reports what the operator declared and the length
  *      of arrays the operator typed — the one aggregate the UI is permitted to compute.
- *   2. **An invalid draft cannot produce a request.** `prepareScenarioRequest` refuses rather than
- *      emitting a payload the backend would reject, so the review step cannot show a body that could
- *      never be sent.
+ *   2. **An invalid draft cannot reach submission.** Validation is shared with the lifecycle adapter,
+ *      so the review step and the published API request enforce the same draft rules.
  *   3. **Errors name the field.** A validation message that does not say which input is wrong is a
  *      message an operator has to guess at.
  *
@@ -23,13 +22,10 @@
 
 import {
   DISRUPTION_TYPES,
-  SCENARIO_CREATE_ENDPOINT,
   SCENARIO_SEVERITIES,
   findTemplate,
   type DisruptionType,
-  type ScenarioCreateRequest,
   type ScenarioDraft,
-  type ScenarioRequestReceipt,
   type ScenarioSeverity,
   type ScenarioTemplate,
 } from './scenarioContracts';
@@ -154,7 +150,7 @@ export function validateDraft(draft: ScenarioDraft): ValidationReport {
   }
 
   if (draft.name.trim() === '') {
-    add('name', 'NAME_REQUIRED', 'Give the scenario a name so it can be told apart in a replay.');
+    add('name', 'NAME_REQUIRED', 'Give this draft a name so it is clear during review.');
   }
 
   if (!DISRUPTION_TYPES.includes(draft.disruptionType)) {
@@ -264,7 +260,7 @@ export function validateDraft(draft: ScenarioDraft): ValidationReport {
     add(
       'notes',
       'CRITICAL_WITHOUT_NOTE',
-      'Critical severity with no note leaves a replay unable to say why it was critical.',
+      'Critical severity without operator context should be reviewed deliberately.',
       'warning',
     );
   }
@@ -430,116 +426,4 @@ export function stepStates(
 export function canOpenStep(draft: ScenarioDraft, step: ScenarioStepId): boolean {
   if (step === 'template') return true;
   return findTemplate(draft.templateId) !== null;
-}
-
-// ---------------------------------------------------------------- request
-
-/**
- * A stable id for a prepared request: FNV-1a over the canonical payload.
- *
- * Deterministic on purpose. A random id would change on every render and could not be matched
- * against a payload an operator copied out five minutes earlier, and the house rule for replayable
- * surfaces is that identical inputs produce identical output.
- */
-export function stableRequestId(payload: ScenarioCreateRequest): string {
-  const canonical = JSON.stringify([
-    payload.name,
-    payload.disruption_type,
-    payload.airport_icao,
-    payload.starts_at,
-    payload.duration_minutes,
-    payload.severity,
-    payload.flight_numbers,
-    payload.primary_flight,
-    payload.notes,
-    payload.template_id,
-    payload.run_after_create,
-  ]);
-
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < canonical.length; index += 1) {
-    hash ^= canonical.charCodeAt(index);
-    // FNV prime, applied with >>> 0 so this stays an unsigned 32-bit value in JavaScript.
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `scn-${hash.toString(16).padStart(8, '0')}`;
-}
-
-export function buildCreateRequest(
-  draft: ScenarioDraft,
-  options: { runAfterCreate: boolean },
-): ScenarioCreateRequest {
-  return {
-    name: draft.name.trim(),
-    disruption_type: draft.disruptionType,
-    airport_icao: draft.airportIcao.trim().toUpperCase(),
-    starts_at: draft.startsAt,
-    duration_minutes: draft.durationMinutes,
-    severity: draft.severity,
-    flight_numbers: [...draft.flightNumbers],
-    primary_flight: draft.primaryFlight,
-    notes: draft.notes.trim(),
-    template_id: draft.templateId,
-    run_after_create: options.runAfterCreate,
-  };
-}
-
-/**
- * The command that reproduces this draft today, or null when there is not one.
- *
- * Offered only for a draft still matching a template the repository actually seeds, and only when
- * the operator has not edited the parts the seed fixes. An "equivalent" command that produced a
- * different disruption would be worse than no command at all.
- */
-export function equivalentCommandFor(
-  draft: ScenarioDraft,
-  options: { runAfterCreate: boolean },
-): string | null {
-  const template = findTemplate(draft.templateId);
-  if (!template?.seedScenarioId) return null;
-
-  const unchanged =
-    draft.airportIcao.trim().toUpperCase() === template.airportIcao &&
-    draft.disruptionType === template.disruptionType &&
-    draft.severity === template.severity &&
-    draft.durationMinutes === template.durationMinutes &&
-    draft.flightNumbers.length === template.flightNumbers.length &&
-    draft.flightNumbers.every((flight, index) => flight === template.flightNumbers[index]);
-
-  if (!unchanged) return null;
-
-  const cascade = options.runAfterCreate ? ' --cascade' : '';
-  return `python -m app.cli inject --scenario ${template.seedScenarioId}${cascade}`;
-}
-
-export const UNSUBMITTED_REASON =
-  'Prepared in the console and not sent. Scenario authoring has no endpoint yet, and inventing a created scenario would put a state change on screen that never happened.';
-
-/**
- * Builds the request, or refuses because the draft is invalid.
- *
- * Refusing here rather than in the component is what stops the review step rendering a payload the
- * backend would reject. `now` is a parameter so the receipt is deterministic under test.
- */
-export function prepareScenarioRequest(
-  draft: ScenarioDraft,
-  options: { runAfterCreate: boolean; now: Date },
-): { receipt: ScenarioRequestReceipt } | { refused: ValidationReport } {
-  const report = validateDraft(draft);
-  if (!report.ok) return { refused: report };
-
-  const payload = buildCreateRequest(draft, { runAfterCreate: options.runAfterCreate });
-  return {
-    receipt: {
-      requestId: stableRequestId(payload),
-      preparedAt: options.now.toISOString(),
-      targetEndpoint: SCENARIO_CREATE_ENDPOINT,
-      payload,
-      submitted: false,
-      unsubmittedReason: UNSUBMITTED_REASON,
-      equivalentCommand: equivalentCommandFor(draft, {
-        runAfterCreate: options.runAfterCreate,
-      }),
-    },
-  };
 }

@@ -157,6 +157,55 @@ export interface FlightsResponse {
   flights: FlightRow[];
 }
 
+// ---------------------------------------------------------------- authored scenarios
+export type ScenarioMemberRole = 'primary' | 'affected_departure' | 'affected_arrival';
+
+export interface ScenarioMemberInput {
+  flight_id: number;
+  role: ScenarioMemberRole;
+  delay_minutes: number;
+}
+
+export interface ScenarioCreateRequest {
+  root_cause: string;
+  airport_icao: string;
+  severity: string;
+  effective_at: string;
+  actor_id: string;
+  members: ScenarioMemberInput[];
+}
+
+export interface ScenarioMemberOut extends ScenarioMemberInput {
+  flight_number: string;
+}
+
+export interface ScenarioCreateResponse {
+  scenario_reference: string;
+  state: IncidentState;
+  root_cause: string;
+  airport_icao: string;
+  severity: string;
+  effective_at: string;
+  members: ScenarioMemberOut[];
+  created_by: string;
+  created_at: string;
+  provenance: Provenance;
+  replayed: boolean;
+}
+
+export interface ScenarioStartResponse {
+  scenario_reference: string;
+  state: IncidentState;
+  members: GroupMember[];
+  opened_incident_ids: number[];
+  blocked_reason: string | null;
+  awaiting_approval_count: number;
+  started_by: string;
+  started_at: string;
+  provenance: Provenance;
+  replayed: boolean;
+}
+
 // ---------------------------------------------------------------- assurance
 export interface CheckResult {
   name: CheckName;

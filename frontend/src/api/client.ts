@@ -29,6 +29,9 @@ import type {
   ReadyStatus,
   ReportResponse,
   RunResponse,
+  ScenarioCreateRequest,
+  ScenarioCreateResponse,
+  ScenarioStartResponse,
   ServerBlastRadius,
   ServerReplayResponse,
   SourcesResponse,
@@ -176,6 +179,22 @@ export const api = {
 
   /** The most recently opened group. 404 when nothing is open, never an empty placeholder. */
   currentGroup: () => request<IncidentGroupSummary>('/incident-groups/current'),
+
+  /** Persist an authored scenario. The backend validates recorded flight identity and delay. */
+  createScenario: (payload: ScenarioCreateRequest, idempotencyKey?: string) =>
+    request<ScenarioCreateResponse>('/scenarios', {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+      body: JSON.stringify(payload),
+    }),
+
+  /** Open one canonical incident per declared scenario member; this does not execute actions. */
+  startScenario: (scenarioReference: string, actorId = 'operator-1', idempotencyKey?: string) =>
+    request<ScenarioStartResponse>(`/scenarios/${scenarioReference}/start`, {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+      body: JSON.stringify({ actor_id: actorId }),
+    }),
 
   blastRadius: (groupRef: string) =>
     request<ServerBlastRadius>(`/incident-groups/${groupRef}/blast-radius`),
