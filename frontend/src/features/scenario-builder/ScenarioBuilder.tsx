@@ -10,35 +10,29 @@
  * scenario opens one incident per declared flight and each of those carries its own approval gate, so
  * a mis-typed flight list is an operator authorising work on the wrong aircraft.
  *
- * What this screen refuses to do:
+ * The screen resolves entered designators against the published flight-board rows, creates a real Scenario
+ * through the typed API client, and optionally starts it. Starting opens one canonical incident per
+ * declared flight; creation alone persists membership without pretending work has begun.
  *
- *   1. **It does not report a scenario as created.** No endpoint accepts one. `Create` and
- *      `Create & Run` build the exact request body and show it, labelled as prepared and not sent,
- *      with the endpoint that would receive it. Rendering a fabricated scenario id would put a state
- *      transition on screen that never happened — the rule `api/client.ts` sets for every write.
- *   2. **It computes no impact figures.** Passengers, connections, crew pairings and hotels are
- *      derived by the engine from the seeded dataset. The preview names them as pending rather than
- *      guessing, because a passenger count typed into a form is a number no record supports.
- *   3. **It offers a command only when the command works.** The equivalent CLI line appears only for
- *      a draft still matching a scenario this repository actually seeds.
- *
- * All validation, preview and step logic lives in `scenarioDraft.ts` so it is unit-tested; this file
- * is rendering and local state only.
+ * Impact figures remain engine-owned. The client sends recorded flight ids and delays, preserves
+ * idempotency keys across retries, keeps a successful `SCN-*` when start fails, and navigates only
+ * after the API confirms start.
  *
  * Owner: Stream D.
  */
 
 import { useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Play,
-  Plus,
-  Terminal,
-} from 'lucide-react';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Play, Plus } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
+
+import { api, ApiError } from '@/api/client';
+import type {
+  ScenarioCreateRequest,
+  ScenarioCreateResponse,
+  ScenarioStartResponse,
+} from '@/api/types';
 
 import { MonoValue, Panel, ProvenanceDot, StateBadge } from '@/components/ui/primitives';
 import { StepRail } from '@/components/ui/primitives';
@@ -50,21 +44,24 @@ import {
   findTemplate,
   scenarioApi,
   type DisruptionType,
-  type ScenarioRequestReceipt,
   type ScenarioSeverity,
   type ScenarioTemplate,
 } from './scenarioContracts';
 import {
   MAX_NOTES_LENGTH,
+  DEMO_SCENARIO_ACTOR_ID,
   applyTemplate,
+  buildCreateRequest,
   buildPreview,
   canOpenStep,
+  createScenarioIdempotencyKeys,
   emptyDraft,
   issuesForField,
   parseFlightList,
-  prepareScenarioRequest,
   setFlightNumbers,
+  startedMemberIncidentCount,
   stepStates,
+  submitScenario,
   validateDraft,
   type ScenarioStepId,
   type ValidationIssue,
@@ -194,88 +191,214 @@ function Labelled({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-/** The prepared request. Everything here is a fact about the console, not about the backend. */
-function ReceiptPanel({ receipt }: { receipt: ScenarioRequestReceipt }) {
+/** Useful, status-specific feedback without replacing the server's stable code or correlation id. */
+function submissionMessage(stage: 'create' | 'start', error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return `The scenario could not be ${stage === 'create' ? 'created' : 'started'}. Retry when the API is available.`;
+  }
+  if (error.status === 404) {
+    return stage === 'create'
+      ? 'A selected flight no longer exists. Refresh the flight dataset and review the draft.'
+      : 'The created scenario could not be found. Keep its reference when contacting support.';
+  }
+  if (error.status === 409) {
+    return 'The scenario conflicts with active work or this request was changed after its idempotency key was used.';
+  }
+  if (error.status === 422) {
+    return 'The API rejected the scenario data. Review the selected flights, airport, delay records, and start time.';
+  }
+  if (error.status >= 500) {
+    return 'The Scenario API failed. No success is assumed; retry with the same idempotency key.';
+  }
+  return error.message;
+}
+
+function ResultPanel({
+  created,
+  started,
+  failure,
+  pending,
+  onRetryStart,
+}: {
+  created: ScenarioCreateResponse | null;
+  started: ScenarioStartResponse | null;
+  failure: { stage: 'create' | 'start'; error: unknown } | null;
+  pending: boolean;
+  onRetryStart: () => void;
+}) {
+  const apiError = failure?.error instanceof ApiError ? failure.error : null;
   return (
-    <Panel title="Prepared request">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
-        <StateBadge status="pending" label="prepared, not sent" />
-        <Labelled label="request">
-          <MonoValue muted>{receipt.requestId}</MonoValue>
-        </Labelled>
-        <Labelled label="would POST to">
-          <MonoValue muted>{receipt.targetEndpoint}</MonoValue>
-        </Labelled>
-        {receipt.payload.run_after_create && (
-          <Labelled label="then">
-            <MonoValue muted>{scenarioApi.runEndpoint}</MonoValue>
+    <Panel title="Scenario lifecycle">
+      {pending && (
+        <p className="px-3 py-2 text-caption text-fg-secondary">Submitting to the Scenario API…</p>
+      )}
+
+      {created && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
+          <StateBadge status={started ? started.state : created.state} />
+          <Labelled label="scenario">
+            <MonoValue>{created.scenario_reference}</MonoValue>
           </Labelled>
-        )}
-      </div>
-
-      {/* The console's own sentence about why nothing was sent. Never blank while unsubmitted. */}
-      <p className="border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
-        {receipt.unsubmittedReason}
-      </p>
-
-      {receipt.equivalentCommand && (
-        <div className="border-t border-border-subtle px-3 py-2">
-          <span className="flex items-center gap-1.5 text-caption uppercase text-fg-muted">
-            <Terminal size={11} strokeWidth={1.5} aria-hidden />
-            this draft is reproducible today
-          </span>
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-mono-sm text-fg-secondary">
-            {receipt.equivalentCommand}
-          </pre>
+          <Labelled label="demo actor">
+            <MonoValue muted>{created.created_by}</MonoValue>
+          </Labelled>
+          <ProvenanceDot
+            kind={created.provenance.kind}
+            provider={created.provenance.provider}
+            sourceRef={created.provenance.source_ref}
+          />
+          {created.replayed && (
+            <span className="text-caption uppercase text-fg-muted">replayed</span>
+          )}
         </div>
       )}
 
-      <div className="border-t border-border-subtle px-3 py-2">
-        <span className="text-caption uppercase text-fg-muted">request body</span>
-        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-mono-sm text-fg-secondary">
-          {JSON.stringify(receipt.payload, null, 2)}
-        </pre>
-      </div>
+      {created && !started && !failure && !pending && (
+        <p className="border-t border-border-subtle px-3 py-1.5 text-caption text-fg-secondary">
+          Created and persisted. It has not been started, so no incidents were opened.
+        </p>
+      )}
+
+      {started && (
+        <div className="flex flex-wrap items-center gap-3 border-t border-state-ok/30 bg-state-ok-bg px-3 py-2">
+          <span className="text-caption text-state-ok">
+            Started {startedMemberIncidentCount(started)} member incidents; this request opened{' '}
+            {started.opened_incident_ids.length}.
+          </span>
+          <Link
+            to={`/cascade/${encodeURIComponent(started.scenario_reference)}`}
+            className="rounded-sm text-caption uppercase text-accent underline decoration-dotted underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Open active cascade
+          </Link>
+        </div>
+      )}
+
+      {failure && (
+        <div className="border-t border-state-crit/30 bg-state-crit-bg px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <StateBadge status="failed" label={`${failure.stage} failed`} />
+            <MonoValue muted>{apiError?.code ?? 'INTERNAL_ERROR'}</MonoValue>
+            {apiError?.correlationId && (
+              <Labelled label="correlation">
+                <MonoValue muted>{apiError.correlationId}</MonoValue>
+              </Labelled>
+            )}
+          </div>
+          <p className="mt-1 text-caption text-state-crit">
+            {submissionMessage(failure.stage, failure.error)}
+          </p>
+          {failure.stage === 'start' && created && (
+            <button
+              type="button"
+              className={clsx(SECONDARY_BUTTON, 'mt-2')}
+              onClick={onRetryStart}
+              disabled={pending}
+            >
+              <Play size={12} strokeWidth={1.5} aria-hidden />
+              Retry start for {created.scenario_reference}
+            </button>
+          )}
+        </div>
+      )}
     </Panel>
   );
 }
 
 export function ScenarioBuilder() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState(emptyDraft);
   const [step, setStep] = useState<ScenarioStepId>('template');
   const [flightText, setFlightText] = useState('');
-  const [receipt, setReceipt] = useState<ScenarioRequestReceipt | null>(null);
+  const [keys, setKeys] = useState<ReturnType<typeof createScenarioIdempotencyKeys> | null>(null);
+  const [created, setCreated] = useState<ScenarioCreateResponse | null>(null);
+  const [started, setStarted] = useState<ScenarioStartResponse | null>(null);
+  const [failure, setFailure] = useState<{
+    stage: 'create' | 'start';
+    error: unknown;
+  } | null>(null);
 
-  const report = useMemo(() => validateDraft(draft), [draft]);
+  const flightsQuery = useQuery({ queryKey: ['flights'], queryFn: api.flights });
+  const draftReport = useMemo(() => validateDraft(draft), [draft]);
+  const requestOutcome = useMemo(
+    () =>
+      flightsQuery.data
+        ? buildCreateRequest(draft, flightsQuery.data.flights)
+        : { refused: draftReport },
+    [draft, draftReport, flightsQuery.data],
+  );
+  const report = 'refused' in requestOutcome ? requestOutcome.refused : draftReport;
   const preview = useMemo(() => buildPreview(draft), [draft]);
   const steps = useMemo(() => stepStates(draft, step, report), [draft, step, report]);
   const parsedFlights = useMemo(() => parseFlightList(flightText), [flightText]);
   const template = findTemplate(draft.templateId);
 
+  const mutation = useMutation({
+    mutationFn: ({
+      request,
+      runAfterCreate,
+      requestKeys,
+      existingCreate,
+    }: {
+      request: ScenarioCreateRequest;
+      runAfterCreate: boolean;
+      requestKeys: ReturnType<typeof createScenarioIdempotencyKeys>;
+      existingCreate: ScenarioCreateResponse | null;
+    }) => submitScenario(request, runAfterCreate, requestKeys, api, existingCreate),
+    onSuccess: (result) => {
+      if (result.created) setCreated(result.created);
+      if (!result.ok) {
+        setFailure({ stage: result.stage, error: result.error });
+        return;
+      }
+      setFailure(null);
+      setStarted(result.started);
+      if (result.started && result.navigateTo) {
+        void queryClient.invalidateQueries({ queryKey: ['current-group'] });
+        void queryClient.invalidateQueries({ queryKey: ['incident-group'] });
+        void queryClient.invalidateQueries({ queryKey: ['flights'] });
+        navigate(result.navigateTo);
+      }
+    },
+  });
+
+  const resetSubmission = () => {
+    setKeys(null);
+    setCreated(null);
+    setStarted(null);
+    setFailure(null);
+    mutation.reset();
+  };
+
   const chooseTemplate = (chosen: ScenarioTemplate) => {
+    resetSubmission();
     setDraft((current) => applyTemplate(current, chosen));
     setFlightText(chosen.flightNumbers.join(', '));
-    setReceipt(null);
     setStep('details');
   };
 
   const commitFlightText = (raw: string) => {
     setFlightText(raw);
-    setReceipt(null);
+    resetSubmission();
     const { flights } = parseFlightList(raw);
     setDraft((current) => setFlightNumbers(current, flights));
   };
 
-  const prepare = (runAfterCreate: boolean) => {
-    const outcome = prepareScenarioRequest(draft, { runAfterCreate, now: new Date() });
-    if ('receipt' in outcome) {
-      setReceipt(outcome.receipt);
-      setStep('review');
+  const submit = (runAfterCreate: boolean) => {
+    if (!('request' in requestOutcome)) {
+      setStep(flightsQuery.data ? 'details' : 'review');
       return;
     }
-    // Refused. The report already renders beside every field; move to the step that shows it.
-    setReceipt(null);
-    setStep('details');
+    const requestKeys = keys ?? createScenarioIdempotencyKeys(() => crypto.randomUUID());
+    if (!keys) setKeys(requestKeys);
+    setFailure(null);
+    mutation.mutate({
+      request: requestOutcome.request,
+      runAfterCreate,
+      requestKeys,
+      existingCreate: created,
+    });
   };
 
   return (
@@ -293,14 +416,17 @@ export function ScenarioBuilder() {
           />
           <span className="ml-auto flex items-center gap-1.5">
             <ProvenanceDot
-              kind="unavailable"
-              provider="scenario-authoring"
+              kind={api.canWrite ? 'real' : 'fixture'}
+              provider="scenario-api"
               sourceRef={scenarioApi.createEndpoint}
             />
             <span className="text-caption uppercase text-fg-muted">
-              authoring endpoint not published
+              {api.canWrite ? 'live Scenario API' : 'fixture mode — writes disabled'}
             </span>
           </span>
+          <Labelled label="demo actor">
+            <MonoValue muted>{DEMO_SCENARIO_ACTOR_ID}</MonoValue>
+          </Labelled>
         </div>
       </Panel>
 
@@ -341,12 +467,12 @@ export function ScenarioBuilder() {
               }
             >
               <div className="grid gap-3 px-3 py-2 md:grid-cols-2">
-                <Field label="Scenario name" issues={issuesForField(report, 'name')}>
+                <Field label="Draft name (not sent)" issues={issuesForField(report, 'name')}>
                   <input
                     className={INPUT_CLASS}
                     value={draft.name}
                     onChange={(event) => {
-                      setReceipt(null);
+                      resetSubmission();
                       setDraft((current) => ({ ...current, name: event.target.value }));
                     }}
                   />
@@ -362,7 +488,7 @@ export function ScenarioBuilder() {
                     value={draft.airportIcao}
                     maxLength={4}
                     onChange={(event) => {
-                      setReceipt(null);
+                      resetSubmission();
                       setDraft((current) => ({
                         ...current,
                         airportIcao: event.target.value.toUpperCase(),
@@ -377,14 +503,14 @@ export function ScenarioBuilder() {
                     className={INPUT_CLASS}
                     value={draft.startsAt}
                     onChange={(event) => {
-                      setReceipt(null);
+                      resetSubmission();
                       setDraft((current) => ({ ...current, startsAt: event.target.value }));
                     }}
                   />
                 </Field>
 
                 <Field
-                  label="Duration (minutes)"
+                  label="Preview duration (not sent)"
                   issues={issuesForField(report, 'durationMinutes')}
                 >
                   <input
@@ -394,7 +520,7 @@ export function ScenarioBuilder() {
                     min={15}
                     max={1440}
                     onChange={(event) => {
-                      setReceipt(null);
+                      resetSubmission();
                       setDraft((current) => ({
                         ...current,
                         durationMinutes: Number.parseInt(event.target.value, 10),
@@ -408,7 +534,7 @@ export function ScenarioBuilder() {
                     label="Disruption type"
                     value={draft.disruptionType}
                     onChange={(next) => {
-                      setReceipt(null);
+                      resetSubmission();
                       setDraft((current) => ({ ...current, disruptionType: next }));
                     }}
                     options={DISRUPTION_TYPES.map((value) => ({
@@ -423,7 +549,7 @@ export function ScenarioBuilder() {
                     label="Severity"
                     value={draft.severity}
                     onChange={(next) => {
-                      setReceipt(null);
+                      resetSubmission();
                       setDraft((current) => ({ ...current, severity: next }));
                     }}
                     options={SCENARIO_SEVERITIES.map((value) => ({ value, label: value }))}
@@ -475,7 +601,7 @@ export function ScenarioBuilder() {
                         label="Primary flight"
                         value={draft.primaryFlight}
                         onChange={(next) => {
-                          setReceipt(null);
+                          resetSubmission();
                           setDraft((current) => ({ ...current, primaryFlight: next }));
                         }}
                         options={draft.flightNumbers.map((flight) => ({
@@ -489,15 +615,15 @@ export function ScenarioBuilder() {
 
                 <div className="md:col-span-2">
                   <Field
-                    label="Notes"
-                    hint={`Recorded with the scenario so a replay can say why it was run. ${draft.notes.length}/${MAX_NOTES_LENGTH}.`}
+                    label="Draft notes (not sent)"
+                    hint={`Local review context only; the published Scenario contract does not persist notes. ${draft.notes.length}/${MAX_NOTES_LENGTH}.`}
                     issues={issuesForField(report, 'notes')}
                   >
                     <textarea
                       className={clsx(INPUT_CLASS, 'min-h-[64px] resize-y')}
                       value={draft.notes}
                       onChange={(event) => {
-                        setReceipt(null);
+                        resetSubmission();
                         setDraft((current) => ({ ...current, notes: event.target.value }));
                       }}
                     />
@@ -538,15 +664,43 @@ export function ScenarioBuilder() {
                   />
                 }
               >
+                {flightsQuery.isLoading && (
+                  <p className="border-b border-border-subtle px-3 py-1.5 text-caption text-fg-muted">
+                    Loading flight-board records before validating membership…
+                  </p>
+                )}
+                {flightsQuery.error && (
+                  <div className="flex items-center gap-2 border-b border-state-crit/30 bg-state-crit-bg px-3 py-2">
+                    <span className="text-caption text-state-crit">
+                      Flight records could not be loaded, so no scenario can be submitted.
+                    </span>
+                    <button
+                      type="button"
+                      className={SECONDARY_BUTTON}
+                      onClick={() => void flightsQuery.refetch()}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {!api.canWrite && (
+                  <p className="border-b border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
+                    Fixture mode is read-only. Use the live API to create a scenario.
+                  </p>
+                )}
                 {report.issues.length === 0 ? (
                   <p className="flex items-center gap-1.5 px-3 py-2 text-caption text-state-ok">
                     <Check size={12} strokeWidth={1.5} aria-hidden />
-                    Every field the request needs is present and well-formed.
+                    The draft is valid and every selected flight resolves to an authorable API
+                    member.
                   </p>
                 ) : (
                   <ul className="flex flex-col gap-1 px-3 py-2">
                     {report.issues.map((issue) => (
-                      <li key={`${issue.field}-${issue.code}`} className="flex items-start gap-2">
+                      <li
+                        key={`${issue.field}-${issue.code}-${issue.message}`}
+                        className="flex items-start gap-2"
+                      >
                         <StateBadge
                           status={issue.severity === 'error' ? 'failed' : 'at_risk'}
                           label={issue.severity}
@@ -566,6 +720,10 @@ export function ScenarioBuilder() {
               </Panel>
 
               <Panel title="Preview">
+                <p className="border-b border-border-subtle px-3 py-1.5 text-caption text-fg-muted">
+                  Draft name, duration and notes organise this local preview; the published API does
+                  not persist them.
+                </p>
                 <dl className="grid gap-x-4 gap-y-1 px-3 py-2 md:grid-cols-2">
                   {(
                     [
@@ -641,28 +799,41 @@ export function ScenarioBuilder() {
                   <button
                     type="button"
                     className={SECONDARY_BUTTON}
-                    onClick={() => prepare(false)}
-                    disabled={!report.ok}
+                    onClick={() => submit(false)}
+                    disabled={
+                      !report.ok || !flightsQuery.data || !api.canWrite || mutation.isPending
+                    }
                   >
                     <Plus size={12} strokeWidth={1.5} aria-hidden />
-                    Create scenario
+                    {mutation.isPending && !created ? 'Creating…' : 'Create scenario'}
                   </button>
                   <button
                     type="button"
                     className={PRIMARY_BUTTON}
-                    onClick={() => prepare(true)}
-                    disabled={!report.ok}
+                    onClick={() => submit(true)}
+                    disabled={
+                      !report.ok || !flightsQuery.data || !api.canWrite || mutation.isPending
+                    }
                   >
                     <Play size={12} strokeWidth={1.5} aria-hidden />
-                    Create &amp; run
+                    {mutation.isPending ? (created ? 'Starting…' : 'Creating…') : 'Create & run'}
                   </button>
                   <span className="ml-auto text-caption uppercase text-fg-muted">
-                    creating opens one gate per flight — it approves nothing
+                    creation persists membership; start opens incidents — later actions remain
+                    assurance-gated
                   </span>
                 </div>
               </Panel>
 
-              {receipt && <ReceiptPanel receipt={receipt} />}
+              {(created || failure || mutation.isPending) && (
+                <ResultPanel
+                  created={created}
+                  started={started}
+                  failure={failure}
+                  pending={mutation.isPending}
+                  onRetryStart={() => submit(true)}
+                />
+              )}
             </>
           )}
         </div>
@@ -704,8 +875,8 @@ export function ScenarioBuilder() {
           <Panel title="What happens next">
             <ol className="flex flex-col gap-2 px-3 py-2">
               {[
-                'The scenario seeds flights, passengers and crew for the airport and window you set.',
-                'One incident opens per affected flight, each with its own assurance gate.',
+                'The scenario records the selected persisted flights, airport and effective time.',
+                'Starting opens one incident per affected flight; later actions pass their own assurance gates.',
                 'Every high-risk action still waits for a named person, exactly as it does today.',
                 'Figures on the operations screens come from the engine, never from this form.',
               ].map((line, index) => (

@@ -21,15 +21,19 @@
  * Owner: Stream D.
  */
 
+import type {
+  FlightRow,
+  ScenarioCreateRequest,
+  ScenarioCreateResponse,
+  ScenarioStartResponse,
+  TriggerType,
+} from '@/api/types';
 import {
   DISRUPTION_TYPES,
-  SCENARIO_CREATE_ENDPOINT,
   SCENARIO_SEVERITIES,
   findTemplate,
   type DisruptionType,
-  type ScenarioCreateRequest,
   type ScenarioDraft,
-  type ScenarioRequestReceipt,
   type ScenarioSeverity,
   type ScenarioTemplate,
 } from './scenarioContracts';
@@ -154,7 +158,7 @@ export function validateDraft(draft: ScenarioDraft): ValidationReport {
   }
 
   if (draft.name.trim() === '') {
-    add('name', 'NAME_REQUIRED', 'Give the scenario a name so it can be told apart in a replay.');
+    add('name', 'NAME_REQUIRED', 'Give this local draft a name for the review step.');
   }
 
   if (!DISRUPTION_TYPES.includes(draft.disruptionType)) {
@@ -264,7 +268,7 @@ export function validateDraft(draft: ScenarioDraft): ValidationReport {
     add(
       'notes',
       'CRITICAL_WITHOUT_NOTE',
-      'Critical severity with no note leaves a replay unable to say why it was critical.',
+      'Critical severity with no draft note leaves the local review context unexplained.',
       'warning',
     );
   }
@@ -432,114 +436,199 @@ export function canOpenStep(draft: ScenarioDraft, step: ScenarioStepId): boolean
   return findTemplate(draft.templateId) !== null;
 }
 
-// ---------------------------------------------------------------- request
+// ---------------------------------------------------------------- real API adapter and lifecycle
 
-/**
- * A stable id for a prepared request: FNV-1a over the canonical payload.
- *
- * Deterministic on purpose. A random id would change on every render and could not be matched
- * against a payload an operator copied out five minutes earlier, and the house rule for replayable
- * surfaces is that identical inputs produce identical output.
- */
-export function stableRequestId(payload: ScenarioCreateRequest): string {
-  const canonical = JSON.stringify([
-    payload.name,
-    payload.disruption_type,
-    payload.airport_icao,
-    payload.starts_at,
-    payload.duration_minutes,
-    payload.severity,
-    payload.flight_numbers,
-    payload.primary_flight,
-    payload.notes,
-    payload.template_id,
-    payload.run_after_create,
-  ]);
+const TRIGGER_BY_DISRUPTION: Record<DisruptionType, TriggerType> = {
+  weather: 'weather',
+  crew: 'crew_rostering',
+  technical: 'technical',
+  airport_closure: 'other',
+};
 
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < canonical.length; index += 1) {
-    hash ^= canonical.charCodeAt(index);
-    // FNV prime, applied with >>> 0 so this stays an unsigned 32-bit value in JavaScript.
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return `scn-${hash.toString(16).padStart(8, '0')}`;
+function effectiveAtUtc(value: string): string {
+  const includesZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+  const instant = new Date(includesZone ? value : `${value}Z`);
+  return instant.toISOString();
 }
 
+export type ScenarioRequestOutcome =
+  { request: ScenarioCreateRequest } | { refused: ValidationReport };
+
+export const DEMO_SCENARIO_ACTOR_ID = 'operator-1';
+
+/** Resolve operator-entered designators to the exact flight-board rows the API publishes. */
 export function buildCreateRequest(
   draft: ScenarioDraft,
-  options: { runAfterCreate: boolean },
-): ScenarioCreateRequest {
-  return {
-    name: draft.name.trim(),
-    disruption_type: draft.disruptionType,
-    airport_icao: draft.airportIcao.trim().toUpperCase(),
-    starts_at: draft.startsAt,
-    duration_minutes: draft.durationMinutes,
-    severity: draft.severity,
-    flight_numbers: [...draft.flightNumbers],
-    primary_flight: draft.primaryFlight,
-    notes: draft.notes.trim(),
-    template_id: draft.templateId,
-    run_after_create: options.runAfterCreate,
-  };
-}
-
-/**
- * The command that reproduces this draft today, or null when there is not one.
- *
- * Offered only for a draft still matching a template the repository actually seeds, and only when
- * the operator has not edited the parts the seed fixes. An "equivalent" command that produced a
- * different disruption would be worse than no command at all.
- */
-export function equivalentCommandFor(
-  draft: ScenarioDraft,
-  options: { runAfterCreate: boolean },
-): string | null {
-  const template = findTemplate(draft.templateId);
-  if (!template?.seedScenarioId) return null;
-
-  const unchanged =
-    draft.airportIcao.trim().toUpperCase() === template.airportIcao &&
-    draft.disruptionType === template.disruptionType &&
-    draft.severity === template.severity &&
-    draft.durationMinutes === template.durationMinutes &&
-    draft.flightNumbers.length === template.flightNumbers.length &&
-    draft.flightNumbers.every((flight, index) => flight === template.flightNumbers[index]);
-
-  if (!unchanged) return null;
-
-  const cascade = options.runAfterCreate ? ' --cascade' : '';
-  return `python -m app.cli inject --scenario ${template.seedScenarioId}${cascade}`;
-}
-
-export const UNSUBMITTED_REASON =
-  'Prepared in the console and not sent. Scenario authoring has no endpoint yet, and inventing a created scenario would put a state change on screen that never happened.';
-
-/**
- * Builds the request, or refuses because the draft is invalid.
- *
- * Refusing here rather than in the component is what stops the review step rendering a payload the
- * backend would reject. `now` is a parameter so the receipt is deterministic under test.
- */
-export function prepareScenarioRequest(
-  draft: ScenarioDraft,
-  options: { runAfterCreate: boolean; now: Date },
-): { receipt: ScenarioRequestReceipt } | { refused: ValidationReport } {
+  flights: readonly FlightRow[],
+  actorId = DEMO_SCENARIO_ACTOR_ID,
+): ScenarioRequestOutcome {
   const report = validateDraft(draft);
   if (!report.ok) return { refused: report };
 
-  const payload = buildCreateRequest(draft, { runAfterCreate: options.runAfterCreate });
+  const issues: ValidationIssue[] = [];
+  const members: ScenarioCreateRequest['members'] = [];
+  const airport = draft.airportIcao.trim().toUpperCase();
+
+  for (const flightNumber of draft.flightNumbers) {
+    const matches = flights.filter((flight) => flight.flight_number === flightNumber);
+    if (matches.length === 0) {
+      issues.push({
+        field: 'flightNumbers',
+        code: 'FLIGHT_NOT_FOUND',
+        message: `${flightNumber} is not in the current flight dataset.`,
+        severity: 'error',
+      });
+      continue;
+    }
+    if (matches.length > 1) {
+      issues.push({
+        field: 'flightNumbers',
+        code: 'FLIGHT_AMBIGUOUS',
+        message: `${flightNumber} resolves to more than one current flight.`,
+        severity: 'error',
+      });
+      continue;
+    }
+
+    const flight = matches[0]!;
+    const departsRoot = flight.origin_icao === airport;
+    const arrivesRoot = flight.destination_icao === airport;
+    if (!departsRoot && !arrivesRoot) {
+      issues.push({
+        field: 'flightNumbers',
+        code: 'FLIGHT_OUTSIDE_ROOT_AIRPORT',
+        message: `${flightNumber} neither departs from nor arrives at ${airport}.`,
+        severity: 'error',
+      });
+      continue;
+    }
+
+    if (flightNumber === draft.primaryFlight && !departsRoot) {
+      issues.push({
+        field: 'primaryFlight',
+        code: 'PRIMARY_NOT_DEPARTING_ROOT',
+        message: `${flightNumber} is primary but does not depart from ${airport}.`,
+        severity: 'error',
+      });
+      continue;
+    }
+
+    members.push({
+      flight_id: flight.id,
+      role:
+        flightNumber === draft.primaryFlight
+          ? 'primary'
+          : departsRoot
+            ? 'affected_departure'
+            : 'affected_arrival',
+      delay_minutes: flight.delay_minutes,
+    });
+  }
+
+  if (issues.length > 0) {
+    return {
+      refused: {
+        issues: [...report.issues, ...issues],
+        errors: [...report.errors, ...issues],
+        warnings: report.warnings,
+        ok: false,
+      },
+    };
+  }
+
   return {
-    receipt: {
-      requestId: stableRequestId(payload),
-      preparedAt: options.now.toISOString(),
-      targetEndpoint: SCENARIO_CREATE_ENDPOINT,
-      payload,
-      submitted: false,
-      unsubmittedReason: UNSUBMITTED_REASON,
-      equivalentCommand: equivalentCommandFor(draft, {
-        runAfterCreate: options.runAfterCreate,
-      }),
+    request: {
+      root_cause: TRIGGER_BY_DISRUPTION[draft.disruptionType],
+      airport_icao: airport,
+      severity: draft.severity,
+      effective_at: effectiveAtUtc(draft.startsAt),
+      actor_id: actorId,
+      members,
     },
   };
+}
+
+export interface ScenarioIdempotencyKeys {
+  create: string;
+  start: string;
+}
+
+/** Generated once per unchanged draft and retained by the component across retries. */
+export function createScenarioIdempotencyKeys(randomId: () => string): ScenarioIdempotencyKeys {
+  return {
+    create: `scenario-create-${randomId()}`,
+    start: `scenario-start-${randomId()}`,
+  };
+}
+
+export interface ScenarioApiPort {
+  createScenario: (
+    request: ScenarioCreateRequest,
+    idempotencyKey: string,
+  ) => Promise<ScenarioCreateResponse>;
+  startScenario: (
+    scenarioReference: string,
+    actorId: string,
+    idempotencyKey: string,
+  ) => Promise<ScenarioStartResponse>;
+}
+
+/** Total currently associated incidents, distinct from those newly opened by this one request. */
+export function startedMemberIncidentCount(response: ScenarioStartResponse): number {
+  return response.members.filter((member) => member.incident_reference !== null).length;
+}
+
+export type ScenarioSubmissionResult =
+  | {
+      ok: true;
+      created: ScenarioCreateResponse;
+      started: ScenarioStartResponse | null;
+      navigateTo: string | null;
+    }
+  | {
+      ok: false;
+      stage: 'create' | 'start';
+      error: unknown;
+      created: ScenarioCreateResponse | null;
+    };
+
+/**
+ * Execute create and optional start in order. A start failure keeps the real create response so a
+ * retry never creates a second scenario and never hides the `SCN-*` that already exists.
+ */
+export async function submitScenario(
+  request: ScenarioCreateRequest,
+  runAfterCreate: boolean,
+  keys: ScenarioIdempotencyKeys,
+  apiPort: ScenarioApiPort,
+  existingCreate: ScenarioCreateResponse | null = null,
+): Promise<ScenarioSubmissionResult> {
+  let created = existingCreate;
+  if (!created) {
+    try {
+      created = await apiPort.createScenario(request, keys.create);
+    } catch (error) {
+      return { ok: false, stage: 'create', error, created: null };
+    }
+  }
+
+  if (!runAfterCreate) {
+    return { ok: true, created, started: null, navigateTo: null };
+  }
+
+  try {
+    const started = await apiPort.startScenario(
+      created.scenario_reference,
+      request.actor_id,
+      keys.start,
+    );
+    return {
+      ok: true,
+      created,
+      started,
+      navigateTo: `/cascade/${encodeURIComponent(started.scenario_reference)}`,
+    };
+  } catch (error) {
+    return { ok: false, stage: 'start', error, created };
+  }
 }
