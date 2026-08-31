@@ -611,10 +611,24 @@ class TestOpenApiSchemas:
     def test_the_endpoints_not_yet_real_are_still_labelled_fixture(self, client):
         """Honest labelling: an unimplemented endpoint must not look finished."""
         spec = client.get("/openapi.json").json()
-        # `/incidents/{id}/policy` left this list when G4 made it real; `/flights` and `/sources`
-        # are still fixture-backed and must keep saying so.
-        for path in ("/api/v1/flights", "/api/v1/sources"):
+        # `/incidents/{id}/policy` left this list when G4 made it real, and `/flights` left it when
+        # it started reading persisted state; `/sources` is still fixture-backed and must keep
+        # saying so. The rule is unchanged — the list is the set of endpoints that are still
+        # fixtures, so an endpoint leaving it is the label becoming true, not the check relaxing.
+        for path in ("/api/v1/sources",):
             assert "[fixture]" in spec["paths"][path]["get"]["summary"]
+
+    def test_the_flight_board_no_longer_claims_to_be_a_fixture(self, client):
+        """It is the board the Scenario Builder resolves flight ids against.
+
+        While it was a fixture it could not agree with the validation `POST /scenarios` performs
+        against the real `flight` table, and on the committed dataset it did not.
+        """
+        spec = client.get("/openapi.json").json()
+        flights = spec["paths"]["/api/v1/flights"]["get"]
+        assert "[fixture]" not in flights["summary"]
+        schema = flights["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("FlightBoardResponse"), "must resolve to a component schema"
 
     def test_the_policy_endpoint_no_longer_claims_to_be_a_fixture(self, client):
         spec = client.get("/openapi.json").json()
