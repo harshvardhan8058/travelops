@@ -549,6 +549,42 @@ class Orchestrator:
             refs.append(f"flight:{ctx.flight_id}")
         return refs
 
+    async def _planner_candidate_budget(self, incident: Incident | None) -> tuple[float, bool]:
+        """Return the bounded model-call allowance and whether primary-demo tuning applied.
+
+        Windows live runs show the first (primary) demo incident crossing the ordinary 20-second
+        ceiling while later calls to the same provider and planner succeed. The code sends no
+        larger prompt and performs no different schema/reflection work for that incident, so this
+        is first-call provider latency, not a reason to widen every member's budget.
+
+        Primary is recorded data, not a reference convention: the inbound VAAH member also ends in
+        ``-01``. The additional allowance therefore requires both the configured demo dataset id
+        and the unique ``incident_group_flight.role = 'primary'`` row. A direct incident run and a
+        group run make the same decision because both read the persisted membership.
+        """
+        ordinary = self._settings.planner_candidate_budget_seconds
+        if (
+            incident is None
+            or incident.group_id is None
+            or incident.flight_id is None
+            or incident.demo_dataset_id != self._settings.demo_dataset_id
+        ):
+            return ordinary, False
+
+        # Imported lazily with the other Phase 2/3 paths. This is a read of existing declared
+        # membership, not a second role model and not a schema change.
+        from app.models.cascade import IncidentGroupFlight
+
+        role = await self._session.scalar(
+            select(IncidentGroupFlight.role).where(
+                IncidentGroupFlight.incident_group_id == incident.group_id,
+                IncidentGroupFlight.flight_id == incident.flight_id,
+            )
+        )
+        if role == "primary":
+            return self._settings.primary_demo_planner_candidate_budget_seconds, True
+        return ordinary, False
+
     async def _propose_planner_candidate(self, ctx: WorkflowContext) -> None:
         """Phase 3: produce a second candidate plan from the Planner reasoning agent.
 
@@ -604,6 +640,13 @@ class Orchestrator:
             # Get flight info for prompt context
             flight = await self._session.get(Flight, ctx.flight_id) if ctx.flight_id else None
 
+            budget, primary_demo_budget = await self._planner_candidate_budget(incident)
+            log.info(
+                "planner_candidate_budget_selected",
+                incident_reference=ctx.incident_reference,
+                budget_seconds=budget,
+                primary_demo_budget=primary_demo_budget,
+            )
             agent = PlannerAgent()
             phase = "request"
             # Bound the model call itself, and nothing else.
@@ -619,7 +662,6 @@ class Orchestrator:
             # cancelled call cannot leave the session mid-flush. The timeout is converted into the
             # one existing skip route rather than a new one — a model that never answers is
             # unavailable, which is exactly what that path already means.
-            budget = self._settings.planner_candidate_budget_seconds
             try:
                 planner_response, audit = await asyncio.wait_for(
                     agent.propose(
@@ -774,6 +816,8 @@ class Orchestrator:
                 status_code=getattr(exc, "status_code", None),
                 finish_reason=getattr(exc, "finish_reason", None),
                 content_length=getattr(exc, "content_length", None),
+                budget_seconds=budget,
+                primary_demo_budget=primary_demo_budget,
                 reason=str(exc)[:200],
             )
             await self._journal(
@@ -793,6 +837,8 @@ class Orchestrator:
                     "status_code": getattr(exc, "status_code", None),
                     "finish_reason": getattr(exc, "finish_reason", None),
                     "content_length": getattr(exc, "content_length", None),
+                    "budget_seconds": budget,
+                    "primary_demo_budget": primary_demo_budget,
                 },
             )
         except Exception as exc:
