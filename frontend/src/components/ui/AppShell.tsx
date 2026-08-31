@@ -29,6 +29,7 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 import { MonoValue, ProvenanceDot, StateBadge } from './primitives';
+import { effectiveStatuses, type EffectiveStatus } from './sourceStatus';
 import { PackStandingChip } from '@/features/policy-citation/PackStandingView';
 import type { SystemMode } from '@/api/types';
 
@@ -81,44 +82,71 @@ function Rail() {
   );
 }
 
-function ModeChip({ label, value, tone }: { label: string; value: string; tone?: string }) {
+const STATUS_TONE: Record<EffectiveStatus['tone'], string> = {
+  ok: 'text-state-ok',
+  info: 'text-state-info',
+  warn: 'text-state-warn',
+  neutral: 'text-fg-muted',
+};
+
+function SourceStatus({ status }: { status: EffectiveStatus }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5">
-      <span className="text-caption uppercase text-fg-muted">{label}</span>
-      <MonoValue className={clsx('uppercase', tone)}>{value}</MonoValue>
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5"
+      title={status.description}
+    >
+      <span className="text-caption uppercase text-fg-muted">{status.label}</span>
+      <MonoValue className={STATUS_TONE[status.tone]}>{status.value}</MonoValue>
+      <span className="sr-only">. {status.description}</span>
     </span>
   );
 }
 
-function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
-  const llm = mode?.llm_mode ?? '…';
-  // Off is not an error state — it is a supported operating mode and a demo asset.
-  const llmTone =
-    llm === 'live' ? 'text-state-ok' : llm === 'fixture' ? 'text-state-info' : 'text-state-warn';
-
+function SourceStrip({ mode }: { mode?: SystemMode }) {
   return (
-    <header className="flex h-topbar shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-3">
-      <div className="flex items-baseline gap-2">
+    <footer
+      aria-label="Effective source and notification modes"
+      className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border-subtle bg-surface px-3 py-1.5"
+    >
+      <NavLink
+        to="/sources"
+        className="mr-1 shrink-0 rounded-sm text-caption uppercase text-fg-muted underline decoration-dotted underline-offset-2 transition-colors duration-hover ease-out hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Open source ledger for effective mode provenance"
+      >
+        effective modes
+      </NavLink>
+      {effectiveStatuses(mode).map((status) => (
+        <SourceStatus key={status.label} status={status} />
+      ))}
+      <span className="min-w-0 text-caption text-fg-muted">
+        Recorded runtime capability; source records and deliveries remain auditable in their own
+        views.
+      </span>
+    </footer>
+  );
+}
+
+function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
+  return (
+    <header className="flex h-topbar min-w-0 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-3">
+      <div className="flex shrink-0 items-baseline gap-2">
         <span className="text-subtitle font-semibold text-fg">TravelOps</span>
         <span className="text-caption uppercase text-fg-muted">Operations</span>
       </div>
 
-      <div className="ml-2 flex items-center gap-2">
-        <ModeChip label="LLM" value={llm} tone={llmTone} />
-        <ModeChip label="WX" value={mode?.weather_mode ?? '…'} />
-        <ModeChip label="NOTIFY" value={mode?.notification_mode ?? '…'} />
+      {/*
+        Policy standing must never be derived here from `mode.policy_mode === 'verified'`.
+        Runtime mode is not review status; the shared component owns the contract-backed standing
+        interpretation so the shell and policy screen cannot diverge.
+
+        The pack label is secondary shell context and may truncate visually, but the complete label
+        and standing explanation remain in the chip's accessible title and screen-reader copy.
+      */}
+      <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+        <PackStandingChip uiLabel={mode?.policy_pack?.ui_label} />
       </div>
 
-      {/*
-        The pack label, rendered verbatim through the single standing component.
-        This chip used to colour itself from `mode.policy_mode === 'verified'` — the requested runtime
-        mode, which says nothing about the pack that actually loaded. A verified mode over a draft pack
-        painted it green. `/system/mode` publishes no pack status at all, so this surface now makes no
-        standing claim and points at the one that does.
-      */}
-      <PackStandingChip uiLabel={mode?.policy_pack?.ui_label} />
-
-      <div className="ml-auto flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         {mode && (
           <span className="flex items-center gap-1.5" title="Assurance configuration">
             <ProvenanceDot
@@ -187,7 +215,7 @@ export function AppShell({
 
         {/* A blocked action must never be discoverable only by navigating to a page. */}
         {blockedCount > 0 && (
-          <div className="flex shrink-0 items-center gap-2 border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5">
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 border-t border-state-warn/30 bg-state-warn-bg px-3 py-1.5">
             <StateBadge status="needs_human" label="awaiting approval" />
             <span className="text-body text-state-warn">
               <MonoValue className="text-state-warn">{blockedCount}</MonoValue>{' '}
@@ -201,6 +229,8 @@ export function AppShell({
             </NavLink>
           </div>
         )}
+
+        <SourceStrip mode={mode} />
       </div>
     </div>
   );

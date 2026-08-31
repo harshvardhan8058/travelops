@@ -123,7 +123,10 @@ export function PlanAssuranceMatrix({
         </Notice>
       )}
 
-      <TableFrame caption="Tasks by assurance check. Each cell is PASS, WARN or FAIL. There is no aggregate: the gate is fail-closed and ordered, so an average of six checks would be a fiction.">
+      <TableFrame
+        className="[&_table]:table-fixed [&_td]:break-words [&_th]:break-words"
+        caption="Tasks by assurance check. Each cell is PASS, WARN or FAIL. There is no aggregate: the gate is fail-closed and ordered, so an average of six checks would be a fiction."
+      >
         <TableHead
           columns={[
             { key: 'task', label: 'Task' },
@@ -149,7 +152,7 @@ export function PlanAssuranceMatrix({
                     className="flex items-center gap-2 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
                     <MonoValue muted>{task.task_order}</MonoValue>
-                    <MonoValue className={clsx(selected && 'text-accent')}>
+                    <MonoValue className={clsx('break-all', selected && 'text-accent')}>
                       {task.action_type}
                     </MonoValue>
                   </button>

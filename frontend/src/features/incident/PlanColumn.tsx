@@ -1,24 +1,21 @@
 /**
  * Recovery workspace, centre column — Plan and execution.
  *
- * The generator chip at the top is the most important 40px on the screen. A judge must never
- * have to ask whether a model produced this plan. It states one of two things and never
- * anything ambiguous:
- *
- *   Planner · groq · llama-3.3-70b · prompt v1
- *   Fallback playbook · deterministic
- *
- * Classification comes from the `generator` string as returned, and the raw value is printed
- * alongside it, so the chip cannot quietly disagree with the record.
+ * The generator chip at the top is the most important 40px on the screen. It classifies only
+ * recorded tokens the console recognises: MODEL-AUTHORED for the recorded planner/model tokens,
+ * DETERMINISTIC FALLBACK for playbook tokens, and UNCLASSIFIED GENERATOR for everything else.
+ * The raw value remains visible so the classification is auditable.
  *
  * Owner: Stream D.
  */
 
-import { ChevronDown, ChevronRight, Cpu, Workflow } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronDown, ChevronRight, CircleHelp, Cpu, Workflow } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 
+import { api } from '@/api/client';
 import type {
   ActionRecord,
   IncidentDetail,
@@ -38,55 +35,82 @@ import {
 } from '@/components/ui/composition';
 import { utcStamp } from '@/components/ui/format';
 import { refusalFor } from './refusal';
-import { isDeterministicGenerator, plannerCandidateAttribution } from './planAttribution';
+import {
+  candidateMismatchLabel,
+  planGeneratorKind,
+  plannerCandidateAttribution,
+  plannerUnavailableAttribution,
+} from './planAttribution';
 
-/**
- * A plan is either model-proposed or deterministic. There is no third state, and no "maybe":
- * `LLM_MODE=off` must still complete a recovery, so the fallback is a first-class path rather
- * than an error condition.
- */
+/** Classify only recorded generator tokens with known semantics; unknown stays unclassified. */
 function GeneratorChip({ plan }: { plan: PlanSummary }) {
-  // Classifies on the token, not the prose: the real API returns 'fallback-playbook' while the
-  // committed fixture returns 'fallback-playbook · deterministic'.
-  const isDeterministic = isDeterministicGenerator(plan.generator);
-  const Icon = isDeterministic ? Workflow : Cpu;
+  const generatorKind = planGeneratorKind(plan.generator);
+  const isDeterministic = generatorKind === 'deterministic_fallback';
+  const isModelAuthored = generatorKind === 'model_authored';
+  const modelProvider = isModelAuthored ? 'recorded planner' : null;
+  const Icon = isDeterministic ? Workflow : isModelAuthored ? Cpu : CircleHelp;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span
-        className={clsx(
-          'inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 text-label uppercase',
-          isDeterministic
-            ? 'border-border-strong bg-inset text-fg-secondary'
-            : 'border-accent-border bg-accent-subtle text-accent',
-        )}
-      >
-        <Icon size={12} strokeWidth={1.5} aria-hidden />
-        {isDeterministic ? (
-          <span>Fallback playbook · deterministic</span>
-        ) : (
-          <span>
-            Planner · {plan.generator}
-            {plan.prompt_version ? ` · prompt ${plan.prompt_version}` : ' · prompt unversioned'}
+    <div className="flex flex-col items-start gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={clsx(
+            'inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 text-label uppercase',
+            isModelAuthored
+              ? 'border-accent-border bg-accent-subtle text-accent'
+              : 'border-border-strong bg-inset text-fg-secondary',
+          )}
+        >
+          <Icon size={12} strokeWidth={1.5} aria-hidden />
+          {isDeterministic
+            ? 'Deterministic fallback'
+            : isModelAuthored
+              ? `Model-authored${modelProvider ? ` · ${modelProvider}` : ''}`
+              : 'Unclassified generator'}
+        </span>
+        <StateBadge status="recorded" label="recorded plan of record" />
+        <span className="text-caption text-fg-muted">
+          recorded generator <MonoValue muted>{plan.generator}</MonoValue>
+        </span>
+        {isDeterministic && (
+          <span className="text-caption text-fg-muted">
+            Fallback playbook · deterministic · no model produced this plan
           </span>
         )}
-      </span>
+        {generatorKind === 'unclassified' && (
+          <span className="text-caption text-fg-muted">
+            authorship is not inferred from an unknown token
+          </span>
+        )}
+      </div>
 
-      {/* The raw record, so the classification above is auditable rather than trusted. */}
-      <span className="text-caption text-fg-muted">
-        generator <MonoValue muted>{plan.generator}</MonoValue>
-      </span>
-
-      {isDeterministic && (
-        <span className="text-caption text-fg-muted">no model produced this plan</span>
-      )}
-
-      {plan.model_self_report !== null && (
-        <span className="text-caption text-fg-muted">
-          model self-report <MonoValue muted>{plan.model_self_report}</MonoValue> · diagnostic only,
-          never gates execution
-        </span>
-      )}
+      <details className="w-full rounded-sm border border-border-subtle bg-inset px-2 py-1.5">
+        <summary className="cursor-pointer text-caption uppercase text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          Technical attribution
+        </summary>
+        <DefinitionList width="sm" className="mt-2 border-t border-border-subtle pt-2">
+          <DefinitionRow label="generator" width="sm">
+            <MonoValue muted>{plan.generator}</MonoValue>
+          </DefinitionRow>
+          <DefinitionRow label="prompt" width="sm">
+            {plan.prompt_version ? (
+              <MonoValue muted>{plan.prompt_version}</MonoValue>
+            ) : (
+              <Absent label="not recorded" title="This plan records no prompt version." />
+            )}
+          </DefinitionRow>
+          <DefinitionRow label="model self-report" width="sm">
+            {plan.model_self_report === null ? (
+              <Absent label="not recorded" title="This plan records no model self-report." />
+            ) : (
+              <span className="text-caption text-fg-muted">
+                <MonoValue muted>{plan.model_self_report}</MonoValue> · diagnostic only, never gates
+                execution
+              </span>
+            )}
+          </DefinitionRow>
+        </DefinitionList>
+      </details>
     </div>
   );
 }
@@ -230,7 +254,9 @@ export function PlanColumn({
   onSelectTask: (taskId: number) => void;
 }) {
   const { plan, actions } = incident;
-  const plannerCandidate = plannerCandidateAttribution(timeline, plan);
+  const systemMode = useQuery({ queryKey: ['system-mode'], queryFn: api.systemMode });
+  const plannerCandidate = plannerCandidateAttribution(timeline, plan, systemMode.data?.llm_mode);
+  const plannerUnavailable = plannerUnavailableAttribution(timeline);
   const actionByTask = new Map(actions.map((action) => [action.plan_task_id, action]));
 
   /**
@@ -281,7 +307,15 @@ export function PlanColumn({
   return (
     <Panel title="Plan" className="flex min-w-0 flex-col">
       {plannerCandidate && (
-        <Notice tone={plannerCandidate.isPlanOfRecord ? 'default' : 'muted'}>
+        <Notice
+          tone={
+            !plannerCandidate.sourceVerified
+              ? 'warn'
+              : plannerCandidate.isPlanOfRecord
+                ? 'default'
+                : 'muted'
+          }
+        >
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <StateBadge
               status={plannerCandidate.isPlanOfRecord ? 'executing' : 'proposed'}
@@ -292,8 +326,8 @@ export function PlanColumn({
             <span>
               <MonoValue>{plannerCandidate.generator}</MonoValue> · {plannerCandidate.sourceLabel} ·{' '}
               {plannerCandidate.isPlanOfRecord
-                ? 'this is the plan of record'
-                : 'not selected; the deterministic playbook remains the plan of record'}
+                ? `candidate id ${plannerCandidate.planId} matches the recorded plan-of-record id`
+                : `candidate id ${plannerCandidate.planId} does not match plan-of-record id ${plan.id}; ${candidateMismatchLabel(plan)}`}
             </span>
             <Link
               to={`/plans/${incident.reference}`}
@@ -301,6 +335,19 @@ export function PlanColumn({
             >
               compare candidates
             </Link>
+          </span>
+        </Notice>
+      )}
+      {plannerUnavailable && (
+        <Notice tone="warn">
+          <span className="font-medium">Recorded planner unavailable:</span>{' '}
+          <span>{plannerUnavailable.reason}</span>
+          <span className="ml-2 text-caption">
+            timeline event{' '}
+            <MonoValue className="text-state-warn">{plannerUnavailable.eventId}</MonoValue> at{' '}
+            <MonoValue className="text-state-warn">
+              {utcStamp(plannerUnavailable.occurredAt) ?? plannerUnavailable.occurredAt}
+            </MonoValue>
           </span>
         </Notice>
       )}

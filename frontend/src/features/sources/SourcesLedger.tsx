@@ -91,15 +91,20 @@ export function SourcesLedger() {
     count: sources.filter((source) => source.kind === kind).length,
   })).filter((segment) => segment.count > 0);
 
-  const realCount = sources.filter((source) => source.kind === 'real').length;
+  // `kind: real` records source identity, not whether the integration is operating live now.
+  // Count a live source only when both facts are recorded; no provider or health inference.
+  const liveCount = sources.filter(
+    (source) => source.kind === 'real' && source.current_mode === 'live',
+  ).length;
   const unavailableCount = sources.filter((source) => source.kind === 'unavailable').length;
 
   return (
     <div className="flex flex-col gap-3">
       {/*
        * This screen is the root of every provenance claim in the product: each badge elsewhere is
-       * read from here. So it now says so at the top, and states how much of the ledger is a live
-       * source versus a fixture — counts of the rows returned, never a score.
+       * read from here. The summary keeps identity (`kind`) separate from effective operation:
+       * a real-source row counts as live only when its recorded `current_mode` is exactly `live`.
+       * These remain counts of returned rows, never a score.
        */}
       <PageHeader
         eyebrow="Provenance"
@@ -110,8 +115,8 @@ export function SourcesLedger() {
               <MonoValue>{sources.length}</MonoValue>
             </Labelled>
             <Labelled label="live">
-              <MonoValue className={realCount > 0 ? 'text-state-ok' : undefined}>
-                {realCount}
+              <MonoValue className={liveCount > 0 ? 'text-state-ok' : undefined}>
+                {liveCount}
               </MonoValue>
             </Labelled>
             <Labelled label="unavailable">

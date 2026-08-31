@@ -11,8 +11,8 @@
  *   1. ALL SIX CHECKS, ALWAYS, IN CHECK_ORDER. A check missing from the payload renders as
  *      "not returned" rather than vanishing, because a panel showing five rows looks
  *      complete and is not.
- *   2. CONFIG VERSION AND HASH ARE ALWAYS VISIBLE. A replay must be able to prove which
- *      semantics applied when the decision was made.
+ *   2. CONFIG VERSION AND HASH REMAIN AVAILABLE IN AUDIT DETAILS. A replay must be able to prove
+ *      which semantics applied when the decision was made without pushing the decision form down.
  *   3. PASS/WARN/FAIL AS ICON AND WORD AND COLOUR. Never colour alone.
  *
  * The case worth staring at is `notify_passengers`: all six checks PASS and it still blocks,
@@ -47,6 +47,13 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { checkDerivation, decisionDerivation } from '@/components/ui/derivation';
+import {
+  Button,
+  DefinitionList,
+  DefinitionRow,
+  Notice,
+  ReasonField,
+} from '@/components/ui/composition';
 
 const CHECK_LABEL: Record<CheckName, string> = {
   evidence_complete: 'Evidence completeness',
@@ -218,83 +225,59 @@ function ApprovalPanel({
     );
   }
 
+  const submit = (verdict: 'approved' | 'rejected') => {
+    if (reason.trim().length === 0) {
+      setReasonMissing(true);
+      return;
+    }
+    onSubmit(verdict, reason.trim());
+  };
+
   return (
     <form
-      className="border-t border-border-subtle px-3 py-2"
+      className="border-b border-accent-border bg-accent-subtle px-3 py-3"
       onSubmit={(event) => event.preventDefault()}
     >
-      <h3 className="text-label uppercase text-fg-muted">Operator decision required</h3>
+      <h3 className="text-label uppercase text-accent">Operator decision required</h3>
+      <p className="mt-1 text-body text-fg-secondary">
+        Approve authorises this action; reject records that it must not proceed. Either choice
+        writes a new immutable decision against this evaluation.
+      </p>
 
-      <ul className="mt-1.5 flex flex-col gap-1">
-        {evaluation.blocking.map((name) => (
-          <li key={name} className="flex items-start gap-1.5 text-caption text-state-crit">
-            <ShieldAlert size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
-            <span>
-              <MonoValue className="text-state-crit">{name}</MonoValue>{' '}
-              {evaluation.checks.find((check) => check.name === name)?.reason ??
-                evaluation.checks.find((check) => check.name === name)?.reason_code}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-2.5">
+        <ReasonField
+          id={`reason-${evaluation.id}`}
+          value={reason}
+          onChange={(next) => {
+            setReason(next);
+            if (reasonMissing) setReasonMissing(false);
+          }}
+          placeholder="Why this action is authorised, or why it is refused"
+          hint="Required. This justification is written to the immutable decision record."
+          invalid={reasonMissing}
+          error={reasonMissing ? 'A reason is required before you approve or reject.' : undefined}
+        />
+      </div>
 
-      <label htmlFor={`reason-${evaluation.id}`} className="mt-2 block text-caption text-fg-muted">
-        Reason <span className="text-state-crit">required</span>
-      </label>
-      <textarea
-        id={`reason-${evaluation.id}`}
-        value={reason}
-        onChange={(event) => {
-          setReason(event.target.value);
-          if (reasonMissing) setReasonMissing(false);
-        }}
-        rows={2}
-        aria-invalid={reasonMissing}
-        aria-describedby={reasonMissing ? `reason-error-${evaluation.id}` : undefined}
-        placeholder="Why this action is authorised, or why it is refused"
-        className={[
-          'mt-1 w-full rounded-sm border bg-inset px-2 py-1.5 text-body text-fg',
-          'placeholder:text-fg-muted focus-visible:outline focus-visible:outline-2',
-          'focus-visible:outline-offset-2 focus-visible:outline-accent',
-          reasonMissing ? 'border-state-crit' : 'border-border',
-        ].join(' ')}
-      />
-      {reasonMissing && (
-        <p
-          id={`reason-error-${evaluation.id}`}
-          role="alert"
-          className="mt-1 text-caption text-state-crit"
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          size="md"
+          disabled={isSubmitting}
+          disabledReason="A decision is already being submitted."
+          onClick={() => submit('approved')}
         >
-          A reason is required. It is written to the immutable decision record.
-        </p>
-      )}
-
-      <div className="mt-2 flex items-center gap-2">
-        {(['approved', 'rejected'] as const).map((verdict) => (
-          <button
-            key={verdict}
-            type="button"
-            disabled={isSubmitting}
-            onClick={() => {
-              if (reason.trim().length === 0) {
-                setReasonMissing(true);
-                return;
-              }
-              onSubmit(verdict, reason.trim());
-            }}
-            className={[
-              'rounded-sm border px-2 py-1 text-label uppercase transition-colors duration-hover ease-out',
-              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-              'disabled:opacity-60',
-              verdict === 'approved'
-                ? 'border-state-ok/40 text-state-ok hover:bg-state-ok-bg'
-                : 'border-state-crit/40 text-state-crit hover:bg-state-crit-bg',
-            ].join(' ')}
-          >
-            {verdict === 'approved' ? 'Approve' : 'Reject'}
-          </button>
-        ))}
-        {isSubmitting && <span className="text-caption text-fg-muted">submitting…</span>}
+          {isSubmitting ? 'Submitting…' : 'Approve action'}
+        </Button>
+        <Button
+          variant="danger"
+          size="md"
+          disabled={isSubmitting}
+          disabledReason="A decision is already being submitted."
+          onClick={() => submit('rejected')}
+        >
+          Reject action
+        </Button>
       </div>
 
       {/*
@@ -303,16 +286,16 @@ function ApprovalPanel({
        * rather than letting someone discover that after the fact.
        */}
       {!canWrite && (
-        <p className="mt-1.5 text-caption text-fg-muted">
+        <p className="mt-2 text-caption text-fg-muted">
           Fixtures are being served, so this decision will be held in this browser session only.
           Point the UI at the live API to write an audit record.
         </p>
       )}
 
       {submitError && (
-        <p role="alert" className="mt-1.5 text-caption text-state-crit">
+        <Notice tone="crit" alert divider="none" className="mt-2 rounded border">
           {submitError}
-        </p>
+        </Notice>
       )}
     </form>
   );
@@ -422,7 +405,7 @@ export function AssurancePanel({
   }
 
   const byName = new Map(evaluation.checks.map((check) => [check.name, check]));
-  const allPassed = evaluation.checks.every((check) => check.state === 'PASS');
+  const allPassed = CHECK_ORDER.every((name) => byName.get(name)?.state === 'PASS');
   const blockedOnRiskAlone =
     allPassed && evaluation.blocking.length > 0 && evaluation.decision === 'needs_human';
 
@@ -439,30 +422,19 @@ export function AssurancePanel({
       }
     >
       {scopeBanner}
-      <div className="border-b border-border-subtle bg-inset px-3 py-1.5">
-        <MonoValue>{evaluation.action_type}</MonoValue>
-        {/* Always visible: a replay must prove which semantics applied. */}
-        <span className="flex flex-wrap items-center gap-x-2 text-caption text-fg-muted">
-          <span>
-            config <MonoValue muted>{evaluation.config_version ?? configVersion}</MonoValue>
-          </span>
-          <span>
-            hash <MonoValue muted>{evaluation.config_hash ?? configHash}</MonoValue>
-          </span>
-          <span>
-            eval <MonoValue muted>{evaluation.id}</MonoValue>
-          </span>
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-inset px-3 py-2">
+        <div className="min-w-0">
+          <p className="text-label uppercase text-fg-muted">Selected action</p>
+          <MonoValue className="break-all">{evaluation.action_type}</MonoValue>
+        </div>
+        <StateBadge
+          status={`tier_${evaluation.risk_tier}`}
+          label={`${evaluation.risk_tier} risk`}
+        />
       </div>
 
-      <ol>
-        {CHECK_ORDER.map((name) => (
-          <CheckRow key={name} name={name} check={byName.get(name)} evaluation={evaluation} />
-        ))}
-      </ol>
-
       <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
-        <span className="text-label uppercase text-fg-muted">Decision</span>
+        <span className="text-label uppercase text-fg-muted">Gate decision</span>
         <WhyPopover derivation={decisionDerivation(evaluation)}>
           <StateBadge status={evaluation.decision} />
         </WhyPopover>
@@ -473,28 +445,27 @@ export function AssurancePanel({
        * the presenter to explain why a plan with six passing checks did not execute.
        */}
       {blockedOnRiskAlone && (
-        <p className="flex items-start gap-1.5 border-b border-border-subtle bg-state-warn-bg px-3 py-2 text-caption text-state-warn">
-          <AlertTriangle size={12} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
-          <span>
-            All six checks passed. This still requires a human because the action is{' '}
-            <MonoValue className="text-state-warn">{evaluation.risk_tier}</MonoValue> risk:{' '}
-            {evaluation.blocking.join(', ')}.
-          </span>
-        </p>
+        <Notice tone="warn" divider="top">
+          All six checks passed. This still requires a human because the action is{' '}
+          <MonoValue className="text-state-warn">{evaluation.risk_tier}</MonoValue> risk:{' '}
+          {evaluation.blocking.join(', ')}.
+        </Notice>
       )}
 
-      {evaluation.note && (
-        <p className="border-b border-border-subtle px-3 py-2 text-caption text-fg-secondary">
-          {evaluation.note}
-        </p>
-      )}
-
-      {evaluation.warn_permitted_by_config && (
-        <p className="border-b border-border-subtle px-3 py-2 text-caption text-fg-secondary">
-          A warning was permitted for this action type by versioned config, producing{' '}
-          <MonoValue muted>execute_flagged</MonoValue> rather than a block. There is no global
-          soft-failure bypass.
-        </p>
+      {!blockedOnRiskAlone && evaluation.blocking.length > 0 && (
+        <Notice tone="crit" divider="top">
+          <span className="font-medium">Blocking checks:</span>{' '}
+          {evaluation.blocking.map((name, index) => {
+            const check = byName.get(name);
+            return (
+              <span key={name}>
+                {index > 0 ? '; ' : ''}
+                <MonoValue className="text-state-crit">{name}</MonoValue>{' '}
+                {check?.reason ?? check?.reason_code ?? 'not returned'}
+              </span>
+            );
+          })}
+        </Notice>
       )}
 
       {/*
@@ -535,40 +506,91 @@ export function AssurancePanel({
           );
         })()}
 
-      {evaluation.decision === 'needs_human' && (
-        <ApprovalPanel
-          evaluation={evaluation}
-          decision={decision}
-          isSubmitting={isSubmitting}
-          submitError={submitError}
-          canWrite={canWrite}
-          onSubmit={(verdict, reason) => onSubmitDecision(evaluation.id, verdict, reason)}
-        />
-      )}
+      {evaluation.decision === 'needs_human' &&
+        (scopeMismatch ? (
+          <Notice tone="crit" divider="top">
+            Approve and reject controls are hidden because this evaluation belongs to a different
+            incident scope.
+          </Notice>
+        ) : (
+          <ApprovalPanel
+            evaluation={evaluation}
+            decision={decision}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            canWrite={canWrite}
+            onSubmit={(verdict, reason) => onSubmitDecision(evaluation.id, verdict, reason)}
+          />
+        ))}
 
-      {/*
-       * Evidence refs sit AFTER the decision control, not before it.
-       *
-       * With real payloads this list runs to six refs, which pushed Approve and Reject 7px below
-       * the fold at 1920x1080 — measured in the projector rehearsal. A presenter should never
-       * have to scroll to authorise an action. The order is also the better one: what the gate
-       * decided, why it is blocked, what to do about it, and then the references to check
-       * afterwards.
-       */}
-      {evaluation.evidence_refs.length > 0 && (
-        <div className="border-t border-border-subtle px-3 py-2">
-          <h3 className="text-label uppercase text-fg-muted">Evidence</h3>
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {evaluation.evidence_refs.map((ref) => (
-              <li key={ref}>
-                <MonoValue muted className="break-all text-caption">
-                  {ref}
+      <details className="min-w-0 border-t border-border-subtle">
+        <summary className="cursor-pointer px-3 py-2 text-label uppercase text-fg-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          Audit details · six checks, evidence and record identifiers
+        </summary>
+        <div className="min-w-0 border-t border-border-subtle bg-inset">
+          <div className="px-3 py-2.5">
+            <DefinitionList width="lg">
+              <DefinitionRow label="evaluation" width="lg">
+                <MonoValue>{evaluation.id}</MonoValue>
+              </DefinitionRow>
+              <DefinitionRow label="config version" width="lg">
+                <MonoValue muted className="break-all">
+                  {evaluation.config_version ?? configVersion ?? 'not returned'}
                 </MonoValue>
-              </li>
+              </DefinitionRow>
+              <DefinitionRow label="config hash" width="lg">
+                <MonoValue muted className="break-all">
+                  {evaluation.config_hash ?? configHash ?? 'not returned'}
+                </MonoValue>
+              </DefinitionRow>
+              <DefinitionRow label="scope" width="lg">
+                <MonoValue muted className="break-all">
+                  {scopeReference ?? 'not returned'}
+                </MonoValue>
+              </DefinitionRow>
+            </DefinitionList>
+          </div>
+
+          {evaluation.note && (
+            <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-secondary">
+              {evaluation.note}
+            </p>
+          )}
+
+          {evaluation.warn_permitted_by_config && (
+            <p className="border-t border-border-subtle px-3 py-2 text-caption text-fg-secondary">
+              A warning was permitted for this action type by versioned config, producing{' '}
+              <MonoValue muted>execute_flagged</MonoValue> rather than a block. There is no global
+              soft-failure bypass.
+            </p>
+          )}
+
+          <ol className="border-t border-border-subtle">
+            {CHECK_ORDER.map((name) => (
+              <CheckRow key={name} name={name} check={byName.get(name)} evaluation={evaluation} />
             ))}
-          </ul>
+          </ol>
+
+          <div className="border-t border-border-subtle px-3 py-2">
+            <h3 className="text-label uppercase text-fg-muted">Evidence</h3>
+            {evaluation.evidence_refs.length > 0 ? (
+              <ul className="mt-1 flex min-w-0 flex-col gap-0.5">
+                {evaluation.evidence_refs.map((ref) => (
+                  <li key={ref} className="min-w-0">
+                    <MonoValue muted className="break-all text-caption">
+                      {ref}
+                    </MonoValue>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-caption text-fg-muted">
+                No evaluation-level references returned.
+              </p>
+            )}
+          </div>
         </div>
-      )}
+      </details>
     </Panel>
   );
 }

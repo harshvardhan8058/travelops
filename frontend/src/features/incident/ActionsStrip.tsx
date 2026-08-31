@@ -42,7 +42,10 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
           description="Actions appear here the moment the gate authorises one. An action can never exist without an assurance record."
         />
       ) : (
-        <TableFrame caption="Every action executed for this incident, each referencing the assurance evaluation that authorised it. An action cannot exist without one.">
+        <TableFrame
+          className="[&_table]:table-fixed [&_td]:break-words [&_th]:break-words"
+          caption="Every action executed for this incident, each referencing the assurance evaluation that authorised it. An action cannot exist without one."
+        >
           <TableHead
             columns={[
               { key: 'task', label: 'Task' },
@@ -66,7 +69,7 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
                 <td className="px-3">
                   {/* Present on the real API, absent from the committed fixture. */}
                   {action.action_type ? (
-                    <MonoValue>{action.action_type}</MonoValue>
+                    <MonoValue className="break-all">{action.action_type}</MonoValue>
                   ) : (
                     <Absent
                       label="not returned"
@@ -117,7 +120,7 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
                   <MonoValue muted>{action.assurance_id}</MonoValue>
                 </td>
                 <td className="px-3">
-                  <MonoValue muted className="text-caption">
+                  <MonoValue muted className="break-all text-caption">
                     {action.idempotency_key}
                   </MonoValue>
                 </td>
