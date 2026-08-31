@@ -40,9 +40,12 @@ def _load(name: str) -> Any:
 
 
 # ---------------------------------------------------------------- Stream C / A
-@router.get("/flights", summary="Flight board [fixture]")
-async def list_flights() -> Any:
-    return _load("flights")
+# `/flights` moved to `app/api/flights.py` and now reads persisted state. It was the board the
+# Scenario Builder resolves flight ids against, so a fixture here could not agree with the
+# validation `POST /scenarios` performs against the real `flight` table — and on the committed
+# dataset it did not: one offered flight did not exist and another published a delay the database
+# contradicted. `fixtures/api/flights.json` is retained because the console's own offline mode
+# (`VITE_USE_FIXTURES=true`) serves it statically, and that mode cannot author scenarios at all.
 
 
 @router.get("/sources", summary="Provenance ledger [fixture]")

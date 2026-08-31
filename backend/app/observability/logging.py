@@ -56,8 +56,33 @@ def _redact(_logger: object, _name: str, event_dict: dict) -> dict:
     return event_dict
 
 
+#: Third-party loggers held at WARNING because their INFO output leaks a secret.
+#:
+#: `httpx` logs every request at INFO as `HTTP Request: GET <full url> "<status>"`, and a full URL
+#: includes the query string. AviationStack authenticates with `access_key` **as a query
+#: parameter** — it offers no header alternative — so at the service's default `LOG_LEVEL=INFO`
+#: every live flight-status call wrote the API key into the application log, where it would then
+#: travel into any log aggregator, screen share or pasted excerpt.
+#:
+#: The redaction processor above cannot catch this: it inspects structlog event keys, and this is a
+#: pre-formatted message from the standard-library logger with the secret embedded in a string.
+#:
+#: Nothing diagnostic is lost. The client already emits its own structured events for the same
+#: calls — `llm_call_started` and `llm_provider_response_received` carry the endpoint, attempt,
+#: status code and latency, and the endpoint is recorded WITHOUT its query string precisely so it
+#: stays safe to log. WARNING and above still propagate, so httpx's own transport failures remain
+#: visible.
+#:
+#: Bearer-token providers (OpenRouter, Groq) were never exposed this way, because httpx does not
+#: log headers. This is specifically about credentials that a vendor requires in the URL.
+_QUIET_THIRD_PARTY_LOGGERS = ("httpx", "httpcore")
+
+
 def configure_logging(level: str = "INFO", *, json_output: bool = True) -> None:
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
+
+    for name in _QUIET_THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     renderer = (
         structlog.processors.JSONRenderer()
