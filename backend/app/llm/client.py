@@ -40,8 +40,17 @@ MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 1.5
 
 #: Generous enough for a reasoning model, short enough that a hung request does not hold an
-#: incident's run open indefinitely.
+#: incident's run open indefinitely. This is the ceiling for ONE attempt, so a caller that bounds
+#: the whole call must allow at least this much or it cancels an attempt that was still healthy.
 REQUEST_TIMEOUT_SECONDS = 60.0
+
+#: The smallest per-attempt allowance worth issuing a request with.
+#:
+#: When `call(budget_seconds=...)` is given, attempts are sized to the remaining budget and a retry
+#: is only started if a *real* attempt still fits. Starting a 0.4-second attempt to satisfy the
+#: retry count would guarantee a transport timeout and report it as a provider fault, which is
+#: worse than saying the budget ran out — so below this the client stops and says so.
+MIN_ATTEMPT_SECONDS = 5.0
 
 #: 4xx statuses that are worth trying again. Everything else in the 4xx range is the request
 #: being wrong and cannot be fixed by repeating it.
@@ -335,6 +344,7 @@ class LLMClient:
         prompt_version: str,
         scenario_key: str = "bengaluru_storm",
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        budget_seconds: float | None = None,
     ) -> tuple[T, ModelCallAudit]:
         """Invoke the configured mode and return (validated_response, audit).
 
@@ -345,6 +355,15 @@ class LLMClient:
         prose. One ceiling for both truncates the long one mid-object, and truncated JSON
         arrives as `JSONDecodeError` — indistinguishable from a transport fault, so it burns
         all three retries before failing.
+
+        `budget_seconds` bounds the whole live call — every attempt and every backoff — from the
+        inside. Without it the client's own worst case is `3 x 60s + 4.5s` of backoff, and a caller
+        that wants a tighter bound has no option but to cancel the coroutine partway, which
+        destroys an in-flight attempt and reports the caller's timer instead of the provider's
+        behaviour. With it, attempts are sized to the time actually left and a retry is started
+        only when a real one still fits, so the outcome is always the provider's own — a completed
+        answer, a named provider failure, or an explicit "the budget ran out". `None` keeps the
+        previous behaviour exactly, which is what the prose agents use.
         """
         if self._mode is LLMMode.off:
             raise LLMUnavailable("LLM_MODE=off; falling back to deterministic playbook")
@@ -364,6 +383,7 @@ class LLMClient:
             agent_name=agent_name,
             prompt_version=prompt_version,
             max_tokens=max_tokens,
+            budget_seconds=budget_seconds,
         )
 
     def _replay_fixture(
@@ -416,6 +436,7 @@ class LLMClient:
         agent_name: str,
         prompt_version: str,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        budget_seconds: float | None = None,
     ) -> tuple[T, ModelCallAudit]:
         """Live call to the configured provider, with retry on transient failures.
 
@@ -484,16 +505,51 @@ class LLMClient:
             )
         max_tokens = budget
 
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + budget_seconds if budget_seconds is not None else None
+
+        def _remaining() -> float | None:
+            return None if deadline is None else deadline - loop.time()
+
+        async def _wait_before_retry(attempt_number: int) -> bool:
+            """Sleep the backoff. False when the budget cannot hold another real attempt.
+
+            Refusing the retry is the point. Sleeping 1.5s and then issuing a request with 0.3s
+            left produces a transport timeout that looks like the provider hanging, and it spends
+            the caller's remaining time proving nothing.
+            """
+            delay = RETRY_DELAY_SECONDS * attempt_number
+            left = _remaining()
+            if left is not None and left < delay + MIN_ATTEMPT_SECONDS:
+                return False
+            await asyncio.sleep(delay)
+            return True
+
         last_error: Exception | None = None
         last_phase = "transport"
         last_status_code: int | None = None
         last_finish_reason: str | None = None
         last_content_length: int | None = None
+        attempts_made = 0
+        budget_exhausted = False
         for attempt in range(MAX_RETRIES + 1):
             attempt_number = attempt + 1
             last_status_code = None
             last_finish_reason = None
             last_content_length = None
+
+            attempt_timeout = REQUEST_TIMEOUT_SECONDS
+            left = _remaining()
+            if left is not None:
+                if left < MIN_ATTEMPT_SECONDS:
+                    # Only reachable on the first attempt, since `_wait_before_retry` already
+                    # refuses a retry that cannot fit. A caller that hands over less than one
+                    # viable attempt gets told that, not a fabricated provider timeout.
+                    budget_exhausted = True
+                    break
+                attempt_timeout = min(REQUEST_TIMEOUT_SECONDS, left)
+
+            attempts_made = attempt_number
             start = time.perf_counter()
             log.info(
                 "llm_call_started",
@@ -503,9 +559,11 @@ class LLMClient:
                 endpoint=transport.endpoint_url,
                 attempt=attempt_number,
                 max_tokens=max_tokens,
+                attempt_timeout_seconds=attempt_timeout,
+                budget_seconds=budget_seconds,
             )
             try:
-                async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http:
+                async with httpx.AsyncClient(timeout=attempt_timeout) as http:
                     response = await http.post(
                         transport.endpoint_url,
                         headers=headers,
@@ -739,8 +797,9 @@ class LLMClient:
                     status_code=exc.status_code,
                     detail=str(exc)[:200],
                 )
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS * attempt_number)
+                if attempt < MAX_RETRIES and not await _wait_before_retry(attempt_number):
+                    budget_exhausted = True
+                    break
 
             except _ProviderPayloadError as exc:
                 last_error = exc
@@ -758,8 +817,9 @@ class LLMClient:
                     error=type(exc.error).__name__,
                     json_error_position=exc.json_error_position,
                 )
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS * attempt_number)
+                if attempt < MAX_RETRIES and not await _wait_before_retry(attempt_number):
+                    budget_exhausted = True
+                    break
 
             except (httpx.HTTPError, TimeoutError) as exc:
                 last_error = exc
@@ -775,16 +835,37 @@ class LLMClient:
                     error=type(exc).__name__,
                     status_code=None,
                 )
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY_SECONDS * attempt_number)
+                if attempt < MAX_RETRIES and not await _wait_before_retry(attempt_number):
+                    budget_exhausted = True
+                    break
+
+        if budget_exhausted:
+            # Distinguished from an ordinary exhausted retry count so an operator can tell "the
+            # provider kept failing" from "we were not given time to finish". The last provider
+            # error is still reported when there was one, because that is the useful half.
+            attempted = f"{attempts_made} attempt{'s' if attempts_made != 1 else ''}"
+            cause = f": {last_error}" if last_error is not None else " with no attempt completed"
+            raise _live_failure(
+                f"the {agent_name} call ran out of its {budget_seconds:g}s budget after "
+                f"{attempted}{cause}",
+                agent_name=agent_name,
+                provider=provider,
+                model=model,
+                phase="budget_exhausted",
+                attempt=attempts_made,
+                status_code=last_status_code,
+                finish_reason=last_finish_reason,
+                content_length=last_content_length,
+                error=last_error,
+            ) from last_error
 
         raise _live_failure(
-            f"{provider} call failed after {MAX_RETRIES + 1} attempts: {last_error}",
+            f"{provider} call failed after {attempts_made} attempts: {last_error}",
             agent_name=agent_name,
             provider=provider,
             model=model,
             phase=last_phase,
-            attempt=MAX_RETRIES + 1,
+            attempt=attempts_made,
             status_code=last_status_code,
             finish_reason=last_finish_reason,
             content_length=last_content_length,

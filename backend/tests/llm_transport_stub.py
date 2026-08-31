@@ -69,6 +69,13 @@ class RecordingTransport:
 
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
+        #: The `timeout=` each attempt's client was constructed with, in order.
+        #:
+        #: Recorded because the per-attempt ceiling is now a decision rather than a constant: a
+        #: caller can hand the client a total budget, and the client sizes each attempt to what is
+        #: left. Asserting the request body alone would not notice an attempt being armed with a
+        #: timeout that cannot fit — which is precisely how a healthy slow call became no answer.
+        self.timeouts: list[Any] = []
         #: Set to return a JSON string as the assistant message content.
         self.content: str | None = None
         #: Set to replace the whole provider response envelope.
@@ -112,8 +119,8 @@ class RecordingTransport:
         stub = self
 
         class _FakeAsyncClient:
-            def __init__(self, *_: Any, **__: Any) -> None:
-                pass
+            def __init__(self, *_: Any, timeout: Any = None, **__: Any) -> None:
+                stub.timeouts.append(timeout)
 
             async def __aenter__(self):
                 return self

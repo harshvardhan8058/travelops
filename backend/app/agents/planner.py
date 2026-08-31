@@ -109,10 +109,16 @@ class PlannerAgent:
         crew_pairings_affected: int | None = None,
         precedents: list[dict[str, Any]] | None = None,
         scenario_key: str = "bengaluru_storm",
+        budget_seconds: float | None = None,
     ) -> tuple[PlannerResponse, ModelCallAudit]:
         """Call the planner and return a validated plan + audit metadata.
 
         Raises `LLMUnavailable` if the call cannot be made or the response is invalid.
+
+        `budget_seconds` is the orchestrator's wall-clock allowance for this candidate. It is
+        handed to the client rather than enforced by cancelling this coroutine, so the client can
+        size its attempts and its retries to fit — a bound applied from outside can only destroy an
+        in-flight attempt, which is how a healthy-but-slow first call became no candidate at all.
         """
         system = PROMPT_PATH.read_text(encoding="utf-8")
         prompt = _build_prompt(
@@ -137,6 +143,7 @@ class PlannerAgent:
             agent_name="planner",
             prompt_version=PROMPT_VERSION,
             scenario_key=scenario_key,
+            budget_seconds=budget_seconds,
         )
         log.info(
             "planner_agent_succeeded",

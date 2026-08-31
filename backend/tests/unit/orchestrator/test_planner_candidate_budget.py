@@ -125,7 +125,11 @@ def no_precedents(monkeypatch) -> None:
 
 
 def _engine(
-    session: _Session, *, budget: float, primary_demo_budget: float | None = None
+    session: _Session,
+    *,
+    budget: float,
+    primary_demo_budget: float | None = None,
+    pool: float | None = None,
 ) -> Orchestrator:
     return Orchestrator(
         session,  # type: ignore[arg-type]
@@ -134,6 +138,7 @@ def _engine(
             primary_demo_planner_candidate_budget_seconds=(
                 primary_demo_budget if primary_demo_budget is not None else 40.0
             ),
+            planner_group_pool_seconds=pool if pool is not None else 75.0,
         ),
         modes=_modes(),
     )
@@ -229,7 +234,12 @@ async def test_extra_allowance_requires_both_declared_primary_role_and_demo_data
         primary_demo_budget=40.0,
     )
 
-    assert await engine._planner_candidate_budget(incident) == (expected, is_primary_demo)
+    allowance = await engine._planner_candidate_allowance(incident)
+
+    assert (allowance.seconds, allowance.primary_demo) == (expected, is_primary_demo)
+    assert allowance.attempt is True
+    # Only the primary's allowance is reserved; everything else draws on the shared pool.
+    assert allowance.pooled is not is_primary_demo
 
 
 async def test_response_just_under_the_ordinary_budget_is_persisted(
@@ -278,6 +288,11 @@ async def test_primary_demo_live_latency_beyond_twenty_seconds_still_creates_can
             "incident_reference": "INC-2026-0820-VOBL-01",
             "budget_seconds": 40.0,
             "primary_demo_budget": True,
+            # Reserved, so no pool is consulted and none is charged: the seven members behind the
+            # primary can never eat into the one allowance the Phase 3 verifier depends on.
+            "pooled": False,
+            "pool_remaining_seconds": None,
+            "attempted": True,
         }
     ]
 
@@ -387,17 +402,54 @@ async def test_wrapper_is_transparent_to_a_call_inside_the_budget(
     assert "provider said no" in detail["reason"]
 
 
+def test_the_primary_allowance_exceeds_the_transports_own_attempt_ceiling():
+    """The inversion that caused the failure, pinned as an invariant rather than a number.
+
+    The previous 40-second primary allowance was smaller than the client's 60-second per-attempt
+    timeout, so the orchestrator cancelled the primary's provider call before that call could
+    either finish or be retried — the primary was allowed less than one complete attempt. Any
+    future retuning that reintroduces that inequality fails here, whatever the numbers are.
+    """
+    from app.llm.client import MIN_ATTEMPT_SECONDS, REQUEST_TIMEOUT_SECONDS
+
+    settings = Settings()
+
+    assert settings.primary_demo_planner_candidate_budget_seconds > REQUEST_TIMEOUT_SECONDS, (
+        "the primary must be able to complete one whole provider attempt inside its allowance"
+    )
+    # And with enough left over that a fast transient failure can still be retried inside it.
+    assert (
+        settings.primary_demo_planner_candidate_budget_seconds - REQUEST_TIMEOUT_SECONDS
+        >= MIN_ATTEMPT_SECONDS
+    )
+
+
 def test_budgets_are_configurable_bounded_and_fit_the_phase2_request():
-    """One 40s primary plus seven 20s members leaves 120s inside Phase 2's 300s request."""
+    """A reserved primary plus a shared pool bounds planner waiting below the old arithmetic.
+
+    The seven-independent-20s-budgets arrangement reserved 140s the run never used and still left
+    the primary short. Pooling them buys the primary 75s instead of 40s while the worst case falls
+    from 180s to about 159s, so Phase 2's unchanged 300s request keeps more headroom than before,
+    not less.
+    """
+    from app.orchestrator.engine import planner_backstop_seconds
+
     settings = Settings()
     assert settings.planner_candidate_budget_seconds == 20.0
-    assert settings.primary_demo_planner_candidate_budget_seconds == 40.0
-    assert (
-        settings.primary_demo_planner_candidate_budget_seconds
-        + 7 * settings.planner_candidate_budget_seconds
-        == 180.0
-        < 300
+    assert settings.primary_demo_planner_candidate_budget_seconds == 75.0
+    assert settings.planner_group_pool_seconds == 75.0
+
+    previous_arithmetic = 40.0 + 7 * settings.planner_candidate_budget_seconds
+    # The primary's hard bound, plus the pool, plus the most any single member can overshoot it by.
+    primary_worst = planner_backstop_seconds(settings.primary_demo_planner_candidate_budget_seconds)
+    member_overshoot = (
+        planner_backstop_seconds(settings.planner_candidate_budget_seconds)
+        - settings.planner_candidate_budget_seconds
     )
+    worst_case = primary_worst + settings.planner_group_pool_seconds + member_overshoot
+
+    assert worst_case < previous_arithmetic
+    assert worst_case < 300
 
     with pytest.raises(ValueError):
         Settings(planner_candidate_budget_seconds=0)
@@ -407,3 +459,7 @@ def test_budgets_are_configurable_bounded_and_fit_the_phase2_request():
         Settings(primary_demo_planner_candidate_budget_seconds=0)
     with pytest.raises(ValueError):
         Settings(primary_demo_planner_candidate_budget_seconds=121)
+    with pytest.raises(ValueError):
+        Settings(planner_group_pool_seconds=0)
+    with pytest.raises(ValueError):
+        Settings(planner_group_pool_seconds=241)

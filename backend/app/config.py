@@ -199,24 +199,52 @@ class Settings(BaseSettings):
     #: part-way and the union rollups report 13 connections and 5 pairings instead of 22 and 9 —
     #: not wrong arithmetic, just fewer incidents having finished.
     #:
-    #: 20s is comfortably above an ordinary warm live call and bounds seven non-primary members
-    #: to 140s even if every model call hangs. The primary demo incident has a separate allowance
-    #: below, because Windows live runs show first-call latency without showing larger prompts or
-    #: different planner work for that incident.
+    #: 20s is comfortably above an ordinary warm live call. It is a PER-MEMBER cap for non-primary
+    #: members, which additionally draw from the shared pool below rather than each owning an
+    #: independent 20s — seven independent budgets sum to 140s whether or not that time is needed.
+    #: The primary demo incident has a separate reserved allowance, because Windows live runs show
+    #: first-call latency without showing larger prompts or different planner work for it.
     planner_candidate_budget_seconds: float = Field(default=20.0, gt=0, le=180)
 
-    #: Wall-clock ceiling for the optional Planner candidate on the declared primary flight in the
-    #: configured demo dataset. This is deliberately separate from the ordinary per-incident
-    #: budget: raising 20s globally spends the increase eight times because group members advance
-    #: sequentially. A 40s primary allowance plus seven 20s ordinary allowances is 180s, leaving
-    #: 120s inside `verify_phase2.py`'s unchanged 300s request budget for deterministic services,
-    #: assurance, persistence and the cascade projection.
+    #: Reserved wall-clock allowance for the optional Planner candidate on the declared primary
+    #: flight in the configured demo dataset. Separate from the ordinary per-member cap on purpose:
+    #: raising 20s globally spends the increase eight times because group members advance
+    #: sequentially.
+    #:
+    #: **This must stay larger than `app.llm.client.REQUEST_TIMEOUT_SECONDS` (60s).** The previous
+    #: 40s value was smaller than the transport's own single-attempt ceiling, so the orchestrator
+    #: cancelled the primary's provider call before that call could either finish or be retried:
+    #: the primary was allowed less than one complete attempt. Because the primary is advanced
+    #: first and the planner runs only while an incident is `planning`, its single opportunity is
+    #: always the coldest call of the whole run — which is exactly why it failed while later warm
+    #: members produced candidates. 75s guarantees one complete 60s attempt with room left for the
+    #: fast-failing transient cases (429, truncated payload) to be retried inside the budget.
     #:
     #: The role comes from `incident_group_flight.role`, never an incident-reference convention;
     #: the dataset check prevents a production primary from silently receiving demo tuning. A
     #: timeout still follows the existing `PLANNER_AGENT_UNAVAILABLE` route, so the selected
     #: playbook remains the deterministic recovery path.
-    primary_demo_planner_candidate_budget_seconds: float = Field(default=40.0, gt=0, le=120)
+    primary_demo_planner_candidate_budget_seconds: float = Field(default=75.0, gt=0, le=120)
+
+    #: Shared wall-clock pool for non-primary live planner calls in one run, charged by ACTUAL
+    #: elapsed time rather than by nominal allowance.
+    #:
+    #: Seven independent 20s budgets is not an allocation, it is a sum: it reserves 140s that a
+    #: healthy run never uses (warm calls land in single-digit seconds, so seven of them draw ~40s
+    #: and every member still gets a real candidate) while leaving nothing spare for the one member
+    #: whose call actually matters to the Phase 3 verifier. Pooling the non-primary members lets
+    #: the primary's reservation nearly double while the total worst case goes DOWN: a reserved 75s
+    #: (80s including the orchestrator's backstop grace) plus a 75s shared pool bounds planner
+    #: waiting at about 159s against the 180s the seven-independent-budget arithmetic allowed,
+    #: leaving over 140s inside `verify_phase2.py`'s unchanged 300s request budget for
+    #: deterministic services, assurance, persistence and the cascade projection.
+    #:
+    #: An exhausted pool skips the remaining members' model calls immediately and records why. It
+    #: never fabricates a provider failure, and the deterministic playbook plan is already
+    #: persisted and selected, so a skipped candidate costs a candidate and nothing else.
+    #: Applied in `live` mode only: fixture replay is deterministic and free, so subjecting it to a
+    #: wall-clock pool would add nondeterminism to the fixture path for no benefit.
+    planner_group_pool_seconds: float = Field(default=75.0, gt=0, le=240)
 
     #: Plan-level (group-scoped) assurance config. A SEPARATE setting on purpose.
     #:
