@@ -266,6 +266,33 @@ async def test_scenario_becomes_current_only_after_start(client, seeded):
     assert after_start.json()["reference"] == reference
 
 
+async def test_started_scenario_remains_current_after_its_incidents_finish(client, seeded):
+    created = client.post(f"{PREFIX}/scenarios", json=_scenario_payload()).json()
+    reference = created["scenario_reference"]
+    started = client.post(
+        f"{PREFIX}/scenarios/{reference}/start",
+        json={"actor_id": "operator-2"},
+    )
+    assert started.status_code == 200
+
+    factory = async_sessionmaker(bind=seeded, expire_on_commit=False, autoflush=False)
+    async with factory() as session:
+        group = (
+            await session.execute(select(IncidentGroup).where(IncidentGroup.reference == reference))
+        ).scalar_one()
+        incident = (
+            await session.execute(select(Incident).where(Incident.group_id == group.id))
+        ).scalar_one()
+        incident.state = "resolved"
+        incident.closed_at = datetime.now(UTC)
+        group.state = "resolved"
+        await session.commit()
+
+    current = client.get(f"{PREFIX}/incident-groups/current")
+    assert current.status_code == 200
+    assert current.json()["reference"] == reference
+
+
 async def test_start_rejects_an_active_incident_owned_by_another_workflow(client, seeded):
     created = client.post(f"{PREFIX}/scenarios", json=_scenario_payload()).json()
     reference = created["scenario_reference"]

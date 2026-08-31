@@ -216,25 +216,19 @@ async def list_incident_groups(
 async def current_incident_group(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GroupSummary:
-    """The console's landing query. 404 when nothing is active, never an empty placeholder."""
-    active = [state.value for state in IncidentState.active()]
-    active_incident_exists = (
-        select(Incident.id)
-        .where(
-            Incident.group_id == IncidentGroup.id,
-            Incident.state.in_(active),
-        )
-        .exists()
+    """The console's landing query. Excludes authored-but-unstarted empty groups."""
+    started_incident_exists = (
+        select(Incident.id).where(Incident.group_id == IncidentGroup.id).exists()
     )
     stmt = (
         select(IncidentGroup)
-        .where(active_incident_exists)
+        .where(started_incident_exists)
         .order_by(IncidentGroup.opened_at.desc(), IncidentGroup.id.desc())
     )
     group = (await session.execute(stmt)).scalars().first()
     if group is None:
         raise EntityNotFound(
-            "no active disruption group exists",
+            "no started disruption group exists",
             details={"resolution": "seed the demo dataset, then inject the scenario"},
         )
     rollup = await cascade_rollup(session, group_id=group.id)
