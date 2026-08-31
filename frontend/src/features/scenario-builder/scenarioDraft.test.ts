@@ -374,6 +374,11 @@ describe('no Phase 5 surface case-transforms a contract value', () => {
   const SCREENS = [
     ['ScenarioBuilder.tsx', read('./ScenarioBuilder.tsx')],
     ['PassengerDisruptionView.tsx', read('../passenger/PassengerDisruptionView.tsx')],
+    // The Scenario Center joins them because it is dense in machine tokens: simulation ids, root
+    // causes, ICAO codes, member roles, provenance kinds, table names and the reset phrase the
+    // server compares. Uppercasing any of those would misreport what the API published, and the
+    // reset phrase would additionally become a phrase the server rejects.
+    ['ScenarioCenter.tsx', read('../scenario-center/ScenarioCenter.tsx')],
   ] as const;
 
   /**

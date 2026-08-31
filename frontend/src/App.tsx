@@ -28,6 +28,7 @@ import { ImpactExplorer } from '@/features/impact/ImpactExplorer';
 import { WhatIfScreen } from '@/features/cascade/WhatIfScreen';
 import { AgentConsole } from '@/features/agent/AgentConsole';
 import { ScenarioBuilder } from '@/features/scenario-builder/ScenarioBuilder';
+import { ScenarioCenter } from '@/features/scenario-center/ScenarioCenter';
 import { PassengerDisruptionView } from '@/features/passenger/PassengerDisruptionView';
 
 /** Used only when the current route names no incident, e.g. the Command Center. */
@@ -144,6 +145,12 @@ export function App() {
          * the current group's persisted passenger-priority records and keeps booking outcome fields
          * explicitly unavailable because no passenger outcome endpoint serves them.
          */}
+        {/*
+         * The Scenario Center is the demo's front door: it reports what is in the database, starts a
+         * catalogued simulation through the existing scenario lifecycle, and restores the dataset.
+         * Like `/scenarios/new` it is not incident-scoped, so it stays out of the regex above.
+         */}
+        <Route path="/scenarios" element={<ScenarioCenter />} />
         <Route path="/scenarios/new" element={<ScenarioBuilder />} />
         <Route path="/passenger/:bookingRef" element={<PassengerDisruptionView />} />
         <Route path="*" element={<Navigate to="/" replace />} />

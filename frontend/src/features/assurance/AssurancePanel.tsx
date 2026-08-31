@@ -26,7 +26,8 @@
  */
 
 import { useState } from 'react';
-import { AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
+import clsx from 'clsx';
+import { AlertTriangle, PlayCircle, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 import { CHECK_ORDER } from '@/api/types';
 import type {
@@ -38,6 +39,7 @@ import type {
   PlanTaskRow,
 } from '@/api/types';
 import { refusalFor } from '@/features/incident/refusal';
+import { deriveAuthorizationState, type AuthorizationView } from './authorizationState';
 import {
   CheckStateBadge,
   EmptyState,
@@ -46,6 +48,7 @@ import {
   StateBadge,
   WhyPopover,
 } from '@/components/ui/primitives';
+import { Button } from '@/components/ui/composition';
 import { checkDerivation, decisionDerivation } from '@/components/ui/derivation';
 
 const CHECK_LABEL: Record<CheckName, string> = {
@@ -157,28 +160,118 @@ function clsxRow(isBlocking: boolean): string {
  * Submitting writes a new immutable decision. The original evaluation is never mutated, and
  * the panel says so — that sentence is the difference between an audit trail and a form.
  */
+/**
+ * Where the action stands between authorised and done, and the one control that closes that gap.
+ *
+ * The tone comes from the derivation rather than from this component, so a refusal cannot be
+ * rendered as a success by a styling choice made here. The run control appears only when
+ * `offersRun` is set, which the derivation restricts to the single authorised-and-un-run stage.
+ */
+function AuthorizationBand({
+  authorization,
+  onRun,
+  isRunning,
+  runBlockedReason,
+}: {
+  authorization: AuthorizationView;
+  onRun?: () => void;
+  isRunning: boolean;
+  runBlockedReason?: string;
+}) {
+  const tone = AUTHORIZATION_TONE[authorization.tone];
+
+  return (
+    <div className={clsx('rounded-sm border px-2 py-1.5', tone.border, tone.bg)}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className={clsx('text-label uppercase', tone.text)}>{authorization.label}</span>
+        {authorization.offersRun && onRun && (
+          <Button
+            size="sm"
+            variant="primary"
+            icon={PlayCircle}
+            onClick={onRun}
+            disabled={isRunning || Boolean(runBlockedReason)}
+            disabledReason={runBlockedReason}
+          >
+            {isRunning ? 'Running…' : 'Run workflow'}
+          </Button>
+        )}
+      </div>
+      <p className={clsx('mt-1 text-body', tone.text)}>{authorization.detail}</p>
+      {authorization.offersRun && (
+        <p className="mt-1 text-caption text-fg-muted">
+          Approving recorded a decision. It did not run anything: the workflow advances only when
+          somebody asks it to.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tone to token. Only pairings already proven against the WCAG probe are used, and the map is total
+ * so a new tone fails the build rather than rendering unstyled.
+ */
+const AUTHORIZATION_TONE: Record<
+  AuthorizationView['tone'],
+  { border: string; bg: string; text: string }
+> = {
+  ok: { border: 'border-state-ok/30', bg: 'bg-state-ok-bg', text: 'text-state-ok' },
+  warn: { border: 'border-state-warn/30', bg: 'bg-state-warn-bg', text: 'text-state-warn' },
+  crit: { border: 'border-state-crit/30', bg: 'bg-state-crit-bg', text: 'text-state-crit' },
+  info: { border: 'border-state-info/30', bg: 'bg-state-info-bg', text: 'text-state-info' },
+  muted: { border: 'border-border-subtle', bg: 'bg-inset', text: 'text-fg-secondary' },
+};
+
 function ApprovalPanel({
   evaluation,
+  task,
+  action,
   decision,
   onSubmit,
   isSubmitting,
   submitError,
   canWrite,
+  onRun,
+  isRunning,
+  runBlockedReason,
 }: {
   evaluation: AssuranceEvaluation;
+  /** The plan task, whose state is what actually moves when a run picks the decision up. */
+  task?: PlanTaskRow;
+  action?: ActionRecord;
   decision?: HumanDecision;
   onSubmit: (decision: 'approved' | 'rejected', reason: string) => void;
   isSubmitting: boolean;
   submitError?: string | null;
   canWrite: boolean;
+  /** Advances the workflow. Recording a decision never does this; a person has to ask for it. */
+  onRun?: () => void;
+  isRunning?: boolean;
+  runBlockedReason?: string;
 }) {
   const [reason, setReason] = useState('');
   const [reasonMissing, setReasonMissing] = useState(false);
 
   if (decision) {
+    const authorization = deriveAuthorizationState(evaluation, task, action, decision);
+
     return (
       <div className="border-t border-border-subtle px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
+        {/*
+          The handoff, stated where the operator just decided.
+          Approving wrote an audit record and ran nothing. The control that runs it is at the top of
+          this page and looks identical before and after a decision, so without this band the
+          reasonable reading of the screen is that approving it did it.
+        */}
+        <AuthorizationBand
+          authorization={authorization}
+          onRun={onRun}
+          isRunning={isRunning ?? false}
+          runBlockedReason={runBlockedReason}
+        />
+
+        <div className="mt-2 flex items-center justify-between gap-2">
           <h3 className="text-label uppercase text-fg-muted">Human decision</h3>
           <StateBadge status={decision.decision} label={decision.decision} />
         </div>
@@ -331,6 +424,9 @@ export function AssurancePanel({
   isSubmitting,
   submitError,
   canWrite,
+  onRun,
+  isRunning,
+  runBlockedReason,
 }: {
   task?: PlanTaskRow;
   evaluation?: AssuranceEvaluation;
@@ -352,6 +448,15 @@ export function AssurancePanel({
   submitError?: string | null;
   /** False while fixtures are served: no endpoint can take a decision. */
   canWrite: boolean;
+  /**
+   * Advances the workflow one run. Passed in rather than called here because the incident screen
+   * owns the run mutation and its idempotency key — this panel must not become a second way to
+   * execute, only a second place to *ask*.
+   */
+  onRun?: () => void;
+  isRunning?: boolean;
+  /** Why running is unavailable, if it is. Rendered on the control rather than hiding it. */
+  runBlockedReason?: string;
 }) {
   /*
    * `incident_reference` is consumed, not decorated. If the assurance payload ever describes a
@@ -538,11 +643,16 @@ export function AssurancePanel({
       {evaluation.decision === 'needs_human' && (
         <ApprovalPanel
           evaluation={evaluation}
+          task={task}
+          action={action}
           decision={decision}
           isSubmitting={isSubmitting}
           submitError={submitError}
           canWrite={canWrite}
           onSubmit={(verdict, reason) => onSubmitDecision(evaluation.id, verdict, reason)}
+          onRun={onRun}
+          isRunning={isRunning}
+          runBlockedReason={runBlockedReason}
         />
       )}
 
