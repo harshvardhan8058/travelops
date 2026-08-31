@@ -10,13 +10,15 @@
 
 // ---------------------------------------------------------------- provenance
 /** Rendered by the UI, never inferred from a provider name. */
-export type ProvenanceKind = 'real' | 'simulated' | 'synthetic' | 'fixture' | 'unavailable';
+export type ProvenanceKind =
+  'real' | 'simulated' | 'synthetic' | 'fixture' | 'derived' | 'unavailable';
 
 export const PROVENANCE_KINDS: readonly ProvenanceKind[] = [
   'real',
   'simulated',
   'synthetic',
   'fixture',
+  'derived',
   'unavailable',
 ] as const;
 

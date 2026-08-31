@@ -109,12 +109,12 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
       }
     >
       <div className="min-w-0">
-        <PanelSection title="Weather observation used">
+        <PanelSection title="Latest origin weather observation">
           {!weather ? (
             <p className="text-caption text-fg-muted">
-              No observation is recorded for the origin airport, so the plan was assured without
-              one. This is <MonoValue muted>null</MonoValue> from the endpoint, not a fetch that
-              failed.
+              No current observation is recorded for the origin airport. This is{' '}
+              <MonoValue muted>null</MonoValue> from the endpoint, not a failed fetch; the
+              delay-risk record below independently names any weather evidence it scored.
             </p>
           ) : (
             <>
@@ -177,6 +177,11 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
                   <span className="text-caption text-fg-muted">not recorded on this endpoint</span>
                 )}
               </Field>
+              <p className="mt-1.5 text-caption text-fg-muted">
+                This is the latest origin observation returned by the incident endpoint. It is not
+                labelled as risk-scored evidence; the prediction's recorded evidence references are
+                shown with Delay risk below.
+              </p>
             </>
           )}
         </PanelSection>
@@ -261,6 +266,20 @@ export function EvidenceColumn({ incident }: { incident: IncidentDetail }) {
                     </li>
                   ))}
                 </ul>
+              )}
+              {risk.evidence_refs && risk.evidence_refs.length > 0 && (
+                <div className="mt-1.5">
+                  <span className="text-caption uppercase text-fg-muted">scored evidence refs</span>
+                  <ul className="mt-1 flex flex-col gap-0.5">
+                    {risk.evidence_refs.map((reference) => (
+                      <li key={reference}>
+                        <MonoValue muted className="break-all text-caption">
+                          {reference}
+                        </MonoValue>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               {risk.note && <p className="mt-1.5 text-caption text-fg-muted">{risk.note}</p>}
             </>

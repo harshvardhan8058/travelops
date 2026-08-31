@@ -48,7 +48,7 @@ const NAV = [
   // Phase 5. Both are keyed on their own reference rather than an incident, so they sit at the end
   // rather than beside the incident-scoped entries.
   { to: '/scenarios/new', icon: Wand2, label: 'Scenario builder' },
-  { to: '/passenger/X9Y2Z1', icon: Luggage, label: 'Passenger view' },
+  { to: '/passenger/K4X8YR', icon: Luggage, label: 'Passenger view' },
 ] as const;
 
 function Rail() {
@@ -142,12 +142,16 @@ export function AppShell({
   clock,
   timeline,
   blockedCount,
+  blockedSingular,
+  blockedPlural,
   children,
 }: {
   mode?: SystemMode;
   clock: string;
   timeline: ReactNode;
   blockedCount: number;
+  blockedSingular: string;
+  blockedPlural: string;
   children: ReactNode;
 }) {
   const degradations = mode?.degradations ?? [];
@@ -187,7 +191,7 @@ export function AppShell({
             <StateBadge status="needs_human" label="awaiting approval" />
             <span className="text-body text-state-warn">
               <MonoValue className="text-state-warn">{blockedCount}</MonoValue>{' '}
-              {blockedCount === 1 ? 'action requires' : 'actions require'} an operator decision
+              {blockedCount === 1 ? blockedSingular : blockedPlural}
             </span>
             <NavLink
               to="/assurance"

@@ -264,6 +264,13 @@ export function RecoveryWorkspace() {
 
   const incident = incidentQuery.data;
 
+  const timelineQuery = useQuery({
+    queryKey: ['timeline', incidentId],
+    queryFn: () => api.timeline(incidentId),
+    enabled: incidentId.length > 0,
+    refetchInterval: 10_000,
+  });
+
   /*
    * Land on the blocked task. An operator opening this screen mid-disruption wants the thing
    * waiting for them, not task 1 which already succeeded. `plan` is null until the orchestrator
@@ -446,6 +453,8 @@ export function RecoveryWorkspace() {
 
         <PlanColumn
           incident={incident}
+          timeline={timelineQuery.data}
+          timelineUnavailable={timelineQuery.isError}
           selectedTaskId={selectedTaskId}
           onSelectTask={setSelectedTaskId}
         />

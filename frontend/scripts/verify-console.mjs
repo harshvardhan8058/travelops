@@ -161,6 +161,12 @@ const ROUTES = [
     expect: [],
     derive: policyExpectations,
   },
+  {
+    path: '/passenger/K4X8YR',
+    name: 'Passenger operational view',
+    expect: ['K4X8YR', 'persisted_records', 'No passenger booking outcome is available'],
+    expectExactCase: ['persisted_records'],
+  },
   { path: '/sources', name: 'Provenance ledger', expect: [] },
 ];
 

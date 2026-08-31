@@ -278,7 +278,8 @@ export function GroupApprovalQueue() {
   }
 
   const data = assurance.data;
-  if (!data) return <LoadingState label="Loading the approval queue" />;
+  const group = current.data;
+  if (!data || !group) return <LoadingState label="Loading the approval queue" />;
 
   const preview = data.approval_preview;
   /*
@@ -314,11 +315,21 @@ export function GroupApprovalQueue() {
       <PageHeader
         eyebrow="Group approval queue"
         title={<span className="font-mono tabular-nums">{data.group_reference}</span>}
-        status={<StateBadge status={data.requires_human ? 'awaiting_approval' : 'executing'} />}
+        status={
+          <StateBadge status={group.state} label={`workflow ${group.state.replace(/_/g, ' ')}`} />
+        }
         meta={
           <>
             <Labelled label="gate">
               <MonoValue>{data.decision.replace(/_/g, ' ')}</MonoValue>
+            </Labelled>
+            <Labelled label="gate requirement">
+              <MonoValue>
+                {data.requires_human ? 'human decisions required' : 'no human gate'}
+              </MonoValue>
+            </Labelled>
+            <Labelled label="incidents awaiting approval">
+              <MonoValue>{group.awaiting_approval_count}</MonoValue>
             </Labelled>
             <Labelled label="plan risk tier">
               <MonoValue>{data.plan_risk_tier}</MonoValue>
@@ -368,13 +379,13 @@ export function GroupApprovalQueue() {
                   awaiting > 0 ? 'text-state-warn' : 'text-fg-muted',
                 )}
               >
-                Awaiting a person
+                Human-gated tasks
               </span>
               <span className="text-subtitle">
                 <Metric
                   value={awaiting}
                   derivation={planTotalDerivation({
-                    label: 'Tasks awaiting a person',
+                    label: 'Tasks whose gate requires a person',
                     field: 'awaiting_approval_count',
                     contributions: awaitingContributions,
                     configVersion: data.config_version,
@@ -388,7 +399,8 @@ export function GroupApprovalQueue() {
         footer={
           <p className="text-body text-fg-secondary">
             This summary authorises nothing. Every action still passes its own gate at execution
-            time.
+            time. “Human decisions required” describes the recorded plan rule; “incidents awaiting
+            approval” and the workflow badge come from the current group record.
           </p>
         }
       />
@@ -419,13 +431,13 @@ export function GroupApprovalQueue() {
           </MonoValue>
         }
       >
-        <TableFrame caption="Each member incident in the group, with its plan and how many tasks await a person.">
+        <TableFrame caption="Each member incident in the group, with its plan and how many task gates require a person. This is a plan property; the page header separately reports incidents whose workflows still await approval.">
           <TableHead
             columns={[
               { key: 'incident', label: 'Incident' },
               { key: 'variant', label: 'Variant' },
               { key: 'tasks', label: 'Tasks', align: 'right' },
-              { key: 'awaiting', label: 'Awaiting', hint: 'a person', align: 'right' },
+              { key: 'awaiting', label: 'Human-gated', hint: 'tasks', align: 'right' },
               { key: 'decisions', label: 'Decisions', hint: 'gate outcome per task' },
             ]}
           />
