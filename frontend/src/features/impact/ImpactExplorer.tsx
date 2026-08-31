@@ -47,6 +47,13 @@ import { impactCountDerivation, impactFieldDerivation } from '@/components/ui/de
 import { useKeyboardList } from '@/hooks/useKeyboardList';
 import { PassengerPriorityPanel } from './PassengerPriorityPanel';
 import {
+  CONNECTIONS_NOT_ASSESSED,
+  IMPACT_TAB_LABEL,
+  impactTabs,
+  resolveActiveTab,
+  type ImpactTab,
+} from './availability';
+import {
   connectionImpact,
   crewImpact,
   hotelImpact,
@@ -55,15 +62,12 @@ import {
   type ConnectionRow,
 } from './payloads';
 
-type Tab = 'connections' | 'passengers' | 'priorities' | 'crew' | 'hotels';
-
-const TAB_LABEL: Record<Tab, string> = {
-  connections: 'Connections',
-  passengers: 'Passengers',
-  priorities: 'Recorded priorities',
-  crew: 'Crew rotations',
-  hotels: 'Hotels',
-};
+/*
+ * Tab identity, labels and availability live in `availability.ts` so they are unit-tested. The rule
+ * that matters is that connections is offered unconditionally — see that module for why dropping it
+ * was the defect.
+ */
+type Tab = ImpactTab;
 
 export function ImpactExplorer() {
   const { incidentId = '' } = useParams();
@@ -146,13 +150,13 @@ export function ImpactExplorer() {
    * has been recorded yet.
    */
   const groupReference = incidentQuery.data.group_reference ?? null;
-  const available: Tab[] = [
-    ...(connections ? (['connections', 'passengers'] as Tab[]) : []),
-    ...(groupReference ? (['priorities'] as Tab[]) : []),
-    ...(crew ? (['crew'] as Tab[]) : []),
-    ...(hotels ? (['hotels'] as Tab[]) : []),
-  ];
-  const active = available.includes(tab) ? tab : (available[0] ?? 'connections');
+  const available = impactTabs({
+    hasConnections: connections !== null,
+    hasCrew: crew !== null,
+    hasHotels: hotels !== null,
+    hasGroup: groupReference !== null,
+  });
+  const active = resolveActiveTab(available, tab);
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
@@ -283,43 +287,55 @@ export function ImpactExplorer() {
           </p>
         )}
 
-        {available.length === 0 ? (
-          <EmptyState
-            title="Nothing has been assessed yet"
-            description={
-              'No connection, crew or accommodation action has run for this incident, so there is ' +
-              'no per-entity finding to explore. Run the incident to produce one.'
-            }
-          />
-        ) : (
-          <div className="border-t border-border-subtle px-3 py-2">
-            <FilterChips
-              label="Entity type"
-              value={active}
-              onChange={(next) => setTab(next as Tab)}
-              options={available.map((key) => ({
-                value: key,
-                label: TAB_LABEL[key],
-                count:
-                  key === 'connections'
+        {/*
+          Always rendered. There is no longer an "available.length === 0" case, because connections is
+          offered unconditionally: each surface now accounts for its own absence, which is more useful
+          than one screen-level message that could not say which finding was missing.
+        */}
+        <div className="border-t border-border-subtle px-3 py-2">
+          <FilterChips
+            label="Entity type"
+            value={active}
+            onChange={(next) => setTab(next as Tab)}
+            options={available.map((key) => ({
+              value: key,
+              label: IMPACT_TAB_LABEL[key],
+              count:
+                key === 'connections'
+                  ? // Undefined, not 0, when nothing has been recorded: a zero here would read as
+                    // "examined, none at risk", which is the claim this screen must not make.
+                    connections?.atRisk.length
+                  : key === 'passengers'
                     ? connections?.atRisk.length
-                    : key === 'passengers'
-                      ? connections?.atRisk.length
-                      : key === 'priorities'
-                        ? // The count comes from the panel's own query, not from here. Left
-                          // undefined rather than guessed: a chip count this screen invented
-                          // could disagree with the table beneath it.
-                          undefined
-                        : key === 'crew'
-                          ? crew?.impacts.length
-                          : hotels?.properties.length,
-              }))}
-            />
-          </div>
-        )}
+                    : key === 'priorities'
+                      ? // The count comes from the panel's own query, not from here. Left
+                        // undefined rather than guessed: a chip count this screen invented
+                        // could disagree with the table beneath it.
+                        undefined
+                      : key === 'crew'
+                        ? crew?.impacts.length
+                        : hotels?.properties.length,
+            }))}
+          />
+        </div>
       </Panel>
 
-      {active === 'connections' && connections && <ConnectionTable impact={connections} />}
+      {/*
+        The surface is present whether or not the finding is. When it is absent the panel says nobody
+        has looked, rather than the screen dropping every mention of connections — which is what made
+        a not-yet-advanced cascade look like a rendering fault while `/impacts` answered 200.
+      */}
+      {active === 'connections' &&
+        (connections ? (
+          <ConnectionTable impact={connections} />
+        ) : (
+          <Panel title="Connections">
+            <EmptyState
+              title="No connection has been examined yet"
+              description={CONNECTIONS_NOT_ASSESSED}
+            />
+          </Panel>
+        ))}
       {active === 'passengers' && connections && <PassengerTable impact={connections} />}
       {active === 'priorities' && groupReference && (
         <PassengerPriorityPanel groupRef={groupReference} />

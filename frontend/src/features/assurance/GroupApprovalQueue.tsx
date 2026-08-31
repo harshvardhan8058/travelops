@@ -26,6 +26,7 @@ import { clsx } from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, ApiError } from '@/api/client';
+import { dataUnavailable, retryUnlessUnavailable } from '@/api/unavailable';
 import type { ExcludedEvaluation, GroupExposure, PlanCheck } from '@/api/types';
 import { CountBar, Metric } from '@/components/ui/Metric';
 import { planTotalDerivation } from '@/components/ui/derivation';
@@ -194,6 +195,12 @@ export function GroupApprovalQueue() {
     queryKey: ['group-assurance', groupRef],
     queryFn: () => api.groupAssurance(groupRef),
     enabled: Boolean(groupRef),
+    /*
+     * A group with no member plan answers 404 with a resolution, and that is not transient: retrying
+     * it is three more requests whose answer is already known, and it holds this screen on a spinner
+     * before showing the empty state an operator could act on.
+     */
+    retry: retryUnlessUnavailable,
   });
 
   const approve = useMutation({
@@ -232,16 +239,26 @@ export function GroupApprovalQueue() {
   }
   if (assurance.isError) {
     const error = assurance.error;
-    const resolution =
-      error instanceof ApiError &&
-      error.status === 404 &&
-      error.code === 'ENTITY_NOT_FOUND' &&
-      typeof error.details.resolution === 'string'
-        ? error.details.resolution
-        : null;
+    /*
+     * Classified in one shared place rather than inline, so this screen and Plan Comparison cannot
+     * drift apart about what a 404 means. The 404 is not hidden: the empty state carries the server's
+     * own code, message and next step.
+     */
+    const unavailable = dataUnavailable(error);
 
-    if (resolution) {
-      return <EmptyState title="Plan assurance is not available yet" description={resolution} />;
+    if (unavailable) {
+      return (
+        <EmptyState
+          title="Plan assurance is not available yet"
+          description={unavailable.resolution}
+          action={
+            <span className="flex flex-wrap items-center justify-center gap-2">
+              <StateBadge status="pending" label={unavailable.code} />
+              <span className="text-caption text-fg-muted">{unavailable.message}</span>
+            </span>
+          }
+        />
+      );
     }
 
     return (
@@ -253,6 +270,7 @@ export function GroupApprovalQueue() {
             : 'The group assurance endpoint did not respond.'
         }
         correlationId={error instanceof ApiError ? error.correlationId : null}
+        onRetry={() => void assurance.refetch()}
       />
     );
   }
