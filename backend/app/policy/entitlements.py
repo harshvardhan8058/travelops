@@ -80,6 +80,8 @@ class CitedEntitlement(BaseModel):
     pack_version: str | None = None
     pack_hash: str | None = None
     pack_status: str | None = None
+    verified_mode_eligible: bool = False
+    source_document_verified: bool = False
     pack_ui_label: str | None = None
     policy_mode: str
     engine_version: str | None = None
@@ -93,8 +95,12 @@ class CitedEntitlement(BaseModel):
 
     @property
     def may_be_presented_as_current_law(self) -> bool:
-        """False for anything short of an approved pack. The UI badge depends on this."""
-        return self.pack_status == "approved"
+        """Only approved, verified-eligible, source-verified policy has that standing."""
+        return (
+            self.pack_status == "approved"
+            and self.verified_mode_eligible
+            and self.source_document_verified
+        )
 
     @property
     def has_citation(self) -> bool:
@@ -115,6 +121,8 @@ def _from_resolution(
         pack_version=pack.version,
         pack_hash=pack.pack_hash,
         pack_status=pack.status.value,
+        verified_mode_eligible=pack.verified_mode_eligible,
+        source_document_verified=pack.source_document_verified,
         pack_ui_label=pack.ui_label,
         policy_mode=mode.value,
         applicability=[candidate.model_dump(mode="json") for candidate in resolution.candidates],
@@ -148,6 +156,8 @@ def _from_result(
         pack_version=result.pack_version,
         pack_hash=result.pack_hash,
         pack_status=result.pack_status,
+        verified_mode_eligible=result.verified_mode_eligible,
+        source_document_verified=result.source_document_verified,
         pack_ui_label=result.pack_ui_label,
         policy_mode=mode.value,
         engine_version=result.engine_version,

@@ -1,0 +1,200 @@
+pack: in-dgca-car-3m4
+version: "rev4-2023.01"
+
+# PROJECT POLICY-PACK APPROVAL ONLY.
+# This records the project owner's explicit decision in the authenticated project session on
+# 2026-08-21. It is not DGCA endorsement, regulator approval, external legal advice, or proof
+# that these instruments remain current. Those distinctions are enforced by the false verified
+# eligibility flag and by tests.
+review_status: approved_for_project_use_with_limitations
+reviewer_name: "Project owner (project-provided approver)"
+reviewer_role: "Project owner and policy-pack approver"
+reviewer_organisation: null
+reviewed_at: 2026-08-21
+approval:
+  decision: approved_for_project_use_with_limitations
+  approved_by: "Project owner (project-provided approver)"
+  approved_at: 2026-08-21
+  scope: project_policy_artifact
+  permits:
+    - charter_mode_calculation_with_disclosed_operational_gates
+  does_not_assert:
+    - DGCA endorsement or approval
+    - external legal or aviation SME approval
+    - currentness or absence of supersession
+    - legal certainty for unresolved interpretations
+  verified_mode_eligible: false
+  basis: >-
+    Explicit project-owner approval to promote the pack as a project artifact while preserving
+    unresolved regulatory facts as fail-closed human-review requirements or accepted external
+    risk. Approval does not convert those unknowns into facts.
+
+reviewer_instructions: >-
+  The project approval below covers use of the encoded rules with their runtime gates. It does
+  not answer RQ-3, RQ-4 or RQ-5 as legal interpretations and does not resolve RQ-9 currentness.
+  A future verified-mode promotion must supply authoritative evidence for those blockers and
+  create a new pack hash.
+
+open_review_questions:
+  - id: RQ-1
+    clause: "3.4.3"
+    affected_rule: delay.care.hotel.long_or_night_window
+    status: resolved_project_decision
+    decision: Keep the rule as encoded; no advance-notice condition applies to Para 3.4.3.
+    basis: The complete archived clause contains no communication or notice condition.
+
+  - id: RQ-2
+    clause: "3.4.4, 3.8.1"
+    affected_rule: delay.exemption.extraordinary_circumstances
+    status: resolved_project_decision
+    decision: Keep suppression of meals and hotel facilities as encoded.
+    basis: >-
+      Para 3.4.4 excuses adherence to Para 3.8; Para 3.8.1 contains meals and hotel. Para 3.4
+      contains no INR figure, percentage or cash-compensation provision.
+
+  - id: RQ-3
+    clause: "3.3.2"
+    affected_rules:
+      - cancellation.compensation.block_upto_60
+      - cancellation.compensation.block_60_to_120
+      - cancellation.compensation.block_over_120
+    status: operational_scope_required
+    operational_disposition: needs_human
+    required_fact: cancellation.compensation_branch_confirmed_by_project_reviewer
+    decision: >-
+      No regulatory interpretation is adopted. A cancellation cash rule may compute only after
+      a project reviewer explicitly confirms that the compensation branch is the branch being
+      evaluated. Missing confirmation is needs_human.
+
+  - id: RQ-4
+    clause: "3.2.2, 3.3.2"
+    affected_rules:
+      - denied_boarding.alternate_within_24h
+      - denied_boarding.alternate_beyond_24h
+      - denied_boarding.no_alternate_taken
+      - cancellation.compensation.block_upto_60
+      - cancellation.compensation.block_60_to_120
+      - cancellation.compensation.block_over_120
+    status: operational_scope_required
+    operational_disposition: needs_human
+    required_fact: fare.component_definition_confirmed_by_project_reviewer
+    decision: >-
+      No definition is invented. Supplying two numbers does not prove their legal composition;
+      fare-based cash may compute only after a project reviewer confirms the supplied components
+      correspond to booked one-way basic fare and airline fuel charge.
+
+  - id: RQ-5
+    clause: "1.4, 1.5, 3.3.4, 3.4.4"
+    affected_rules:
+      - cancellation.exemption.extraordinary_circumstances
+      - delay.exemption.extraordinary_circumstances
+    status: operational_scope_required
+    operational_disposition: needs_human
+    required_facts:
+      - cause_evidence.external_to_carrier
+      - cause_evidence.unavoidable_despite_reasonable_measures
+      - cause_evidence.evidence_refs
+    decision: >-
+      No universal evidentiary standard is invented. The exemption remains unavailable unless a
+      human evidence assessment supplies both legal limbs and evidence references; partial
+      evidence remains needs_human.
+
+  - id: RQ-6
+    clause: "3.6.1"
+    affected_rule: foreign_carrier.compensation_basis
+    status: resolved_project_decision
+    decision: Preserve fail-closed deferral; no precedence between the two alternatives is chosen.
+
+  - id: RQ-7
+    clause: "3.2.3"
+    affected_rule: denied_boarding.connecting_flight_first_leg
+    status: resolved_project_decision
+    decision: Keep informational and out of MVP scope until the required arrival-delay fact and cross-rule support exist.
+
+  - id: RQ-8
+    clause: "3.5.1"
+    affected_rule: downgrading.involuntary.reimbursement
+    status: resolved_project_decision
+    decision: Keep informational and out of MVP scope; do not invent a ticket-cost formula or distance fact.
+
+  - id: RQ-9
+    clause: "1.1, 3.3.5"
+    status: accepted_external_risk
+    accepted_by: "Project owner (project-provided approver)"
+    accepted_at: 2026-08-21
+    acceptance_scope: project_policy_artifact_charter_mode_only
+    currentness_asserted: false
+    blocks_verified_mode: true
+    external_dependency: authoritative DGCA currentness and supersession evidence
+    decision: >-
+      The project accepts the disclosed risk for project-artifact use only. No assertion is made
+      that Part IV Rev. 4 is current or that its cross-reference conclusively selects Part II
+      Rev. 3 dated 24 February 2026.
+
+  # RQ-10 was retired when the original Part IV PDF became byte-archived and hash-verified.
+  - id: RQ-11
+    clause: "car:3m2:rev3:3(e)"
+    affected_rules:
+      - refund.look_in_option_48h
+      - refund.look_in_option.international_requires_human
+    status: resolved_project_decision
+    decision: >-
+      Keep deterministic evaluation to the domestic seven-day branch. Route the international
+      fifteen-day branch to explicit project human review rather than guessing.
+
+# Every rule is signed off for PROJECT use only, under the limitations above. This is not a
+# regulatory or external-SME sign-off. The IDs are checked against rules.yaml by tests.
+rule_signoff:
+  decision: approved_for_project_use_with_limitations
+  approved_by: "Project owner (project-provided approver)"
+  approved_at: 2026-08-21
+  regulatory_approval: false
+  applies_to_rule_ids:
+    - denied_boarding.volunteers_first
+    - denied_boarding.alternate_within_1h.no_compensation
+    - denied_boarding.alternate_within_24h
+    - denied_boarding.alternate_beyond_24h
+    - denied_boarding.no_alternate_taken
+    - denied_boarding.connecting_flight_first_leg
+    - cancellation.notice.two_weeks_or_more
+    - cancellation.notice.under_two_weeks_to_24h
+    - cancellation.compensation.block_upto_60
+    - cancellation.compensation.block_60_to_120
+    - cancellation.compensation.block_over_120
+    - cancellation.care.facilities_while_waiting
+    - cancellation.exemption.no_contact_info
+    - cancellation.exemption.extraordinary_circumstances
+    - delay.care.facilities.block_upto_150
+    - delay.care.facilities.block_150_to_300
+    - delay.care.facilities.block_over_300
+    - delay.domestic.over_6h.alternate_or_refund
+    - delay.care.hotel.long_or_night_window
+    - delay.exemption.extraordinary_circumstances
+    - delay.no_cash_compensation
+    - delay.burden_of_proof_on_airline
+    - downgrading.involuntary.reimbursement
+    - foreign_carrier.compensation_basis
+    - compensation.mode
+    - facilities.reduced_mobility
+    - general.alternate_airport_transfer_cost
+    - information.flights_and_reservations
+    - information.display_and_grievance
+    - redressal.escalation_path
+    - refund.timing.credit_card_7_days
+    - refund.timing.cash_immediate
+    - refund.timing.travel_agent_14_working_days
+    - refund.statutory_charges_always_refundable
+    - refund.look_in_option_48h
+    - refund.look_in_option.international_requires_human
+    - refund.credit_shell_is_passenger_option
+    - refund.cancellation_charge_ceiling
+    - refund.no_processing_charge
+    - refund.foreign_carrier_country_of_origin
+    - refund.name_correction_free_within_24h
+    - refund.medical_emergency
+    - refund.disclosure_obligations
+    - refund.applicability
+  conditions:
+    - RQ-3, RQ-4 and RQ-5 runtime human-review gates remain authoritative
+    - RQ-9 remains accepted external risk and blocks verified mode
+    - Part II visual-review limitation remains disclosed

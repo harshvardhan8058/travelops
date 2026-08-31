@@ -1,0 +1,57 @@
+id: in-dgca-car-3m4
+version: "rev4-2023.01"
+jurisdiction: IN
+authority: Directorate General of Civil Aviation, Government of India
+document: >-
+  Civil Aviation Requirements, Section 3 — Air Transport, Series 'M' Part IV, Issue I dated
+  6th August 2010, Rev. 4 dated 25th January 2023. Subject: Facilities to be provided to
+  passengers by airlines due to denied boarding, cancellation of flights and delays in flights.
+document_date: 2023-01-25
+currency: INR
+
+# ---------------------------------------------------------------------------
+# THIS PRIMARY-SOURCE ENCODING IS PROJECT-APPROVED WITH LIMITATIONS.
+#
+# Approval was explicitly granted by the project owner on 21 August 2026 for use as a project
+# policy artifact in charter mode. It is not DGCA endorsement, regulator approval, external legal
+# advice, or proof of currentness. RQ-3/4/5 remain fail-closed operational review requirements;
+# RQ-9 is an accepted external risk and blocks verified mode.
+#
+# `status: approved` means the project accepted this encoded artifact under review.yaml. The
+# separate `verified_mode_eligible: false` is authoritative: neither this pack nor any downstream
+# citation may call it current law until the listed blockers are genuinely resolved.
+# ---------------------------------------------------------------------------
+status: approved
+
+verified_mode_eligible: false
+ui_label: "PROJECT-APPROVED DGCA CAR 3/M/IV · DATED SOURCES · NOT VERIFIED CURRENT LAW"
+
+blocks_verified_mode_until:
+  - >-
+    RQ-9 resolved with authoritative DGCA evidence that Part IV Rev. 4 remains current and a
+    reviewed reading of Para 3.3.5 given that Part II Rev. 3 postdates this Part IV revision
+  - >-
+    RQ-3 resolved by an external aviation/legal SME interpretation of the alternate-flight versus
+    compensation branch; until then each evaluation requires a project human decision
+  - >-
+    RQ-4 resolved by an external aviation/legal SME definition of booked one-way basic fare and
+    airline fuel charge; until then every fare-based cash calculation requires project review
+  - >-
+    RQ-5 resolved by an external aviation/legal SME evidentiary standard for reasonable measures;
+    until then the existing evidence facts and needs_human gate remain authoritative
+  - an explicit later project decision setting verified_mode_eligible true after those facts exist
+  # Source integrity is complete. Both original PDFs are archived with test-verified SHA-256.
+
+precedence:
+  # No global "most favourable to passenger" rule is assumed. This pack overlaps the charter
+  # pack, which is derived from it; overlap handling is undetermined until a reviewer defines it.
+  conflict_rules_defined: false
+  on_conflict: needs_human
+
+required_context:
+  - itinerary
+  - operating_carrier
+  - event
+  - notice
+  - cause_evidence
+  - fare_components

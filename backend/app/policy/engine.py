@@ -201,6 +201,10 @@ def _apply_operator(operator: str, actual: Any, expected: Any) -> TriState:
             return True
         if operator == "absent":
             return False
+        if operator == "confirmed":
+            # Human/project confirmation is tri-state: only literal True confirms. False means
+            # "not confirmed", not a substantive decision that the guarded rule is inapplicable.
+            return True if actual is True else UNKNOWN
         if operator == "eq":
             return actual == expected
         if operator == "ne":
@@ -472,6 +476,8 @@ class EntitlementResult(BaseModel):
     pack_version: str | None = None
     pack_hash: str | None = None
     pack_status: str | None = None
+    verified_mode_eligible: bool = False
+    source_document_verified: bool = False
     source_clause_refs: list[str] = Field(default_factory=list)
     # Human-readable derivation, e.g. "least_of(cap 7500, 4200 + 800) = 5000"
     formula_used: str | None = None
@@ -502,8 +508,12 @@ class EntitlementResult(BaseModel):
 
     @property
     def may_be_presented_as_current_law(self) -> bool:
-        """False for anything short of an approved pack."""
-        return self.pack_status == "approved"
+        """Project approval alone is never regulatory/current-law standing."""
+        return (
+            self.pack_status == "approved"
+            and self.verified_mode_eligible
+            and self.source_document_verified
+        )
 
 
 class ApplicabilityResult(BaseModel):
@@ -528,6 +538,8 @@ def _pack_identity(pack: Any) -> dict[str, Any]:
         "pack_version": getattr(pack, "version", None),
         "pack_hash": getattr(pack, "pack_hash", None),
         "pack_status": getattr(status, "value", status),
+        "verified_mode_eligible": bool(getattr(pack, "verified_mode_eligible", False)),
+        "source_document_verified": bool(getattr(pack, "source_document_verified", False)),
         "pack_ui_label": getattr(pack, "ui_label", None),
         "currency": getattr(pack, "currency", None),
     }
@@ -632,14 +644,17 @@ def evaluate(*, facts: dict[str, Any], pack: Any) -> EntitlementResult:
         if not rule.requires_facts or rule.on_missing_required_fact != OUTCOME_NEEDS_HUMAN:
             continue
         absent = absent_facts(facts, rule.requires_facts)
-        if not absent:
+        condition_gaps = next(
+            (e["missing_facts"] for e in undetermined if e["rule_id"] == rule.id), []
+        )
+        unconfirmed = [
+            path for path in condition_gaps if path in rule.requires_facts and path not in absent
+        ]
+        if not absent and not unconfirmed:
             continue
         asserted = [path for path in rule.requires_facts if path not in absent]
         if not asserted:
             continue
-        condition_gaps = next(
-            (e["missing_facts"] for e in undetermined if e["rule_id"] == rule.id), []
-        )
         return _blocked(
             pack=pack,
             reasons=[REASON_MISSING_REQUIRED_FACT],

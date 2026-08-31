@@ -1,0 +1,528 @@
+pack: in-dgca-car-3m4
+version: "rev4-2023.01"
+
+# Executable expectations for the primary-source pack. Every figure traces to a clause reference
+# in rules.yaml, and these double as the SME review worksheet: a reviewer reads each case and
+# confirms or corrects the expected outcome.
+#
+# Cases prefixed `dgca_` to distinguish them from the charter pack's in test output.
+
+cases:
+
+  # ------------------------------------------------------ denied boarding, Para 3.2.2
+  - id: dgca_denied_boarding_alternate_within_1h
+    description: Para 3.2.2 — alternate within one hour, no compensation payable.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 40 }
+    expect:
+      cash_inr: 0
+      rules_fired: [denied_boarding.alternate_within_1h.no_compensation]
+
+  - id: dgca_denied_boarding_within_24h_fare_governs
+    description: Para 3.2.2(a) — 200 percent of fare plus fuel, under the INR 10,000 cap.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 780 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 3000, airline_fuel_charge_inr: 500 }
+      passenger: { opted_for_alternate: true }
+    expect:
+      cash_inr: 7000
+      rules_fired: [denied_boarding.alternate_within_24h]
+
+  - id: dgca_denied_boarding_within_24h_cap_binds
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 600 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
+      passenger: { opted_for_alternate: true }
+    expect:
+      cash_inr: 10000
+      rules_fired: [denied_boarding.alternate_within_24h]
+
+  - id: dgca_denied_boarding_beyond_24h_cap_binds
+    description: Para 3.2.2(b) — 400 percent, capped at INR 20,000.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 1800 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 8000, airline_fuel_charge_inr: 1000 }
+      passenger: { opted_for_alternate: true }
+    expect:
+      cash_inr: 20000
+      rules_fired: [denied_boarding.alternate_beyond_24h]
+
+  - id: dgca_denied_boarding_declines_alternate
+    description: Para 3.2.2(c) — full ticket refund plus 400 percent, capped.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      passenger: { opted_for_alternate: false }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 2000, airline_fuel_charge_inr: 500 }
+    expect:
+      cash_inr: 10000
+      plus: full_ticket_value_refund
+      rules_fired: [denied_boarding.no_alternate_taken]
+
+  # ---------------------------------------------------------- cancellation, Para 3.3
+  - id: dgca_cancellation_crew_cause_block_95min
+    description: >-
+      Para 3.3.2(b) — internal cause so no exemption applies. Block time 95 minutes puts the cap
+      at INR 7,500; the fare is lower, so the lesser value governs.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger:
+        contact_info_provided_at_booking: true
+        reported_for_original_flight: true
+      alternate_flight: { offered: true }
+      cause_evidence:
+        operational_cause: crew_rostering
+        external_to_carrier: false
+        unavoidable_despite_reasonable_measures: false
+        evidence_refs: ["ops_event:rostering"]
+    expect:
+      cash_inr: 5000
+      formula_used: least_of_cap_and_basic_fare_plus_fuel_charge
+      plus: full_refund
+      entitlements: [cash, meals_refreshments]
+      rules_fired:
+        - cancellation.compensation.block_60_to_120
+        - cancellation.care.facilities_while_waiting
+
+  - id: dgca_cancellation_cap_binds_when_fare_high
+    description: Para 3.3.2(c) — cap governs when fare plus fuel exceeds it.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 200 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      cash_inr: 10000
+      rules_fired: [cancellation.compensation.block_over_120]
+
+  - id: dgca_cancellation_short_block_time
+    description: Para 3.3.2(a) — block time 55 minutes, INR 5,000 cap binds against 9,900.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 0 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 55 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 9000, airline_fuel_charge_inr: 900 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      cash_inr: 5000
+      rules_fired: [cancellation.compensation.block_upto_60]
+
+  - id: dgca_cancellation_informed_three_weeks_ahead
+    description: Para 3.3.1 — two-week notice obligation met, no cash.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 30240 }
+      cancellation: { notice_obligation_met: true }
+      flight: { block_time_minutes: 200 }
+    expect:
+      cash_inr: 0
+      entitlements: [passenger_choice]
+      rules_fired: [cancellation.notice.two_weeks_or_more]
+
+  - id: dgca_cancellation_no_contact_info_suppresses_cash
+    description: Para 3.3.3 — no adequate contact information at booking.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 200 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      passenger: { contact_info_provided_at_booking: false }
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [NO_CONTACT_INFO_AT_BOOKING]
+      rules_fired: [cancellation.exemption.no_contact_info]
+
+  - id: dgca_cancellation_extraordinary_circumstances_suppresses_cash
+    description: >-
+      Paras 3.3.4 with 1.4/1.5 — fully evidenced extraordinary circumstances. Cash suppressed;
+      the Para 3.8.1(a) facilities survive because 3.3.4 excuses compensation only.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger:
+        contact_info_provided_at_booking: true
+        reported_for_original_flight: true
+      alternate_flight: { offered: true }
+      cause_evidence:
+        operational_cause: meteorological
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: true
+        evidence_refs: ["metar:VOBL:2026-08-20T15:20Z"]
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [EXTRAORDINARY_CIRCUMSTANCES]
+      entitlements: [meals_refreshments]
+      rules_fired: [cancellation.exemption.extraordinary_circumstances]
+
+  - id: dgca_cancellation_weather_without_reasonable_measures_evidence
+    description: >-
+      THE CASE THAT PROVES THE DESIGN. Paras 1.4/1.5 make "beyond control" and "could not have
+      been avoided even if all reasonable measures had been taken" cumulative. A meteorological
+      cause is asserted and the reasonable-measures fact is null, so the exemption must refuse
+      rather than fire.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true }
+      cause_evidence:
+        operational_cause: meteorological
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: null
+    expect:
+      decision: needs_human
+      blocking_reasons: [MISSING_REQUIRED_FACT]
+      missing_facts: ["cause_evidence.unavoidable_despite_reasonable_measures"]
+      cash_inr: null
+
+  # ----------------------------------------------------------------- delay, Para 3.4
+  - id: dgca_delay_pays_no_cash_but_owes_care
+    description: >-
+      Para 3.4 provides no monetary compensation. Block time 165 minutes places the meals
+      threshold at three hours under Para 3.4.1(b), which a 420-minute delay exceeds.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI, is_foreign: false }
+      event:
+        type: delay
+        delay_minutes: 420
+        expected_delay_minutes: 420
+        notice_minutes: 1500
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "11:05" }
+      passenger: { checked_in_on_time: true }
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [NO_DELAY_COMPENSATION_PROVISION]
+      entitlements: [meals_refreshments, passenger_choice]
+      must_not_include: [hotel_accommodation]
+      rules_fired:
+        - delay.care.facilities.block_150_to_300
+        - delay.domestic.over_6h.alternate_or_refund
+        - delay.no_cash_compensation
+
+  - id: dgca_delay_night_window_hotel_without_advance_notice
+    description: >-
+      Para 3.4.3 — MATERIAL DIFFERENCE FROM THE 2019 BOOKLET. A 21:10 departure delayed seven
+      hours attracts hotel accommodation. The airline gave only 90 minutes' notice, and Para
+      3.4.3 attaches no advance-communication condition, so hotel is owed anyway. RQ-1.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI, is_foreign: false }
+      event:
+        type: delay
+        delay_minutes: 420
+        expected_delay_minutes: 420
+        notice_minutes: 90
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "21:10" }
+      passenger: { checked_in_on_time: true }
+    expect:
+      cash_inr: 0
+      entitlements: [hotel_accommodation, meals_refreshments]
+      rules_fired: [delay.care.hotel.long_or_night_window]
+      review_required: true
+
+  - id: dgca_delay_over_24h_hotel_regardless_of_departure_time
+    description: Para 3.4.3 — total delay over 24 hours, daytime departure.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: delay, delay_minutes: 1500, expected_delay_minutes: 1500 }
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "11:05" }
+      passenger: { checked_in_on_time: true }
+    expect:
+      entitlements: [hotel_accommodation]
+      rules_fired: [delay.care.hotel.long_or_night_window]
+
+  - id: dgca_delay_meals_threshold_boundary_block_150
+    description: Para 3.4.1(a) — block time exactly 150 minutes uses the two-hour threshold.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: delay, delay_minutes: 120 }
+      flight: { block_time_minutes: 150 }
+      passenger: { checked_in_on_time: true }
+    expect:
+      entitlements: [meals_refreshments]
+      rules_fired: [delay.care.facilities.block_upto_150]
+
+  - id: dgca_delay_below_threshold_owes_nothing
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: delay, delay_minutes: 100 }
+      flight: { block_time_minutes: 120 }
+      passenger: { checked_in_on_time: true }
+    expect:
+      cash_inr: 0
+      entitlements: []
+
+  - id: dgca_delay_not_checked_in_on_time
+    description: Para 3.4.1 conditions the facilities on the passenger having checked in on time.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: delay, delay_minutes: 200 }
+      flight: { block_time_minutes: 120 }
+      passenger: { checked_in_on_time: false }
+    expect:
+      must_not_include: [meals_refreshments]
+
+  - id: dgca_delay_exemption_suppresses_facilities
+    description: >-
+      Para 3.4.4 — MATERIAL DIFFERENCE FROM THE 2019 BOOKLET. The clause excuses adherence to
+      Para 3.8 itself, so a fully evidenced extraordinary circumstance suppresses the meals and
+      hotel facilities, not merely a cash payment. Flagged as RQ-2 and not to be demonstrated
+      until reviewed.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI, is_foreign: false }
+      event:
+        type: delay
+        delay_minutes: 420
+        expected_delay_minutes: 420
+        notice_minutes: 1500
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "21:10" }
+      passenger: { checked_in_on_time: true }
+      cause_evidence:
+        operational_cause: meteorological
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: true
+        evidence_refs: ["metar:VOBL:2026-08-20T15:20Z"]
+    expect:
+      cash_inr: 0
+      cash_reason_codes: [EXTRAORDINARY_CIRCUMSTANCES]
+      must_not_include: [meals_refreshments, hotel_accommodation]
+      entitlements: [passenger_choice]
+      rules_fired: [delay.exemption.extraordinary_circumstances]
+      review_required: true
+
+  - id: dgca_delay_asserted_weather_without_evidence_blocks
+    description: Para 3.4.4 with 1.4/1.5 — asserted cause, decisive fact null, refuse.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: delay, delay_minutes: 420, expected_delay_minutes: 420 }
+      flight: { block_time_minutes: 165, scheduled_departure_local_time: "21:10" }
+      passenger: { checked_in_on_time: true }
+      cause_evidence:
+        operational_cause: meteorological
+        external_to_carrier: true
+        unavoidable_despite_reasonable_measures: null
+    expect:
+      decision: needs_human
+      blocking_reasons: [MISSING_REQUIRED_FACT]
+      missing_facts: ["cause_evidence.unavoidable_despite_reasonable_measures"]
+
+  # ------------------------------------------------- refund, Part II Rev. 3 Para 3
+  - id: dgca_refund_look_in_option_48h
+    description: >-
+      Part II Para 3(e) — ANSWERS THE CHARTER PACK'S EXCLUDED RULE. The free cancellation and
+      amendment window is 48 hours, not 24, and applies only to a direct website booking at least
+      seven days before departure.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      request: { type: cancellation, minutes_after_booking: 600 }
+      booking: { channel: airline_website, days_before_first_leg: 20 }
+    expect:
+      entitlements: [fee_prohibition]
+      rules_fired: [refund.look_in_option_48h]
+
+  - id: dgca_refund_look_in_expired_after_48h
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      request: { type: cancellation, minutes_after_booking: 3000 }
+      booking: { channel: airline_website, days_before_first_leg: 20 }
+    expect:
+      must_not_include: [] # look-in must simply not fire
+      rules_not_fired: [refund.look_in_option_48h]
+
+  - id: dgca_refund_look_in_unavailable_close_to_departure
+    description: Part II Para 3(e) — under seven days to departure, the option is unavailable.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN, is_domestic: true }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      request: { type: cancellation, minutes_after_booking: 600 }
+      booking: { channel: airline_website, days_before_first_leg: 3 }
+    expect:
+      rules_not_fired: [refund.look_in_option_48h]
+
+  - id: dgca_refund_agent_purchase_onus_on_airline
+    description: >-
+      Part II Para 3(c) — MATERIAL DIFFERENCE FROM THE 2019 BOOKLET. The onus is on the airline,
+      within 14 working days, not on the travel agent.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      # passenger_cancellation, not an airline cancellation: this case is about refund timing,
+      # and an airline cancellation would additionally engage the Para 3.3.2 bands.
+      event: { type: passenger_cancellation }
+      payment: { method: travel_agent }
+    expect:
+      entitlements: [refund_timing]
+      rules_fired: [refund.timing.travel_agent_14_working_days]
+
+  - id: dgca_refund_credit_card_seven_days
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      payment: { method: credit_card }
+    expect:
+      rules_fired: [refund.timing.credit_card_7_days]
+
+  - id: dgca_refund_statutory_charges_on_no_show
+    description: Part II Para 3(d) — taxes and fees refundable even on a no-show.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: no_show }
+    expect:
+      entitlements: [refund_component]
+      rules_fired: [refund.statutory_charges_always_refundable]
+
+  - id: dgca_refund_name_correction_free_within_24h
+    description: Part II Para 3(l) — direct website booking only.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      request: { type: name_correction, minutes_after_booking: 600 }
+      booking: { channel: airline_website }
+    expect:
+      rules_fired: [refund.name_correction_free_within_24h]
+
+  # ------------------------------------------------------------- fail-closed behaviour
+  - id: dgca_cancellation_without_project_branch_decision_blocks
+    description: RQ-3 — no interpretation is invented; the compensation branch needs review.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false }
+      flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      missing_facts: [cancellation.compensation_branch_confirmed_by_project_reviewer]
+
+  - id: dgca_cash_without_fare_definition_review_blocks
+    description: RQ-4 — supplied numbers do not prove their legal composition.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI }
+      event: { type: denied_boarding }
+      alternate_flight: { minutes_after_original_scheduled: 780 }
+      fare: { one_way_basic_fare_inr: 3000, airline_fuel_charge_inr: 500 }
+    expect:
+      decision: needs_human
+      missing_facts: [fare.component_definition_confirmed_by_project_reviewer]
+
+  - id: dgca_international_look_in_requires_project_review
+    description: RQ-11 — international fifteen-day branch is routed to a human.
+    facts:
+      itinerary: { origin_country: IN, destination_country: SG, is_domestic: false }
+      operating_carrier: { id: AI }
+      event: { type: passenger_cancellation }
+      request: { type: cancellation, minutes_after_booking: 600 }
+      booking: { channel: airline_website, days_before_first_leg: 20 }
+    expect:
+      decision: needs_human
+      missing_facts: [request.international_look_in_decision_confirmed_by_project_reviewer]
+
+  - id: dgca_missing_block_time_blocks_cancellation_cash
+    description: Para 3.3.2 bands on block time. Without it the engine must not guess a band.
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 4200, airline_fuel_charge_inr: 800 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      missing_facts: ["flight.block_time_minutes"]
+
+  - id: dgca_missing_fare_components_blocks_cash
+    facts:
+      itinerary: { origin_country: IN, destination_country: IN }
+      operating_carrier: { id: AI, is_foreign: false }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 95 }
+      fare: { component_definition_confirmed_by_project_reviewer: true }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      missing_facts:
+        ["fare.one_way_basic_fare_inr", "fare.airline_fuel_charge_inr"]
+
+  - id: dgca_foreign_carrier_defers_to_jurisdiction
+    description: >-
+      Para 3.6.1 is disjunctive and Part II Para 3(k) points to the country of origin. With no
+      reviewed precedence rule, the engine defers rather than choosing. RQ-6.
+    facts:
+      itinerary: { origin_country: IN, destination_country: SG }
+      operating_carrier: { id: SQ, is_foreign: true, country: SG }
+      event: { type: cancellation, notice_minutes: 600 }
+      cancellation: { notice_obligation_met: false, compensation_branch_confirmed_by_project_reviewer: true }
+      flight: { block_time_minutes: 200 }
+      fare: { component_definition_confirmed_by_project_reviewer: true, one_way_basic_fare_inr: 14000, airline_fuel_charge_inr: 1500 }
+      passenger: { contact_info_provided_at_booking: true }
+    expect:
+      decision: needs_human
+      blocking_reasons: [DEFERS_TO_OTHER_JURISDICTION]
+
+  - id: dgca_pack_is_rejected_in_verified_mode
+    description: >-
+      No SME review exists and the Part IV PDF is not archived, so verified mode must refuse.
+      Both preconditions are independent; either alone is sufficient to refuse.
+    mode: verified
+    expect:
+      load_result: rejected
+      reason_code: PACK_NOT_VERIFIED_ELIGIBLE
+
+  - id: dgca_pack_is_rejected_in_demo_mode
+    description: A real authority's pack must never load behind the fictional demo badge.
+    mode: demo
+    expect:
+      load_result: rejected
+      reason_code: POLICY_PACK_UNAVAILABLE

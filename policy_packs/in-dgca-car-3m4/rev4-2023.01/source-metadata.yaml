@@ -1,0 +1,192 @@
+# This pack is built from TWO official DGCA primary documents, because Part IV Para 3.3.5
+# defers refund of the air ticket to Part II. Both original PDF binaries are archived in this
+# directory with SHA-256 digests computed from their exact repository bytes.
+
+title: >-
+  Civil Aviation Requirements, Section 3 — Air Transport, Series 'M' Part IV:
+  Facilities to be provided to passengers by airlines due to denied boarding,
+  cancellation of flights and delays in flights
+publisher: Directorate General of Civil Aviation, Government of India
+issuing_office: >-
+  Office of the Director General of Civil Aviation, Technical Centre,
+  Opp Safdarjung Airport, New Delhi
+language: en
+
+# ---------------------------------------------------------------- primary document
+# The instrument this pack is named for. Its identity is transcribed from the document's own
+# cover page and footer.
+section: "Section 3 — Air Transport"
+series: "Series 'M' Part IV"
+issue: "Issue I"
+issue_date: 2010-08-06
+revision: "Rev. 4"
+revision_date: 2023-01-25
+effective_date: 2023-02-15
+file_number: "23-15/2016-AED"
+signed_by: "Arun Kumar, Director General of Civil Aviation"
+legal_basis: >-
+  Rule 133A of the Aircraft Rules, 1937, with the approval of the Ministry of Civil Aviation
+  (Para 1.6). Applicable to all scheduled and non-scheduled operators (Para 1.7).
+pages: 8
+
+provided_by: team
+received_at: 2026-08-28
+source_form: original_pdf_binary
+repository_original_path: policy_packs/D3M-M4(R4_Jan2023).pdf
+official_url: https://www.dgca.gov.in/digigov-portal/
+
+# ---------------------------------------------------------------- archive integrity
+# `source.pdf` is the exact Git blob committed by the team at the repository path above. The
+# digest below was computed from those PDF bytes, not from extracted text or rendered pages.
+# `verify_source_document` recomputes it whenever this pack is loaded.
+local_path: source.pdf
+content_sha256: "3b4b50844edc6a46099cce3b94626d29b03f90ccc61318aa1aa2db6d0fa3ff4a"
+size_bytes: 285108
+archived: true
+archived_at: 2026-08-31
+archived_from_commit: f24eae4f26a987d4f83e6c15858d945a7e601bc8
+verification_method: sha256_and_exact_byte_comparison_to_repository_original
+verification_caveat: >-
+  Byte identity and PDF archival are verified. They do not establish that Rev. 4 remains current,
+  resolve its cross-reference to the later Part II revision, or substitute for SME review of the
+  rule encoding. Those remain explicit promotion blockers.
+
+self_declared_scope: >-
+  Para 1.6 states the CAR is issued under Rule 133A of the Aircraft Rules 1937 with the approval
+  of the Ministry of Civil Aviation, for information, guidance and compliance of all concerned.
+  Para 1.7 makes it applicable to all scheduled and non-scheduled operators. Paras 1.2 and 1.3
+  extend it to non-scheduled flights and to foreign carriers operating to and from India, and
+  place the compliance obligation on the airline performing the flight. This is primary
+  regulation, not a public-information summary.
+
+# ------------------------------------------------- referenced instrument, archived and hashed
+# Part IV Para 3.3.5: "The refund of air ticket shall be made in accordance with CAR Section 3,
+# Series M, Part II." The refund rules in rules.yaml carrying `car:3m2:rev3:*` clause references
+# are read from this document.
+referenced_instruments:
+  - ref_prefix: "car:3m2:rev3"
+    title: >-
+      Civil Aviation Requirements, Section 3 — Air Transport, Series 'M', Part II:
+      Refund of Airline Tickets to Passengers of Public Transport Undertakings
+    section: "Section 3 — Air Transport"
+    series: "Series 'M' Part II"
+    revision: "Rev. 3"
+    revision_date: 2026-02-24
+    effective_date: 2026-03-26
+    file_number: "23-16/2016-AED"
+    signed_by: "Faiz Ahmed Kidwai, Director General Civil Aviation"
+    legal_basis: >-
+      Rule 133A of the Aircraft Rules and Ministry of Civil Aviation Order
+      No. AV 13030/105/2007-DT dated 12 May 2008
+    pages: 3
+    referenced_by: "car:3m4:rev4:3.3.5"
+    official_url: "https://www.dgca.gov.in/digigov-portal/Upload?attachId=cuYJ%2FdQQ6Gx93z%2Fwchd5xw%3D%3D&flag=iframeAttachView"
+    local_path: source-part-ii.pdf
+    repository_original_path: policy_packs/CAR 3M2 Feb26.pdf
+    # Real SHA-256 computed from the repository PDF bytes. The archived file is byte-identical to
+    # the team-provided original and is re-hashed by tests/unit/policy/test_dgca_car_pack.py.
+    content_sha256: "558ecee1d535b63023dd8bd37f0de10d08e7eb82a37ec48817ec1d613ff09281"
+    size_bytes: 2754578
+    archived: true
+    archived_at: 2026-08-31
+    archived_from_commit: f24eae4f26a987d4f83e6c15858d945a7e601bc8
+    retrieved_at: 2026-08-31
+    retrieved_from: official DGCA portal attachment URL supplied by the team
+    verification_method: sha256_and_exact_byte_comparison_to_repository_original
+    verification_caveat: >-
+      This PDF is a three-page scan with no embedded text layer. Byte identity and PDF archival
+      are verified; interpretation and currentness still require the external review recorded in
+      review.yaml.
+
+# Checked 2026-08-31. Recorded as evidence that the check was performed, not as a substitute for
+# confirming the revision on the DGCA portal on the day of promotion.
+supersession_check:
+  performed_at: 2026-08-31
+  method: >-
+    DGCA portal retrieval, plus web search of Parliament answers and contemporaneous reporting
+  part_iv:
+    finding: no later revision of Series M Part IV identified
+    evidence:
+      - source: Rajya Sabha unstarred question 169, answered 2 February 2026
+        note: >-
+          Ministry of Civil Aviation answer cites CAR Section 3 Series M Part IV by its Rev. 4
+          subject title as the governing instrument, with no mention of a later revision.
+        url: https://sansad.in/getFile/annex/270/AU169_fPCFYi.pdf?source=pqars
+      - source: Rajya Sabha unstarred question 2, answered 21 July 2025
+        note: >-
+          Same instrument cited for delay and cancellation facilities, and force majeure
+          described in the terms of Paras 1.4 and 1.5.
+        url: https://sansad.in/getFile/annex/268/AU2_eYOYZp.pdf?source=pqars
+      - source: NDTV, February 2026
+        note: >-
+          Minister of State for Civil Aviation quoted citing Part IV and stating there is no plan
+          for automatic flight-delay compensation. Independently corroborates that this
+          instrument provides no monetary compensation for delay.
+        url: https://www.ndtv.com/india-news/no-plan-for-automatic-flight-delay-compensation-20-lakh-hit-in-2025-centre-11859629
+  part_ii:
+    finding: >-
+      Rev. 3 dated 24 February 2026 is the current revision and supersedes the earlier issue
+      dated 22 May 2008. The 2008 issue is still served from the portal under a different
+      attachment id and must not be used.
+    evidence:
+      - source: the archived Rev. 3 document itself
+        note: >-
+          Cover page reads DATED 24 February, 2026 with EFFECTIVE 26 March 2026, and the footer
+          on every page reads Rev. 3, dated 24 Feb 2026.
+      - source: reporting dated 24 February
+        note: >-
+          Describes the amended CAR introducing a 48-hour cancellation and modification window,
+          which matches Para 3(e) of the archived Rev. 3.
+        url: https://www.businessworld.in/article/dgca-eases-ticket-refund-rules-48-hour-free-cancellation-window-introduced-595365
+  caveat: >-
+    Absence of evidence of a later revision is not proof that these are current. Both documents
+    must be re-checked on the DGCA portal on the day of promotion; that check is listed in
+    pack.yaml under blocks_verified_mode_until.
+
+# Questions the primary sources raise against each other or against the system's facts. Recorded
+# rather than resolved, because resolving them is a reviewer's job.
+open_source_questions:
+  - id: SQ-1
+    note: >-
+      Part IV Para 3.4.3 attaches no advance-communication condition to hotel accommodation. The
+      2019 MoCA booklet, from which the charter pack was built, described one. The primary text
+      governs, so the charter pack's rule is narrower than the regulation. Tracked as RQ-1.
+  - id: SQ-2
+    note: >-
+      Part IV Para 3.4.4 excuses adherence to Para 3.8 — the facilities themselves — for a delay
+      caused by extraordinary circumstances. The charter pack preserved duty of care through its
+      exemption. Tracked as RQ-2.
+  - id: SQ-3
+    note: >-
+      Part II Rev. 3 Para 3(c) places the onus of an agent-purchased refund on the AIRLINE within
+      14 working days. The 2019 booklet said the refund comes from the travel agent. The primary
+      text governs.
+  - id: SQ-4
+    note: >-
+      Part II Rev. 3 Para 3(e) sets the free cancellation or amendment window at 48 hours, with
+      conditions the booklet did not state: booked directly through the airline website, and not
+      available where departure is under 7 days domestic or 15 days international. This answers
+      the charter pack's excluded 24-hour rule — the window is 48 hours, not 24.
+  - id: SQ-5
+    note: >-
+      Part IV Para 3.6.1 and Part II Para 3(k) treat foreign carriers differently. Part II is
+      unconditional: refund per country-of-origin regulations. Part IV is disjunctive: compensation
+      per country of origin OR per Paras 3.2.2/3.3.2/3.5.1. Both defer rather than compute here.
+      Tracked as RQ-6.
+
+redistribution:
+  status: permitted_with_attribution
+  basis: >-
+    The DGCA website policy states material featured on the website may be reproduced free of
+    charge, provided it is reproduced accurately, not used in a derogatory or misleading context,
+    and the source is prominently acknowledged.
+  url: https://www.dgca.gov.in/digigov-portal/jsp/dgca/footerLink/WebsitePolicy.jsp
+  acknowledgement: >-
+    Source: Directorate General of Civil Aviation, Government of India. Reproduced from the
+    official DGCA portal without alteration.
+  note: >-
+    On that basis both original DGCA PDF binaries are archived here unaltered. Their recorded
+    SHA-256 values are recomputed from the archive files by the G1 tests.
+
+# Content is paraphrased in rules.yaml with exact clause references rather than reproduced at
+# length. Full clause text must be read from the archived originals.

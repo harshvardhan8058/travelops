@@ -1,0 +1,64 @@
+pack: in-dgca-car-3m4
+version: "rev4-2023.01"
+
+# Facts the resolver must have before this pack's applicability can be decided.
+# A missing required fact yields `undetermined` — never `not_applicable`.
+required_facts:
+  - itinerary.origin_country
+  - itinerary.destination_country
+  - itinerary.scheduled_departure_local
+  - operating_carrier.id
+  - event.type
+  - event.travel_date
+
+# Facts required only by specific rule families, each traced to the clause that needs them.
+conditionally_required_facts:
+  # Para 3.3.2 bands on block time; Para 3.3.3 conditions payment on contact information.
+  cancellation_compensation:
+    - event.notice_minutes
+    - cancellation.notice_obligation_met
+    - flight.block_time_minutes
+    - fare.one_way_basic_fare_inr
+    - fare.airline_fuel_charge_inr
+    - passenger.contact_info_provided_at_booking
+  # Para 3.2.2 bands on the alternate flight's departure relative to the original.
+  denied_boarding_compensation:
+    - alternate_flight.minutes_after_original_scheduled
+    - fare.one_way_basic_fare_inr
+    - fare.airline_fuel_charge_inr
+  # Para 3.4.1 conditions facilities on check-in and bands on block time.
+  delay_care:
+    - passenger.checked_in_on_time
+    - flight.block_time_minutes
+    - event.delay_minutes
+  # Para 3.4.3 depends on total delay and, for the night window, the scheduled departure time.
+  delay_hotel:
+    - event.delay_minutes
+    - flight.scheduled_departure_local_time
+  # Paras 1.4, 1.5, 3.3.4 and 3.4.4. Evidence, never an inference from a trigger label.
+  exemption_assessment:
+    - cause_evidence.operational_cause
+    - cause_evidence.external_to_carrier
+    - cause_evidence.unavoidable_despite_reasonable_measures
+    - cause_evidence.evidence_refs
+
+# Paras 1.2, 1.3 and 1.7: applies to scheduled and non-scheduled operators, and to foreign
+# carriers operating to or from India. So an Indian origin OR destination brings a flight within
+# scope, as does an Indian operating carrier.
+applies_when:
+  any_of:
+    - itinerary.origin_country: IN
+    - itinerary.destination_country: IN
+    - operating_carrier.country: IN
+
+scope_notes:
+  - Para 1.3 places the compliance obligation on the airline performing the flight, including
+    aircraft under dry or wet lease.
+  - Para 3.6.1 gives a foreign carrier's compensation as either its country-of-origin
+    regulations or Paras 3.2.2/3.3.2/3.5.1 of this CAR. That disjunction is a reviewer question,
+    not something this pack resolves.
+  - Para 3.3.5 defers refund of the air ticket to CAR Section 3 Series M Part II, which is a
+    separate instrument and not encoded here.
+
+on_missing_required_fact: undetermined
+on_undetermined: needs_human
