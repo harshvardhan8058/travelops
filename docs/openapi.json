@@ -3978,6 +3978,273 @@
         "title": "RunResponse",
         "type": "object"
       },
+      "ScenarioCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "airport_icao": {
+            "maxLength": 4,
+            "minLength": 4,
+            "pattern": "^[A-Z]{4}$",
+            "title": "Airport Icao",
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "title": "Effective At",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioMemberInput"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Members",
+            "type": "array"
+          },
+          "root_cause": {
+            "$ref": "#/components/schemas/TriggerType"
+          },
+          "severity": {
+            "maxLength": 12,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_cause",
+          "airport_icao",
+          "severity",
+          "effective_at",
+          "actor_id",
+          "members"
+        ],
+        "title": "ScenarioCreateRequest",
+        "type": "object"
+      },
+      "ScenarioCreateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "airport_icao": {
+            "title": "Airport Icao",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "title": "Effective At",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceBlock"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "root_cause": {
+            "$ref": "#/components/schemas/TriggerType"
+          },
+          "scenario_reference": {
+            "title": "Scenario Reference",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          }
+        },
+        "required": [
+          "scenario_reference",
+          "state",
+          "root_cause",
+          "airport_icao",
+          "severity",
+          "effective_at",
+          "created_by",
+          "created_at",
+          "provenance"
+        ],
+        "title": "ScenarioCreateResponse",
+        "type": "object"
+      },
+      "ScenarioMemberInput": {
+        "additionalProperties": false,
+        "properties": {
+          "delay_minutes": {
+            "maximum": 32767.0,
+            "minimum": 0.0,
+            "title": "Delay Minutes",
+            "type": "integer"
+          },
+          "flight_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Flight Id",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "primary",
+              "affected_departure",
+              "affected_arrival"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flight_id",
+          "role",
+          "delay_minutes"
+        ],
+        "title": "ScenarioMemberInput",
+        "type": "object"
+      },
+      "ScenarioMemberOut": {
+        "additionalProperties": false,
+        "properties": {
+          "delay_minutes": {
+            "title": "Delay Minutes",
+            "type": "integer"
+          },
+          "flight_id": {
+            "title": "Flight Id",
+            "type": "integer"
+          },
+          "flight_number": {
+            "title": "Flight Number",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "primary",
+              "affected_departure",
+              "affected_arrival"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flight_id",
+          "flight_number",
+          "role",
+          "delay_minutes"
+        ],
+        "title": "ScenarioMemberOut",
+        "type": "object"
+      },
+      "ScenarioStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Actor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id"
+        ],
+        "title": "ScenarioStartRequest",
+        "type": "object"
+      },
+      "ScenarioStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "awaiting_approval_count": {
+            "default": 0,
+            "title": "Awaiting Approval Count",
+            "type": "integer"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "opened_incident_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Opened Incident Ids",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceBlock"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "scenario_reference": {
+            "title": "Scenario Reference",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "started_by": {
+            "title": "Started By",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncidentState"
+          }
+        },
+        "required": [
+          "scenario_reference",
+          "state",
+          "started_by",
+          "started_at",
+          "provenance"
+        ],
+        "title": "ScenarioStartResponse",
+        "type": "object"
+      },
       "SelectPlanRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4129,6 +4396,19 @@
         ],
         "title": "TimelineResponse",
         "type": "object"
+      },
+      "TriggerType": {
+        "description": "Operational cause. This is context, never a legal verdict.",
+        "enum": [
+          "weather",
+          "atc",
+          "technical",
+          "crew_rostering",
+          "security",
+          "other"
+        ],
+        "title": "TriggerType",
+        "type": "string"
       },
       "UnassessedFactorOut": {
         "additionalProperties": false,
@@ -5742,6 +6022,143 @@
         "summary": "Executive report for a resolved incident or group (Phase 3 reasoning agent)",
         "tags": [
           "reasoning"
+        ]
+      }
+    },
+    "/api/v1/scenarios": {
+      "post": {
+        "description": "Validate and persist a scenario without opening or advancing any incident.",
+        "operationId": "create_scenario_api_v1_scenarios_post",
+        "parameters": [
+          {
+            "description": "A repeat returns the first recorded lifecycle result.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A repeat returns the first recorded lifecycle result.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create and persist an authored disruption scenario",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_reference}/start": {
+      "post": {
+        "description": "Open one canonical incident per declared member; never execute actions here.",
+        "operationId": "start_scenario_api_v1_scenarios__scenario_reference__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_reference",
+            "required": true,
+            "schema": {
+              "title": "Scenario Reference",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A repeat returns the first recorded lifecycle result.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A repeat returns the first recorded lifecycle result.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start the existing TravelOps workflow for a persisted scenario",
+        "tags": [
+          "scenarios"
         ]
       }
     },
