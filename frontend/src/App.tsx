@@ -27,6 +27,8 @@ import { ReportScreen } from '@/features/reports/ReportScreen';
 import { ImpactExplorer } from '@/features/impact/ImpactExplorer';
 import { WhatIfScreen } from '@/features/cascade/WhatIfScreen';
 import { AgentConsole } from '@/features/agent/AgentConsole';
+import { ScenarioBuilder } from '@/features/scenario-builder/ScenarioBuilder';
+import { PassengerDisruptionView } from '@/features/passenger/PassengerDisruptionView';
 
 /** Used only when the current route names no incident, e.g. the Command Center. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
@@ -102,6 +104,20 @@ export function App() {
         <Route path="/assurance" element={<GroupApprovalQueue />} />
         <Route path="/plans/:incidentId" element={<PlanComparison />} />
         <Route path="/reports/:incidentId" element={<ReportScreen />} />
+        {/*
+         * Phase 5. Neither route is incident-scoped, so neither joins the regex above:
+         *
+         *   /scenarios/new        authors a disruption that does not exist yet, so there is no
+         *                         incident for the timeline to follow.
+         *   /passenger/:ref       is keyed on a BOOKING reference, not an incident reference. Adding
+         *                         it to that alternation would feed a PNR to the assurance query and
+         *                         put a 404 in the rail beside a screen that rendered fine.
+         *
+         * Both read proposed contracts declared in their own feature directories. No endpoint serves
+         * either one, and each screen says so on its face rather than implying a service behind it.
+         */}
+        <Route path="/scenarios/new" element={<ScenarioBuilder />} />
+        <Route path="/passenger/:bookingRef" element={<PassengerDisruptionView />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

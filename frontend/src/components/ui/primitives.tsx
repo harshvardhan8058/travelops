@@ -838,3 +838,98 @@ export function StateRail({
     </ol>
   );
 }
+
+// ---------------------------------------------------------------- StepRail
+/**
+ * A wizard's steps, rendered as a rail.
+ *
+ * Sibling to `StateRail` rather than a copy of it, because the two answer different questions and
+ * conflating them would break both. `StateRail` reports a state machine the **backend** advanced,
+ * keyed on a `reached_at` timestamp; this reports where an **operator** is inside a form they can
+ * move around freely, and a form has a state the incident rail has no concept of: reachable but not
+ * yet valid.
+ *
+ * That fourth state is why this exists. A wizard that renders "not started" and "started and wrong"
+ * identically is a wizard whose Next button appears to do nothing, and the operator has no way to
+ * learn which field is at fault. `blocked` carries a warning glyph and warn tone; `todo` stays muted.
+ *
+ * Steps are buttons when `onSelect` is given and plain items otherwise, so a rail on a read-only
+ * review surface does not offer controls that go nowhere. Colour is never the only signal: every
+ * state has its own glyph and every step is labelled in words.
+ *
+ * Owner: Stream D.
+ */
+export type StepState = 'done' | 'current' | 'todo' | 'blocked';
+
+const STEP_ICON: Record<StepState, typeof Check> = {
+  done: Check,
+  current: CircleDot,
+  todo: Circle,
+  blocked: AlertTriangle,
+};
+
+const STEP_CLASS: Record<StepState, string> = {
+  done: 'border-border-subtle bg-inset text-fg-secondary',
+  current: 'border-accent-border bg-accent-subtle text-accent',
+  todo: 'border-border-subtle text-fg-muted',
+  blocked: 'border-state-warn/30 bg-state-warn-bg text-state-warn',
+};
+
+export function StepRail({
+  steps,
+  onSelect,
+  label = 'Steps',
+}: {
+  steps: { id: string; label: string; state: StepState }[];
+  onSelect?: (id: string) => void;
+  label?: string;
+}) {
+  return (
+    <ol className="flex flex-wrap items-center gap-1" aria-label={label}>
+      {steps.map((step, index) => {
+        const Icon = STEP_ICON[step.state];
+        const isCurrent = step.state === 'current';
+        const content = (
+          <>
+            <Icon size={11} strokeWidth={1.5} aria-hidden />
+            <span className="text-label uppercase">{step.label}</span>
+            {/* The number is a position, so it reads as an ordinal rather than a measurement. */}
+            <MonoValue muted className="text-caption">
+              {index + 1}
+            </MonoValue>
+          </>
+        );
+
+        const shell = clsx(
+          'inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5',
+          STEP_CLASS[step.state],
+        );
+
+        return (
+          <li key={step.id} className="flex items-center gap-1">
+            {index > 0 && <span className="h-px w-3 bg-border-default" aria-hidden />}
+            {onSelect ? (
+              <button
+                type="button"
+                onClick={() => onSelect(step.id)}
+                {...(isCurrent ? { 'aria-current': 'step' as const } : {})}
+                className={clsx(
+                  shell,
+                  'transition-colors duration-hover ease-out',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                  !isCurrent && 'hover:border-accent-border hover:text-accent',
+                )}
+              >
+                {content}
+              </button>
+            ) : (
+              <span {...(isCurrent ? { 'aria-current': 'step' as const } : {})} className={shell}>
+                {content}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
