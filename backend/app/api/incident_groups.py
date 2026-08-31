@@ -211,19 +211,44 @@ async def list_incident_groups(
 @router.get(
     "/incident-groups/current",
     response_model=GroupSummary,
-    summary="The most recently opened disruption group",
+    summary="The disruption group most recently started",
 )
 async def current_incident_group(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GroupSummary:
-    """The console's landing query. Excludes authored-but-unstarted empty groups."""
+    """The console's landing query. Excludes authored-but-unstarted empty groups.
+
+    Ordered by when the cascade was most recently **started**, not by when its disruption is
+    dated. Those are different questions and this endpoint answers the second one.
+
+    `opened_at` is the incident clock: deliberately the authored anchor, because evidence
+    selection and freshness are judged against it — `Orchestrator.open_incident` says so, and
+    `load_delay_risk_inputs` relies on it to avoid scoring a storm against a later clear-weather
+    METAR. It answers "when did the disruption happen".
+
+    Ordering the landing query by it meant a scenario authored about an earlier time could be
+    created, started, and directly addressed, yet never be landed on: `POST /scenarios` and
+    `POST /scenarios/{ref}/start` both returned 200, and then the Scenario Builder's Create & Run
+    reported `CURRENT_GROUP_MISMATCH` because the seeded cascade — anchored 2026-08-20T15:36Z —
+    still sorted first. Nothing was wrong with the scenario; the question being asked was wrong.
+
+    "Most recently started" is the highest incident id in the group. `incident_group` and
+    `incident` carry no `created_at` (neither uses `TimestampMixin`), so the monotonic primary key
+    is the creation-order signal available, and starting a cascade is precisely what creates its
+    incidents. The group's own id is the tie-break, for a group somehow holding no incident id
+    ordering can separate.
+    """
     started_incident_exists = (
         select(Incident.id).where(Incident.group_id == IncidentGroup.id).exists()
+    )
+    # Correlated: the most recent incident opened for this group.
+    latest_incident = (
+        select(func.max(Incident.id)).where(Incident.group_id == IncidentGroup.id).scalar_subquery()
     )
     stmt = (
         select(IncidentGroup)
         .where(started_incident_exists)
-        .order_by(IncidentGroup.opened_at.desc(), IncidentGroup.id.desc())
+        .order_by(latest_incident.desc(), IncidentGroup.id.desc())
     )
     group = (await session.execute(stmt)).scalars().first()
     if group is None:

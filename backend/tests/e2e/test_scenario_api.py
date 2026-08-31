@@ -370,3 +370,135 @@ def test_openapi_contains_only_the_two_new_typed_operations(client):
         "scenario_reference",
         "Idempotency-Key",
     }
+
+
+# ------------------------------------------------- which cascade the console lands on
+
+
+async def test_a_back_dated_scenario_still_becomes_current_once_started(client, seeded):
+    """The question `/current` answers is "what am I working on", not "when did it happen".
+
+    `opened_at` is the incident clock, deliberately the authored anchor because evidence
+    selection and freshness are judged against it. Ordering the landing query by it meant a
+    scenario authored about an earlier time could be created and started successfully, be
+    addressable by reference, and still never be landed on — both calls returned 200 and then
+    Create & Run reported `CURRENT_GROUP_MISMATCH`. Nothing was wrong with the scenario.
+
+    This pins the reported symptom and, more sharply, that the fix did **not** buy the ordering by
+    moving the anchor: `opened_at` must still be the authored time, because evidence selection and
+    freshness are judged against it. The discriminating test for the ordering itself is the one
+    below, which needs two competing cascades.
+    """
+    created = client.post(
+        f"{PREFIX}/scenarios",
+        json=_scenario_payload(effective_at="2026-08-19T06:00:00Z"),
+    ).json()
+    reference = created["scenario_reference"]
+    assert reference.startswith("SCN-20260819-"), "the reference should carry the authored date"
+
+    assert (
+        client.post(
+            f"{PREFIX}/scenarios/{reference}/start", json={"actor_id": "operator-2"}
+        ).status_code
+        == 200
+    )
+
+    current = client.get(f"{PREFIX}/incident-groups/current")
+
+    assert current.status_code == 200
+    assert current.json()["reference"] == reference
+    # And the authored anchor is untouched: it is still the disruption's own time.
+    assert current.json()["opened_at"].startswith("2026-08-19T06:00:00")
+
+
+async def _second_departure(seeded) -> int:
+    """A second VOBL departure, so two cascades can be started at once.
+
+    `uq_incident_active_per_flight` allows one active incident per flight, so two scenarios that
+    both declare flight 1 cannot both start — the second would deduplicate onto the first's
+    incident and own none of its own. A distinct flight is what makes the comparison real.
+    """
+    from datetime import timedelta
+
+    from app.models.enums import ProvenanceKind
+    from app.models.reference import Flight
+
+    factory = async_sessionmaker(bind=seeded, expire_on_commit=False, autoflush=False)
+    async with factory() as session:
+        departure = datetime(2026, 8, 20, 16, 15, tzinfo=UTC)
+        flight = Flight(
+            flight_number="6E 811",
+            airline_code="6E",
+            origin_icao="VOBL",
+            destination_icao="VIDP",
+            scheduled_departure=departure,
+            scheduled_arrival=departure + timedelta(minutes=105),
+            estimated_departure=departure + timedelta(minutes=110),
+            block_time_minutes=105,
+            status="delayed",
+            is_domestic=True,
+            provenance_kind=ProvenanceKind.fixture,
+            source_ref="fixture:bengaluru_storm:flight",
+        )
+        session.add(flight)
+        await session.commit()
+        return flight.id
+
+
+async def test_the_most_recently_started_scenario_wins_regardless_of_authored_order(client, seeded):
+    """Two started cascades: the operator lands on the one they started last.
+
+    Authored newest-first on purpose, so a test that merely sorted by `opened_at` would pass
+    for the wrong reason. The one started second is the one authored *earlier*.
+    """
+    second_flight = await _second_departure(seeded)
+
+    late = client.post(
+        f"{PREFIX}/scenarios",
+        json=_scenario_payload(effective_at="2026-08-22T09:00:00Z"),
+    ).json()["scenario_reference"]
+    early = client.post(
+        f"{PREFIX}/scenarios",
+        json=_scenario_payload(
+            effective_at="2026-08-18T09:00:00Z",
+            members=[{"flight_id": second_flight, "role": "primary", "delay_minutes": 110}],
+        ),
+    ).json()["scenario_reference"]
+
+    client.post(f"{PREFIX}/scenarios/{late}/start", json={"actor_id": "operator-2"})
+    client.post(f"{PREFIX}/scenarios/{early}/start", json={"actor_id": "operator-2"})
+
+    current = client.get(f"{PREFIX}/incident-groups/current")
+
+    assert current.status_code == 200
+    assert current.json()["reference"] == early, (
+        "the cascade started most recently must be the one the console lands on, "
+        "even though it is dated earlier"
+    )
+
+
+async def test_an_authored_but_unstarted_scenario_never_shadows_a_started_one(client, seeded):
+    """The existing exclusion still holds, and now cannot be bypassed by a later date.
+
+    An unstarted group has no incidents, so there is nothing to land on. Authoring it with the
+    latest date of all must not move the console off the cascade actually being worked.
+    """
+    started = client.post(
+        f"{PREFIX}/scenarios",
+        json=_scenario_payload(effective_at="2026-08-20T15:40:00Z"),
+    ).json()["scenario_reference"]
+    client.post(f"{PREFIX}/scenarios/{started}/start", json={"actor_id": "operator-2"})
+
+    second_flight = await _second_departure(seeded)
+    client.post(
+        f"{PREFIX}/scenarios",
+        json=_scenario_payload(
+            effective_at="2026-12-31T23:00:00Z",
+            members=[{"flight_id": second_flight, "role": "primary", "delay_minutes": 110}],
+        ),
+    )
+
+    current = client.get(f"{PREFIX}/incident-groups/current")
+
+    assert current.status_code == 200
+    assert current.json()["reference"] == started
