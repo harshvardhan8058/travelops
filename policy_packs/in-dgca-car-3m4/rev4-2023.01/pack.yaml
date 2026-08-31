@@ -1,0 +1,64 @@
+id: in-dgca-car-3m4
+version: "rev4-2023.01"
+jurisdiction: IN
+authority: Directorate General of Civil Aviation, Government of India
+document: >-
+  Civil Aviation Requirements, Section 3 — Air Transport, Series 'M' Part IV, Issue I dated
+  6th August 2010, Rev. 4 dated 25th January 2023. Subject: Facilities to be provided to
+  passengers by airlines due to denied boarding, cancellation of flights and delays in flights.
+document_date: 2023-01-25
+currency: INR
+
+# ---------------------------------------------------------------------------
+# THIS IS THE PRIMARY REGULATION. IT IS STILL NOT `approved`.
+#
+# The charter pack (`in-moca-charter-2019`) was official but SECONDARY — a
+# public-information booklet that itself points readers to this CAR. This pack is
+# the instrument the booklet points to: issued under Rule 133A of the Aircraft
+# Rules 1937, with the approval of the Ministry of Civil Aviation, signed by the
+# Director General. Every figure below is read from it directly.
+#
+# Two things are nevertheless missing, and both are recorded rather than assumed:
+#
+#   1. NO AUTHORISED SME HAS REVIEWED THIS ENCODING. `review.yaml` names no
+#      reviewer and records no approval, because none exists. The loader refuses
+#      an `approved` pack without one, which is why `status` below is not
+#      `approved` and why verified mode remains unreachable.
+#   2. THE SOURCE PDF IS NOT ARCHIVED IN THIS REPOSITORY. Only extracted text was
+#      supplied, so `content_sha256` is PENDING_ARCHIVAL and `archived` is false.
+#      `verify_source_document` refuses a verified load on exactly that, and no
+#      hash was invented to make it pass.
+#
+# `status: official_guidance_dated` is the honest rung. Its permissions are the
+# ones that fit — the pack may compute, behind a visible dated label, and may
+# never be called current law — even though its source quality is better than the
+# rung's description, because the rung above requires review this encoding has not
+# had. Promotion to `approved` is data and review, not code: see review.yaml.
+# ---------------------------------------------------------------------------
+status: official_guidance_dated
+
+verified_mode_eligible: false
+ui_label: "DGCA CAR 3/M/IV · REV. 4 · EFFECTIVE 15 FEB 2023 · PENDING SME REVIEW"
+
+blocks_verified_mode_until:
+  - source PDF archived at source.pdf with its real SHA-256 recorded in source-metadata.yaml
+  - authorised aviation/legal SME review recorded in review.yaml with per-rule sign-off
+  - the eight open review questions in review.yaml answered
+  - CAR Section 3 Series M Part II obtained, because Para 3.3.5 defers ticket refund to it and
+    that instrument was reportedly amended after this revision
+  - confirmation from the DGCA portal that Rev. 4 is still the current revision on the day of
+    promotion
+
+precedence:
+  # No global "most favourable to passenger" rule is assumed. This pack overlaps the charter
+  # pack, which is derived from it; overlap handling is undetermined until a reviewer defines it.
+  conflict_rules_defined: false
+  on_conflict: needs_human
+
+required_context:
+  - itinerary
+  - operating_carrier
+  - event
+  - notice
+  - cause_evidence
+  - fare_components

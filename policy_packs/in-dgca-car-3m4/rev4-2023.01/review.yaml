@@ -1,0 +1,128 @@
+pack: in-dgca-car-3m4
+version: "rev4-2023.01"
+
+# ---------------------------------------------------------------------------
+# NOTHING HERE IS FILLED IN, AND THAT IS THE POINT.
+#
+# The encoding was produced from the primary document. It has NOT been reviewed by
+# an authorised aviation, legal or compliance SME. Filling any field below without
+# that review — including a placeholder name, a team member's name, or an
+# "approved by engineering" — is the single most damaging thing anyone could do to
+# this project's credibility, because `may_be_called_current_law` and
+# POLICY_MODE=verified both key off it.
+#
+# The loader enforces this: an `approved` pack without `reviewer_name` and
+# `approval` is refused with POLICY_PACK_UNAVAILABLE.
+# ---------------------------------------------------------------------------
+review_status: pending
+reviewer_name: null
+reviewer_role: null
+reviewer_organisation: null
+reviewed_at: null
+approval: null
+
+reviewer_instructions: >-
+  For each rule in rules.yaml, confirm or correct four things: the clause reference, the
+  paraphrased interpretation, the input facts the rule requires, and the computed output.
+  Confirm the expected outcomes in test_cases.yaml. Mark each rule approved, corrected or
+  rejected in rule_signoff below. Where a provision is not expressible in the rule DSL, say so
+  rather than approving an approximation.
+
+# Questions where the encoding is a judgement call rather than a direct reading. Each names the
+# clause and the test case that depends on the answer.
+open_review_questions:
+
+  - id: RQ-1
+    clause: "3.4.3"
+    question: >-
+      Para 3.4.3 makes hotel accommodation available when total delay exceeds 24 hours, or
+      exceeds 6 hours for a flight scheduled to depart between 2000 and 0300 hrs. Unlike the
+      2019 charter booklet, it attaches NO advance-communication condition. Is the hotel
+      entitlement genuinely independent of whether the airline gave more than 24 hours' notice?
+    why_it_matters: >-
+      The charter pack encoded a >24h notice precondition and flagged it as RQ-3 there. The
+      primary text does not contain it. If this reading is right, the charter pack under-served
+      passengers and its rule should be corrected against this one.
+    status: unanswered
+    test_case: dgca_delay_night_window_hotel_without_advance_notice
+
+  - id: RQ-2
+    clause: "3.4.4"
+    question: >-
+      Para 3.4.4 says an operating airline is not obliged to adhere to Para 3.8 where the delay
+      is caused by extraordinary circumstances under Paras 1.4/1.5. Read literally this excuses
+      the CARE facilities themselves — meals and hotel — not merely a cash payment. Is that the
+      intended effect?
+    why_it_matters: >-
+      It is a materially harsher reading than the charter encoding, which preserved duty of care
+      through an exemption. Getting it wrong in either direction misstates what a passenger is
+      owed during a weather event, which is the demo scenario.
+    status: unanswered
+    test_case: dgca_delay_exemption_suppresses_facilities
+
+  - id: RQ-3
+    clause: "3.3.2"
+    question: >-
+      Para 3.3.2 offers the airline a choice: provide an alternate flight acceptable to the
+      passenger OR pay compensation in addition to a full refund. This pack computes the
+      compensation branch. Should an accepted alternate flight suppress the cash entitlement,
+      and if so what evidence establishes acceptance?
+    why_it_matters: Determines whether a cancellation figure is owed at all.
+    status: unanswered
+
+  - id: RQ-4
+    clause: "3.3.2, 3.2.2"
+    question: >-
+      Confirm the definitions of "booked one-way basic fare" and "airline fuel charge", and that
+      no other fare component enters the lesser-of and percentage calculations.
+    why_it_matters: Determines every cancellation and denied-boarding figure in the system.
+    status: unanswered
+
+  - id: RQ-5
+    clause: "1.4, 1.5, 3.3.4, 3.4.4"
+    question: >-
+      What evidence is sufficient to establish that a circumstance was beyond the airline's
+      control AND could not have been avoided even if all reasonable measures had been taken?
+      Paras 1.4/1.5 name categories including meteorological conditions and ATC decisions, but
+      the "all reasonable measures" limb is a factual test.
+    why_it_matters: >-
+      The engine deliberately refuses to treat a weather trigger as an automatic exemption. The
+      evidence standard decides how often a real operator can satisfy it.
+    status: unanswered
+    test_case: dgca_cancellation_weather_without_reasonable_measures_evidence
+
+  - id: RQ-6
+    clause: "3.6.1"
+    question: >-
+      Para 3.6.1 states a foreign carrier's compensation shall be as in its country-of-origin
+      regulations OR as given in Paras 3.2.2/3.3.2/3.5.1. Who chooses, and on what basis?
+    why_it_matters: >-
+      conflict_rules_defined is false, so this pack refuses rather than choosing. A reviewed
+      precedence rule would let it compute.
+    status: unanswered
+
+  - id: RQ-7
+    clause: "3.2.3"
+    question: >-
+      Para 3.2.3 compensates a passenger on connecting flights via the first airline under
+      3.2.2, where denied boarding at the departure station caused arrival at the final
+      destination at least three hours late. Confirm the encoding is left informational rather
+      than computed, given it needs an arrival-delay fact and a cross-reference the rule DSL
+      does not express.
+    why_it_matters: An uncomputed provision must be visibly uncomputed, not silently absent.
+    status: unanswered
+
+  - id: RQ-8
+    clause: "3.5.1"
+    question: >-
+      Para 3.5.1 pays 75% of ticket cost including taxes for a domestic involuntary downgrade,
+      and 30/50/75% by distance band internationally. These are recorded as informational and
+      out of MVP scope because the rule DSL has no ticket-cost formula and no distance fact.
+      Confirm that omission is acceptable for now, or require the formula.
+    why_it_matters: >-
+      A provision that exists in law and not in the engine must be recorded as such, so nobody
+      concludes from silence that nothing is owed.
+    status: unanswered
+
+# Per-rule sign-off. Reviewer fills status and notes. Empty until reviewed.
+rule_signoff: []
