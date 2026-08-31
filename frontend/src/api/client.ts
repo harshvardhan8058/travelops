@@ -29,6 +29,9 @@ import type {
   ReadyStatus,
   ReportResponse,
   RunResponse,
+  ScenarioCreateRequest,
+  ScenarioCreateResponse,
+  ScenarioStartResponse,
   ServerBlastRadius,
   ServerReplayResponse,
   SourcesResponse,
@@ -130,6 +133,22 @@ export const api = {
   flights: () => request<FlightsResponse>('/flights'),
   sources: () => request<SourcesResponse>('/sources'),
   incidentGroups: () => request<IncidentGroupsResponse>('/incident-groups'),
+
+  /** Persist an authored scenario. The key is retained by the caller across safe retries. */
+  createScenario: (payload: ScenarioCreateRequest, idempotencyKey: string) =>
+    request<ScenarioCreateResponse>('/scenarios', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+
+  /** Open the persisted scenario's canonical incidents without advancing their workflows. */
+  startScenario: (scenarioReference: string, actorId: string, idempotencyKey: string) =>
+    request<ScenarioStartResponse>(`/scenarios/${encodeURIComponent(scenarioReference)}/start`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ actor_id: actorId }),
+    }),
 
   incident: (id: string) => request<IncidentDetail>(`/incidents/${id}`),
   timeline: (id: string) => request<TimelineResponse>(`/incidents/${id}/timeline`),

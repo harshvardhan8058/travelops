@@ -85,9 +85,17 @@ export function CascadeExplorer() {
   const [selectedHop, setSelectedHop] = useState<number | null>(null);
   const [selectedMechanism, setSelectedMechanism] = useState<PairingMechanism | null>(null);
 
+  const isCurrentAlias = groupId === 'current' || groupId.length === 0;
+  const currentQuery = useQuery({
+    queryKey: ['current-group'],
+    queryFn: api.currentGroup,
+    enabled: isCurrentAlias,
+  });
+  const resolvedGroupId = isCurrentAlias ? currentQuery.data?.reference : groupId;
   const groupQuery = useQuery({
-    queryKey: ['incident-group', groupId],
-    queryFn: () => api.incidentGroup(groupId),
+    queryKey: ['incident-group', resolvedGroupId],
+    queryFn: () => api.incidentGroup(resolvedGroupId!),
+    enabled: Boolean(resolvedGroupId),
   });
   // Only source of a flight -> incident link today: the flight board's own rows.
   const flightsQuery = useQuery({ queryKey: ['flights'], queryFn: api.flights });
@@ -113,19 +121,25 @@ export function CascadeExplorer() {
     onOpen: (index) => setSelectedNode(nodes[index]?.id ?? null),
   });
 
-  if (groupQuery.isLoading) return <CascadeSkeleton />;
+  if ((isCurrentAlias && currentQuery.isLoading) || groupQuery.isLoading) {
+    return <CascadeSkeleton />;
+  }
 
-  if (groupQuery.error || !group) {
-    const error = groupQuery.error instanceof ApiError ? groupQuery.error : null;
+  if ((isCurrentAlias && currentQuery.error) || groupQuery.error || !group) {
+    const queryError = currentQuery.error ?? groupQuery.error;
+    const error = queryError instanceof ApiError ? queryError : null;
     return (
       <ErrorState
         code={error?.code ?? 'INTERNAL_ERROR'}
         message={
           error?.message ??
-          `Could not load cascade ${groupId}. The Ops Board and Decision Timeline still work.`
+          `Could not load cascade ${resolvedGroupId ?? groupId}. The Ops Board and Decision Timeline still work.`
         }
         correlationId={error?.correlationId ?? null}
-        onRetry={() => void groupQuery.refetch()}
+        onRetry={() => {
+          if (isCurrentAlias) void currentQuery.refetch();
+          if (resolvedGroupId) void groupQuery.refetch();
+        }}
       />
     );
   }

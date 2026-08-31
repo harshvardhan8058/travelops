@@ -1,12 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import {
-  SCENARIO_TEMPLATES,
-  findTemplate,
-  scenarioApi,
-  type ScenarioDraft,
-} from './scenarioContracts';
+import type { FlightRow, ScenarioCreateResponse, ScenarioStartResponse } from '@/api/types';
+import { SCENARIO_TEMPLATES, findTemplate, type ScenarioDraft } from './scenarioContracts';
 import {
   LARGE_SCENARIO_FLIGHTS,
   MAX_DURATION_MINUTES,
@@ -17,15 +13,15 @@ import {
   buildCreateRequest,
   buildPreview,
   canOpenStep,
+  createScenarioIdempotencyKeys,
   emptyDraft,
-  equivalentCommandFor,
   issuesForField,
   normaliseFlightNumber,
   parseFlightList,
-  prepareScenarioRequest,
   setFlightNumbers,
-  stableRequestId,
+  startedMemberIncidentCount,
   stepStates,
+  submitScenario,
   validateDraft,
 } from './scenarioDraft';
 
@@ -46,7 +42,79 @@ function validDraft(overrides: Partial<ScenarioDraft> = {}): ScenarioDraft {
   };
 }
 
-const NOW = new Date('2026-08-20T12:00:00.000Z');
+const FLIGHTS: FlightRow[] = [
+  {
+    id: 1,
+    flight_number: '6E 2134',
+    airline_code: '6E',
+    origin_icao: 'VOBL',
+    destination_icao: 'VIDP',
+    scheduled_departure: '2026-08-20T15:40:00Z',
+    estimated_departure: null,
+    delay_minutes: 420,
+    block_time_minutes: 150,
+    status: 'delayed',
+    risk_index: 80,
+    risk_level: 'high',
+    passengers: 180,
+    connections_at_risk: 12,
+    incident_reference: null,
+    provenance: { kind: 'simulated', provider: 'seed' },
+  },
+  {
+    id: 2,
+    flight_number: '6E 811',
+    airline_code: '6E',
+    origin_icao: 'VIDP',
+    destination_icao: 'VOBL',
+    scheduled_departure: '2026-08-20T16:40:00Z',
+    estimated_departure: null,
+    delay_minutes: 180,
+    block_time_minutes: 150,
+    status: 'delayed',
+    risk_index: 60,
+    risk_level: 'elevated',
+    passengers: 160,
+    connections_at_risk: 8,
+    incident_reference: null,
+    provenance: { kind: 'simulated', provider: 'seed' },
+  },
+];
+
+const CREATED: ScenarioCreateResponse = {
+  scenario_reference: 'SCN-20260820-001',
+  state: 'detected',
+  root_cause: 'weather',
+  airport_icao: 'VOBL',
+  severity: 'high',
+  effective_at: '2026-08-20T15:36:00Z',
+  members: [
+    { flight_id: 1, flight_number: '6E 2134', role: 'primary', delay_minutes: 420 },
+    {
+      flight_id: 2,
+      flight_number: '6E 811',
+      role: 'affected_arrival',
+      delay_minutes: 180,
+    },
+  ],
+  created_by: 'operator-1',
+  created_at: '2026-08-20T12:00:00Z',
+  provenance: { kind: 'simulated', provider: 'scenario-builder' },
+  replayed: false,
+};
+
+const STARTED: ScenarioStartResponse = {
+  scenario_reference: CREATED.scenario_reference,
+  state: 'detected',
+  members: [],
+  opened_incident_ids: [10, 11],
+  blocked_reason: null,
+  awaiting_approval_count: 0,
+  started_by: 'operator-1',
+  started_at: '2026-08-20T12:01:00Z',
+  provenance: CREATED.provenance,
+  replayed: false,
+};
 
 describe('normaliseFlightNumber', () => {
   it('accepts the spaced and unspaced forms an operator actually types', () => {
@@ -251,9 +319,9 @@ describe('templates and drafts', () => {
 
   it('keeps the operator notes when a template is re-applied', () => {
     const typed = { ...emptyDraft(), notes: 'Checking the crew rotation case.' };
-    const applied = applyTemplate(typed, SCENARIO_TEMPLATES[2]!);
+    const applied = applyTemplate(typed, SCENARIO_TEMPLATES[0]!);
     expect(applied.notes).toBe('Checking the crew rotation case.');
-    expect(applied.templateId).toBe(SCENARIO_TEMPLATES[2]!.id);
+    expect(applied.templateId).toBe(SCENARIO_TEMPLATES[0]!.id);
   });
 
   it('makes the first template flight the primary', () => {
@@ -364,152 +432,212 @@ describe('stepStates', () => {
 });
 
 describe('buildCreateRequest', () => {
-  it('sends the wire shape, normalised the way the preview showed it', () => {
-    const payload = buildCreateRequest(validDraft({ airportIcao: 'vobl', name: ' Storm ' }), {
-      runAfterCreate: true,
-    });
-    expect(payload).toEqual({
-      name: 'Storm',
-      disruption_type: 'weather',
+  it('maps the draft to exact persisted ids, roles, delays, trigger, and UTC time', () => {
+    const outcome = buildCreateRequest(validDraft({ airportIcao: 'vobl' }), FLIGHTS);
+    if (!('request' in outcome)) throw new Error('expected a request');
+
+    expect(outcome.request).toEqual({
+      root_cause: 'weather',
       airport_icao: 'VOBL',
-      starts_at: '2026-08-20T15:36',
-      duration_minutes: 180,
       severity: 'high',
-      flight_numbers: ['6E 2134', '6E 811'],
-      primary_flight: '6E 2134',
-      notes: 'Runways closed for the evening peak.',
-      template_id: 'bengaluru-monsoon-storm',
-      run_after_create: true,
+      effective_at: '2026-08-20T15:36:00.000Z',
+      actor_id: 'operator-1',
+      members: [
+        { flight_id: 1, role: 'primary', delay_minutes: 420 },
+        { flight_id: 2, role: 'affected_arrival', delay_minutes: 180 },
+      ],
     });
   });
 
-  it('does not alias the draft flight list, so later edits cannot mutate a sent payload', () => {
-    const draft = validDraft();
-    const payload = buildCreateRequest(draft, { runAfterCreate: false });
-    draft.flightNumbers.push('AI 503');
-    expect(payload.flight_numbers).toEqual(['6E 2134', '6E 811']);
-  });
-});
-
-describe('stableRequestId', () => {
-  it('is identical for identical payloads', () => {
-    const first = buildCreateRequest(validDraft(), { runAfterCreate: false });
-    const second = buildCreateRequest(validDraft(), { runAfterCreate: false });
-    expect(stableRequestId(first)).toBe(stableRequestId(second));
+  it.each([
+    ['crew', 'crew_rostering'],
+    ['technical', 'technical'],
+    ['airport_closure', 'other'],
+  ] as const)('maps %s to the backend trigger %s', (disruptionType, expected) => {
+    const outcome = buildCreateRequest(validDraft({ disruptionType }), FLIGHTS);
+    if (!('request' in outcome)) throw new Error('expected a request');
+    expect(outcome.request.root_cause).toBe(expected);
   });
 
-  it('changes when any part of the request changes, including the run flag', () => {
-    const base = buildCreateRequest(validDraft(), { runAfterCreate: false });
-    const withRun = buildCreateRequest(validDraft(), { runAfterCreate: true });
-    const renamed = buildCreateRequest(validDraft({ name: 'Other' }), { runAfterCreate: false });
-    const ids = new Set([
-      stableRequestId(base),
-      stableRequestId(withRun),
-      stableRequestId(renamed),
-    ]);
-    expect(ids.size).toBe(3);
+  it('refuses an arriving primary before the backend has to reject its role', () => {
+    const outcome = buildCreateRequest(validDraft({ primaryFlight: '6E 811' }), FLIGHTS);
+    expect('refused' in outcome && outcome.refused.errors.map((issue) => issue.code)).toContain(
+      'PRIMARY_NOT_DEPARTING_ROOT',
+    );
   });
 
-  it('is a stable, readable token rather than a random one', () => {
-    expect(stableRequestId(buildCreateRequest(validDraft(), { runAfterCreate: false }))).toMatch(
-      /^scn-[0-9a-f]{8}$/,
+  it('refuses unresolved, ambiguous, and root-airport-mismatched flights locally', () => {
+    const missing = buildCreateRequest(
+      validDraft({ flightNumbers: ['6E 999'], primaryFlight: '6E 999' }),
+      FLIGHTS,
+    );
+    expect('refused' in missing && missing.refused.errors.map((issue) => issue.code)).toContain(
+      'FLIGHT_NOT_FOUND',
+    );
+
+    const ambiguous = buildCreateRequest(validDraft(), [...FLIGHTS, { ...FLIGHTS[0]!, id: 99 }]);
+    expect('refused' in ambiguous && ambiguous.refused.errors.map((issue) => issue.code)).toContain(
+      'FLIGHT_AMBIGUOUS',
+    );
+
+    const outside = buildCreateRequest(validDraft({ airportIcao: 'VABB' }), FLIGHTS);
+    expect('refused' in outside && outside.refused.errors.map((issue) => issue.code)).toContain(
+      'FLIGHT_OUTSIDE_ROOT_AIRPORT',
     );
   });
 });
 
-describe('equivalentCommandFor', () => {
-  it('offers the seed command only for a template the repository actually ships', () => {
-    const command = equivalentCommandFor(applyTemplate(emptyDraft(), SCENARIO_TEMPLATES[0]!), {
-      runAfterCreate: true,
+describe('scenario submission lifecycle', () => {
+  const request = () => {
+    const outcome = buildCreateRequest(validDraft(), FLIGHTS);
+    if (!('request' in outcome)) throw new Error('expected a request');
+    return outcome.request;
+  };
+
+  it('counts all associated member incidents rather than only those opened by the retry', () => {
+    const partialRetry = {
+      ...STARTED,
+      opened_incident_ids: [11],
+      members: [
+        {
+          flight_id: 1,
+          flight_number: '6E 2134',
+          role: 'primary',
+          incident_id: 10,
+          incident_reference: 'INC-1',
+          state: 'detected',
+          note: null,
+        },
+        {
+          flight_id: 2,
+          flight_number: '6E 811',
+          role: 'affected_arrival',
+          incident_id: 11,
+          incident_reference: 'INC-2',
+          state: 'detected',
+          note: null,
+        },
+      ],
+    };
+    expect(startedMemberIncidentCount(partialRetry)).toBe(2);
+    expect(partialRetry.opened_incident_ids).toHaveLength(1);
+  });
+
+  it('creates only when run was not requested', async () => {
+    const calls: string[] = [];
+    const result = await submitScenario(
+      request(),
+      false,
+      { create: 'create-key', start: 'start-key' },
+      {
+        createScenario: async (_payload, key) => {
+          calls.push(`create:${key}`);
+          return CREATED;
+        },
+        startScenario: async () => {
+          calls.push('start');
+          return STARTED;
+        },
+      },
+    );
+
+    expect(result).toEqual({ ok: true, created: CREATED, started: null, navigateTo: null });
+    expect(calls).toEqual(['create:create-key']);
+  });
+
+  it('creates then starts with the returned SCN reference and yields its concrete route', async () => {
+    const calls: string[] = [];
+    const result = await submitScenario(
+      request(),
+      true,
+      { create: 'create-key', start: 'start-key' },
+      {
+        createScenario: async (_payload, key) => {
+          calls.push(`create:${key}`);
+          return CREATED;
+        },
+        startScenario: async (reference, actorId, key) => {
+          calls.push(`start:${reference}:${actorId}:${key}`);
+          return STARTED;
+        },
+      },
+    );
+
+    expect(calls).toEqual([
+      'create:create-key',
+      `start:${CREATED.scenario_reference}:operator-1:start-key`,
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      created: CREATED,
+      started: STARTED,
+      navigateTo: `/cascade/${CREATED.scenario_reference}`,
     });
-    expect(command).toBe('python -m app.cli inject --scenario bengaluru_storm --cascade');
   });
 
-  it('omits --cascade when the operator did not ask for a run', () => {
-    expect(
-      equivalentCommandFor(applyTemplate(emptyDraft(), SCENARIO_TEMPLATES[0]!), {
-        runAfterCreate: false,
-      }),
-    ).toBe('python -m app.cli inject --scenario bengaluru_storm');
-  });
+  it('stops after create failure and never implies a reference exists', async () => {
+    let starts = 0;
+    const failure = new Error('create unavailable');
+    const result = await submitScenario(
+      request(),
+      true,
+      { create: 'create-key', start: 'start-key' },
+      {
+        createScenario: async () => Promise.reject(failure),
+        startScenario: async () => {
+          starts += 1;
+          return STARTED;
+        },
+      },
+    );
 
-  it('offers nothing for a template with no seeded equivalent', () => {
-    for (const template of SCENARIO_TEMPLATES.filter((entry) => entry.seedScenarioId === null)) {
-      expect(
-        equivalentCommandFor(applyTemplate(emptyDraft(), template), { runAfterCreate: false }),
-        template.id,
-      ).toBeNull();
-    }
-  });
-
-  it('withdraws the command as soon as the draft diverges from the seed', () => {
-    /*
-     * The whole point of the check. A command labelled "equivalent" that produced a different
-     * disruption would be worse than offering none, because an operator would trust the output.
-     */
-    const seeded = applyTemplate(emptyDraft(), SCENARIO_TEMPLATES[0]!);
-    for (const divergence of [
-      { airportIcao: 'VIDP' },
-      { severity: 'low' as const },
-      { durationMinutes: 45 },
-      { disruptionType: 'crew' as const },
-      { flightNumbers: ['6E 2134'] },
-    ]) {
-      expect(
-        equivalentCommandFor({ ...seeded, ...divergence }, { runAfterCreate: false }),
-        JSON.stringify(divergence),
-      ).toBeNull();
-    }
-  });
-});
-
-describe('prepareScenarioRequest', () => {
-  it('refuses an invalid draft instead of emitting a body the backend would reject', () => {
-    const outcome = prepareScenarioRequest(emptyDraft(), { runAfterCreate: false, now: NOW });
-    expect('refused' in outcome).toBe(true);
-    if ('refused' in outcome) expect(outcome.refused.ok).toBe(false);
-  });
-
-  it('prepares a request that is explicitly not submitted', () => {
-    const outcome = prepareScenarioRequest(validDraft(), { runAfterCreate: false, now: NOW });
-    expect('receipt' in outcome).toBe(true);
-    if (!('receipt' in outcome)) return;
-
-    const { receipt } = outcome;
-    expect(receipt.submitted).toBe(false);
-    // Never blank while unsubmitted: the screen renders this instead of implying a creation.
-    expect(receipt.unsubmittedReason.trim().length).toBeGreaterThan(0);
-    expect(receipt.targetEndpoint).toBe(scenarioApi.createEndpoint);
-    expect(receipt.preparedAt).toBe(NOW.toISOString());
-  });
-
-  it('is deterministic for the same draft and clock', () => {
-    const first = prepareScenarioRequest(validDraft(), { runAfterCreate: true, now: NOW });
-    const second = prepareScenarioRequest(validDraft(), { runAfterCreate: true, now: NOW });
-    expect(first).toEqual(second);
-  });
-
-  it('records the run intent on the payload rather than acting on it', () => {
-    const outcome = prepareScenarioRequest(validDraft(), { runAfterCreate: true, now: NOW });
-    if (!('receipt' in outcome)) throw new Error('expected a receipt');
-    expect(outcome.receipt.payload.run_after_create).toBe(true);
-    expect(outcome.receipt.submitted).toBe(false);
-  });
-
-  it('warnings do not stop a request being prepared', () => {
-    const outcome = prepareScenarioRequest(validDraft({ severity: 'critical', notes: '' }), {
-      runAfterCreate: false,
-      now: NOW,
+    expect(result).toEqual({
+      ok: false,
+      stage: 'create',
+      error: failure,
+      created: null,
     });
-    expect('receipt' in outcome).toBe(true);
+    expect(starts).toBe(0);
   });
-});
 
-describe('the authoring endpoint is reported as absent, never as available', () => {
-  it('keeps canCreate false while no endpoint exists', () => {
-    // If this ever flips to true, the screen must stop describing the request as merely prepared.
-    expect(scenarioApi.canCreate).toBe(false);
-    expect(scenarioApi.createEndpoint).toMatch(/^POST /);
+  it('preserves create success and retries only start with the same idempotency key', async () => {
+    let creates = 0;
+    const startKeys: string[] = [];
+    const failure = new Error('active conflict');
+    const port = {
+      createScenario: async () => {
+        creates += 1;
+        return CREATED;
+      },
+      startScenario: async (_reference: string, _actor: string, key: string) => {
+        startKeys.push(key);
+        if (startKeys.length === 1) throw failure;
+        return STARTED;
+      },
+    };
+    const keys = { create: 'stable-create', start: 'stable-start' };
+
+    const first = await submitScenario(request(), true, keys, port);
+    expect(first).toEqual({
+      ok: false,
+      stage: 'start',
+      error: failure,
+      created: CREATED,
+    });
+
+    const second = await submitScenario(request(), true, keys, port, CREATED);
+    expect(second.ok).toBe(true);
+    expect(creates).toBe(1);
+    expect(startKeys).toEqual(['stable-start', 'stable-start']);
+  });
+
+  it('generates distinct create/start keys once for the component to retain', () => {
+    const ids = ['one', 'two'];
+    const keys = createScenarioIdempotencyKeys(() => ids.shift()!);
+    expect(keys).toEqual({
+      create: 'scenario-create-one',
+      start: 'scenario-start-two',
+    });
   });
 });
 
