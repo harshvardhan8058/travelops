@@ -73,6 +73,9 @@ function fixtureNameFor(path: string): string | null {
   if (/^\/incidents\/[^/]+\/timeline$/.test(path)) return 'timeline';
   if (/^\/incidents\/[^/]+\/assurance$/.test(path)) return 'assurance';
   if (/^\/incidents\/[^/]+\/policy$/.test(path)) return 'policy';
+  if (/^\/incident-groups\/[^/]+\/impacts(?:\?limit=\d+)?$/.test(path)) {
+    return 'incident_group_impacts';
+  }
   if (/^\/incident-groups\/[^/]+$/.test(path)) return 'incident_group_detail';
   if (/^\/reports\/[^/]+$/.test(path)) return 'report';
   return null;

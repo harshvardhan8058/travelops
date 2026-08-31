@@ -1,0 +1,47 @@
+{
+  "basis": "persisted_records",
+  "cohorts": [],
+  "computed_at": null,
+  "group_reference": "GRP-2026-0820-VOBL",
+  "note": "Fixed-seed fixture replay includes one recorded passenger-impact row from 604 assessed records; cohort aggregates are omitted from this bounded offline snapshot. This constraint ranking reserves and authorises nothing, and it does not assert seat availability or a booking outcome.",
+  "passengers": [
+    {
+      "booking_id": 176,
+      "factors": [
+        {
+          "factor": "broken_connection",
+          "source": "connection_broken",
+          "weight": 30
+        },
+        {
+          "factor": "recorded_tier",
+          "source": "tier=gold",
+          "weight": 7
+        }
+      ],
+      "passenger_id": 176,
+      "passenger_reference": "PAX-00176",
+      "pnr": "K4X8YR",
+      "priority_band": "elevated",
+      "priority_index": 37,
+      "rule_version": "passenger-impact-v1",
+      "ruleset_hash": "04fe47caf919ec4b"
+    }
+  ],
+  "passengers_assessed": 604,
+  "returned": 1,
+  "rule_version": "passenger-impact-v1",
+  "ruleset_hash": "04fe47caf919ec4b",
+  "unassessed_factors": [
+    {
+      "established_by": "rebook_passengers",
+      "factor": "overnight_exposure",
+      "reason": "no service has established whether an onward departure remains today"
+    },
+    {
+      "established_by": "rebook_passengers",
+      "factor": "journey_incomplete",
+      "reason": "no service has established which passengers are stranded mid-itinerary"
+    }
+  ]
+}

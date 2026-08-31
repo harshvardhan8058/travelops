@@ -133,7 +133,7 @@ export function FlightBoard({
           { key: 'sched', label: 'Sched', hint: 'UTC', align: 'right' },
           { key: 'est', label: 'Est', hint: 'UTC', align: 'right' },
           { key: 'delay', label: 'Delay', hint: 'min', align: 'right' },
-          { key: 'status', label: 'Status' },
+          { key: 'status', label: 'Flight status' },
           { key: 'risk', label: 'Risk', hint: 'index · band' },
           { key: 'pax', label: 'Pax', align: 'right' },
           { key: 'conn', label: 'Conn', hint: 'at risk', align: 'right' },

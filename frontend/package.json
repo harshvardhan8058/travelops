@@ -17,7 +17,9 @@
     "prebuild": "node scripts/sync-fixtures.mjs",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "verify:console": "node scripts/verify-console.mjs"
+    "verify:console": "node scripts/verify-console.mjs",
+    "verify:journey": "node scripts/verify-primary-journey.mjs",
+    "verify:passenger-fixture": "node scripts/verify-passenger-fixture.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

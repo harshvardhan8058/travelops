@@ -54,7 +54,12 @@ function useUtcClock(): string {
 
 export function App() {
   const clock = useUtcClock();
+  const { pathname } = useLocation();
   const incidentId = useRouteIncidentId(DEMO_INCIDENT);
+  const usesGroupApprovalScope =
+    pathname === '/' ||
+    pathname === '/assurance' ||
+    /^\/(?:cascade|what-if|passenger)\//.test(pathname);
 
   const { data: mode } = useQuery({
     queryKey: ['system-mode'],
@@ -66,13 +71,35 @@ export function App() {
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
     refetchInterval: 10_000,
+    enabled: !usesGroupApprovalScope,
+  });
+
+  const { data: currentGroup } = useQuery({
+    queryKey: ['current-group'],
+    queryFn: api.currentGroup,
+    refetchInterval: 10_000,
+    enabled: usesGroupApprovalScope,
   });
 
   return (
     <AppShell
       mode={mode}
       clock={clock}
-      blockedCount={assurance?.awaiting_approval_count ?? 0}
+      blockedCount={
+        usesGroupApprovalScope
+          ? (currentGroup?.awaiting_approval_count ?? 0)
+          : (assurance?.awaiting_approval_count ?? 0)
+      }
+      blockedSingular={
+        usesGroupApprovalScope
+          ? 'incident awaits operator approval in the current group'
+          : `action requires an operator decision for ${incidentId}`
+      }
+      blockedPlural={
+        usesGroupApprovalScope
+          ? 'incidents await operator approval in the current group'
+          : `actions require an operator decision for ${incidentId}`
+      }
       timeline={<DecisionTimeline incidentId={incidentId} />}
     >
       <Routes>
@@ -113,8 +140,9 @@ export function App() {
          *                         it to that alternation would feed a PNR to the assurance query and
          *                         put a 404 in the rail beside a screen that rendered fine.
          *
-         * Both read proposed contracts declared in their own feature directories. No endpoint serves
-         * either one, and each screen says so on its face rather than implying a service behind it.
+         * The passenger route is keyed on a booking reference, not an incident reference. It reads
+         * the current group's persisted passenger-priority records and keeps booking outcome fields
+         * explicitly unavailable because no passenger outcome endpoint serves them.
          */}
         <Route path="/scenarios/new" element={<ScenarioBuilder />} />
         <Route path="/passenger/:bookingRef" element={<PassengerDisruptionView />} />

@@ -16,9 +16,16 @@
 
 import { ChevronDown, ChevronRight, Cpu, Workflow } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 
-import type { ActionRecord, IncidentDetail, PlanSummary, PlanTaskRow } from '@/api/types';
+import type {
+  ActionRecord,
+  IncidentDetail,
+  PlanSummary,
+  PlanTaskRow,
+  TimelineResponse,
+} from '@/api/types';
 import { EmptyState, MonoValue, Panel, StateBadge, WhyPopover } from '@/components/ui/primitives';
 import { actionDerivation } from '@/components/ui/derivation';
 import { CountBar } from '@/components/ui/Metric';
@@ -26,10 +33,12 @@ import {
   Absent,
   DefinitionList,
   DefinitionRow,
+  Notice,
   rowSelectionClass,
 } from '@/components/ui/composition';
 import { utcStamp } from '@/components/ui/format';
 import { refusalFor } from './refusal';
+import { isDeterministicGenerator, plannerCandidateAttribution } from './planAttribution';
 
 /**
  * A plan is either model-proposed or deterministic. There is no third state, and no "maybe":
@@ -39,7 +48,7 @@ import { refusalFor } from './refusal';
 function GeneratorChip({ plan }: { plan: PlanSummary }) {
   // Classifies on the token, not the prose: the real API returns 'fallback-playbook' while the
   // committed fixture returns 'fallback-playbook · deterministic'.
-  const isDeterministic = /fallback|playbook|deterministic/i.test(plan.generator);
+  const isDeterministic = isDeterministicGenerator(plan.generator);
   const Icon = isDeterministic ? Workflow : Cpu;
 
   return (
@@ -209,14 +218,19 @@ function TaskRow({
 
 export function PlanColumn({
   incident,
+  timeline,
+  timelineUnavailable,
   selectedTaskId,
   onSelectTask,
 }: {
   incident: IncidentDetail;
+  timeline?: TimelineResponse;
+  timelineUnavailable?: boolean;
   selectedTaskId: number | null;
   onSelectTask: (taskId: number) => void;
 }) {
   const { plan, actions } = incident;
+  const plannerCandidate = plannerCandidateAttribution(timeline, plan);
   const actionByTask = new Map(actions.map((action) => [action.plan_task_id, action]));
 
   /**
@@ -266,6 +280,36 @@ export function PlanColumn({
 
   return (
     <Panel title="Plan" className="flex min-w-0 flex-col">
+      {plannerCandidate && (
+        <Notice tone={plannerCandidate.isPlanOfRecord ? 'default' : 'muted'}>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <StateBadge
+              status={plannerCandidate.isPlanOfRecord ? 'executing' : 'proposed'}
+              label={
+                plannerCandidate.isPlanOfRecord ? 'planner plan of record' : 'planner candidate'
+              }
+            />
+            <span>
+              <MonoValue>{plannerCandidate.generator}</MonoValue> · {plannerCandidate.sourceLabel} ·{' '}
+              {plannerCandidate.isPlanOfRecord
+                ? 'this is the plan of record'
+                : 'not selected; the deterministic playbook remains the plan of record'}
+            </span>
+            <Link
+              to={`/plans/${incident.reference}`}
+              className="text-accent underline decoration-dotted underline-offset-2"
+            >
+              compare candidates
+            </Link>
+          </span>
+        </Notice>
+      )}
+      {timelineUnavailable && (
+        <Notice tone="warn">
+          Planner attribution could not be read from the incident timeline. The plan of record below
+          is still shown exactly as the incident endpoint returned it.
+        </Notice>
+      )}
       {/*
        * How the plan presents itself: who authored it, why, what it is made of.
        *

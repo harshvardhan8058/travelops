@@ -10,8 +10,8 @@ FRONTEND := frontend
 
 .PHONY: help doctor env up down logs ps migrate revision seed reset demo demo-cascade \
         demo-reset test test-backend test-frontend lint fmt typecheck api-shell db-shell \
-        openapi verify-docs verify-demo verify-phase2 verify-console \
-        check-ownership check-collisions check-owners-audit
+        openapi verify-docs verify-demo verify-phase2 verify-console verify-journey \
+        verify-passenger-fixture check-ownership check-collisions check-owners-audit
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -125,3 +125,9 @@ verify-phase2: ## Verify the whole Phase 2 network journey against the running s
 
 verify-console: ## Drive the real console in a headless browser at 1920x1080
 	cd $(FRONTEND) && npm run verify:console -- http://127.0.0.1:5173
+
+verify-journey: ## Drive the complete primary lifecycle through the real API and browser
+	cd $(FRONTEND) && npm run verify:journey -- http://127.0.0.1:5173
+
+verify-passenger-fixture: ## Verify the Passenger View against committed offline fixtures
+	cd $(FRONTEND) && npm run verify:passenger-fixture -- http://127.0.0.1:5173

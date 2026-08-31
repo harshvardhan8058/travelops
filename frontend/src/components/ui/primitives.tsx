@@ -214,6 +214,7 @@ const PROVENANCE_TONE: Record<ProvenanceKind, Tone> = {
   simulated: 'info',
   synthetic: 'info',
   fixture: 'neutral',
+  derived: 'neutral',
   unavailable: 'crit',
 };
 
@@ -222,6 +223,7 @@ const PROVENANCE_LABEL: Record<ProvenanceKind, string> = {
   simulated: 'Simulated by local state machine',
   synthetic: 'Synthetic generated data',
   fixture: 'Committed fixture',
+  derived: 'Derived from recorded rows',
   unavailable: 'Source unavailable',
 };
 

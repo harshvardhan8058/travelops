@@ -42,7 +42,7 @@ import { countDerivation } from '@/components/ui/derivation';
 import { Labelled, Notice, PageHeader, StatStrip, Toolbar } from '@/components/ui/composition';
 import { FlightBoard, NetworkStrip } from './zones';
 
-type FlightFilter = 'all' | 'at_risk' | 'disrupted' | 'in_recovery' | 'resolved';
+type FlightFilter = 'all' | 'at_risk' | 'disrupted' | 'incident_linked';
 
 /** Non-normal first: a controller should never scroll to find the problem. */
 const NORMAL_STATUSES = new Set(['on_time', 'scheduled']);
@@ -53,10 +53,8 @@ function matchesFilter(flight: FlightRow, filter: FlightFilter): boolean {
       return flight.risk_level === 'high' || flight.risk_level === 'severe';
     case 'disrupted':
       return flight.status === 'delayed' || flight.status === 'cancelled';
-    case 'in_recovery':
+    case 'incident_linked':
       return flight.incident_reference !== null;
-    case 'resolved':
-      return flight.status === 'resolved';
     default:
       return true;
   }
@@ -182,8 +180,8 @@ export function CommandCenter() {
             <Labelled label="cascades">
               <MonoValue>{groups.length}</MonoValue>
             </Labelled>
-            <Labelled label="source">
-              <MonoValue muted>{api.usingFixtures ? 'fixture data' : 'live API'}</MonoValue>
+            <Labelled label="transport">
+              <MonoValue muted>{api.usingFixtures ? 'fixture files' : 'real API'}</MonoValue>
             </Labelled>
           </>
         }
@@ -240,7 +238,7 @@ export function CommandCenter() {
       </Panel>
 
       <Panel
-        title="Active cascades"
+        title="Disruption cascades"
         actions={
           <MonoValue muted className="text-caption">
             {groups.length}
@@ -302,14 +300,9 @@ export function CommandCenter() {
                   count: flights.filter((f) => matchesFilter(f, 'disrupted')).length,
                 },
                 {
-                  value: 'in_recovery',
-                  label: 'In recovery',
-                  count: flights.filter((f) => matchesFilter(f, 'in_recovery')).length,
-                },
-                {
-                  value: 'resolved',
-                  label: 'Resolved',
-                  count: flights.filter((f) => matchesFilter(f, 'resolved')).length,
+                  value: 'incident_linked',
+                  label: 'Incident linked',
+                  count: flights.filter((f) => matchesFilter(f, 'incident_linked')).length,
                 },
               ]}
             />
@@ -337,6 +330,11 @@ export function CommandCenter() {
                 <CountBar segments={segments} total={flights.length} />
               </div>
             )}
+            <Notice tone="muted">
+              Flight status describes the operation itself. Recovery workflow state is recorded on
+              the disruption cascade and in each incident workspace; an incident reference remains
+              linked after that workflow resolves.
+            </Notice>
             <FlightBoard flights={sorted} network={network} />
           </>
         )}
