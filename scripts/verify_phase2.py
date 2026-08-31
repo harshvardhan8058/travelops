@@ -33,6 +33,25 @@ GROUP = os.environ.get("VERIFY_GROUP_REF", "GRP-2026-0820-VOBL")
 
 #: The verified figures for the storm. Asserted rather than printed, because a demo that reports
 #: a different number than the one everybody rehearsed is worse than one that fails loudly.
+#:
+#: **Every one of these is derived from `data/generators/cascade_spec.BENGALURU_STORM`**, which is
+#: the authoritative description of the seeded dataset:
+#:
+#:   EXPECTED_FLIGHTS      len(BENGALURU_STORM.affected)
+#:   EXPECTED_PASSENGERS   sum(flight.passengers for flight in ...affected_flights)   # 174+158+96
+#:                                                                 +72+41+33+18+12
+#:   EXPECTED_CONNECTIONS  sum(BENGALURU_STORM.at_risk_connections_by_flight.values())
+#:                         = 8+5+3+2+2+0+0+2 -- the per-flight `at_risk_connections`, each of which
+#:                           the generator realises as a tight onward segment 60 minutes after the
+#:                           inbound's SCHEDULED arrival. The minimum connection is 45 minutes, so
+#:                           any delay over 15 breaks it, and all eight flights are delayed 55-420.
+#:   EXPECTED_PAIRINGS     len(BENGALURU_STORM.pairings)
+#:
+#: They are literals here on purpose: this script is stdlib-only so it can run on the host, inside
+#: the API container, or against a remote deployment, and importing the generators would tie it to
+#: one of those. `backend/tests/contract/test_verified_figures.py` asserts that each literal still
+#: equals the value the dataset derives, so the two cannot drift apart silently -- if the dataset
+#: changes, that test fails and names the new figure rather than this script quietly going stale.
 EXPECTED_FLIGHTS = 8
 EXPECTED_PASSENGERS = 604
 EXPECTED_CONNECTIONS = 22
@@ -150,7 +169,11 @@ def check_rollup_figures() -> dict | None:
         if rollups.get(key) != want
     ]
     if wrong:
-        record(FAIL, "verified figures", "; ".join(wrong))
+        # A wrong total is almost never a wrong calculation -- it is usually a rollup taken over
+        # fewer incidents than the group declares, because `connections_at_risk` is the union of
+        # what each incident RECORDED. Saying which incidents contributed what turns "expected 22,
+        # got 15" into something an operator can act on without reading the source.
+        record(FAIL, "verified figures", "; ".join(wrong) + _figure_diagnosis(body))
         return body
 
     record(
@@ -163,29 +186,136 @@ def check_rollup_figures() -> dict | None:
     return body
 
 
-def check_no_summing(detail: dict) -> None:
-    """Connections must be a union, never a sum of per-incident counts.
+def _recorded_connections(detail: dict) -> tuple[dict[str, int], set[int], list[str]]:
+    """Per-incident at-risk counts, the union of their booking ids, and who recorded nothing.
 
-    Eight incidents each reporting their own broken connections would total far more than 22.
-    Asserting the union figure is below the naive sum is what catches a regression to summing.
+    Read from each incident's own recorded `check_connections` payload -- the same rows the group
+    rollup unions -- so this is evidence rather than a second derivation. `action.payload` lives
+    behind `/incidents/{ref}/actions/{id}` by design, so the walk is list-then-fetch.
+    """
+    per_incident: dict[str, int] = {}
+    booking_ids: set[int] = set()
+    silent: list[str] = []
+
+    for flight in detail.get("flights", []):
+        reference = flight.get("incident_reference")
+        if not reference:
+            continue
+        _status, incident = call("GET", f"/incidents/{reference}")
+        actions = incident.get("actions", []) if isinstance(incident, dict) else []
+        connection_actions = [
+            action
+            for action in actions
+            if action.get("action_type") == "check_connections"
+            and action.get("status") == "success"
+        ]
+        if not connection_actions:
+            silent.append(reference)
+            continue
+        total = 0
+        for action in connection_actions:
+            _s, payload_body = call("GET", f"/incidents/{reference}/actions/{action['id']}")
+            payload = payload_body.get("payload", {}) if isinstance(payload_body, dict) else {}
+            for item in payload.get("at_risk") or []:
+                if item.get("booking_id") is not None:
+                    booking_ids.add(int(item["booking_id"]))
+                    total += 1
+        per_incident[reference] = total
+    return per_incident, booking_ids, silent
+
+
+def _figure_diagnosis(detail: dict) -> str:
+    """Why a rollup total is what it is, in one line, from the recorded evidence."""
+    try:
+        per_incident, booking_ids, silent = _recorded_connections(detail)
+    except Exception as exc:  # diagnosis must never mask the failure it is explaining
+        return f"\n       (diagnosis unavailable: {type(exc).__name__}: {exc})"
+    parts = [
+        # Airport and ordinal, because `-01` alone is ambiguous: the inbound VAAH member and the
+        # primary VOBL member both end in it.
+        "\n       recorded per incident: "
+        + ", ".join(
+            f"{'-'.join(ref.split('-')[-2:])}={count}"
+            for ref, count in sorted(per_incident.items())
+        ),
+        f"\n       distinct bookings across them = {len(booking_ids)}"
+        f" (sum {sum(per_incident.values())})",
+    ]
+    if silent:
+        parts.append(
+            "\n       NO successful check_connections recorded for: " + ", ".join(sorted(silent))
+        )
+    status = detail.get("rollup_status") or {}
+    parts.append(
+        f"\n       rollup is_complete={status.get('is_complete')}"
+        f" flights_without_incident={status.get('flights_without_incident')}"
+    )
+    return "".join(parts)
+
+
+def check_rollup_is_complete(detail: dict) -> None:
+    """A partial rollup must fail as partial, not as a wrong number.
+
+    `connections_at_risk` is the union of what each incident recorded, so a group whose members
+    have not all been assessed reports a legitimately smaller figure. `is_complete` already
+    encodes that -- it is false whenever a declared flight has no incident or an incident has not
+    been assessed -- and it was previously printed but never asserted. A run that reports 15 of 22
+    with three incidents unassessed is not a wrong calculation, and being told so is the
+    difference between a five-minute fix and an afternoon.
+    """
+    status = detail.get("rollup_status") or {}
+    if status.get("is_complete") is True:
+        record(
+            PASS,
+            "the rollup covers every declared member",
+            f"membership_is_declared={status.get('membership_is_declared')}",
+        )
+        return
+    record(
+        FAIL,
+        "the rollup covers every declared member",
+        f"is_complete={status.get('is_complete')}; every figure below is therefore partial."
+        + _figure_diagnosis(detail),
+    )
+
+
+def check_no_summing(detail: dict) -> None:
+    """Connections must be the union of what members recorded, never a sum of their counts.
+
+    The previous form only asserted the total was below `22 x 8 = 176`, which passes for almost
+    any wrong answer -- including the partial totals this check exists to catch. It now compares
+    the published figure against the union computed from the members' own recorded payloads, and
+    separately confirms that union is smaller than the naive sum whenever members overlap, so a
+    regression to summing is still caught.
     """
     incidents = [f for f in detail.get("flights", []) if f.get("incident_reference")]
     connections = (detail.get("rollups") or {}).get("connections_at_risk", 0)
     if not incidents:
         record(FAIL, "group figures are unions, not sums", "no member incidents to compare")
         return
-    naive = EXPECTED_CONNECTIONS * len(incidents)
-    if connections >= naive:
+
+    per_incident, booking_ids, silent = _recorded_connections(detail)
+    naive = sum(per_incident.values())
+    if silent:
         record(
             FAIL,
             "group figures are unions, not sums",
-            f"connections_at_risk={connections} is at least the naive sum {naive}",
+            "no successful check_connections recorded for: " + ", ".join(sorted(silent)),
+        )
+        return
+    if connections != len(booking_ids):
+        record(
+            FAIL,
+            "group figures are unions, not sums",
+            f"connections_at_risk={connections} but the members recorded "
+            f"{len(booking_ids)} distinct bookings (sum {naive})",
         )
         return
     record(
         PASS,
         "group figures are unions, not sums",
-        f"{connections} distinct at-risk bookings across {len(incidents)} incidents, not {naive}",
+        f"{connections} distinct at-risk bookings across {len(incidents)} incidents, "
+        f"reconciled against their recorded findings (sum of per-incident counts {naive})",
     )
 
 
@@ -685,6 +815,7 @@ def main() -> int:
 
     detail = check_rollup_figures()
     if detail:
+        check_rollup_is_complete(detail)
         check_no_summing(detail)
         check_why_nine_is_derived(detail)
     check_blast_radius()
