@@ -37,7 +37,7 @@ from app.models.cascade import (
     HotelInventoryHold,
     PassengerImpact,
 )
-from app.models.workflow import Action
+from app.models.workflow import Action, Incident, IncidentGroup, PlanTask
 from tests.contract.postgres_support import requires_postgres
 
 pytestmark = [pytest.mark.anyio, requires_postgres]
@@ -665,3 +665,175 @@ async def test_reprojecting_does_not_multiply_the_graph(client, sessionmaker_for
     first = await edges()
     _run(client)
     assert await edges() == first
+
+
+# ------------------------------------------------- approval is the only route to resolution
+#
+# The Phase 3 stall these pin: the cascade reported `executing` for ever with
+# `awaiting_approval_count` at one, and no error said why. The chain below is asserted one link at a
+# time, because "the group resolved" on its own cannot tell an approval that was honoured from an
+# approval that was never needed.
+
+
+async def _incidents_in_group(sessionmaker_for) -> int:
+    async with sessionmaker_for() as session:
+        return int(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Incident)
+                    .join(IncidentGroup, Incident.group_id == IncidentGroup.id)
+                    .where(IncidentGroup.reference == GROUP)
+                )
+            ).scalar_one()
+        )
+
+
+async def _actions_of_type(sessionmaker_for, action_type: str) -> list[tuple[str, int | None]]:
+    async with sessionmaker_for() as session:
+        rows = (
+            await session.execute(
+                select(Action.status, Action.assurance_id)
+                .join(PlanTask, Action.plan_task_id == PlanTask.id)
+                .where(PlanTask.action_type == action_type)
+            )
+        ).all()
+    return [(str(status), assurance_id) for status, assurance_id in rows]
+
+
+async def test_an_unapproved_high_risk_action_executes_nothing(client, sessionmaker_for):
+    """The gate holds `notify_passengers` for a person, and until one decides, nothing is sent.
+
+    604 passengers' worth of email is the thing that cannot be retracted, so this is the assertion
+    that matters most: the hold is real, not cosmetic.
+    """
+    _open(client)
+    state = _run(client)
+
+    held = _held(client, state)
+    assert len(held) == 8, "expected one high-risk hold per member flight"
+    assert state["state"] != "resolved"
+    assert state["awaiting_approval_count"] == 8
+    assert all(member["state"] == "awaiting_approval" for member in state["members"])
+    assert await _actions_of_type(sessionmaker_for, "notify_passengers") == []
+
+
+async def test_an_approved_action_executes_and_its_completion_is_persisted(
+    client, sessionmaker_for
+):
+    """Approval authorises execution, and the execution leaves a durable, attributed record."""
+    _open(client)
+    state = _run(client)
+    held = _held(client, state)
+
+    for evaluation_id in held:
+        response = client.post(
+            f"{PREFIX}/assurance/{evaluation_id}/decision",
+            json={"decision": "approved", "reason": "approved by the integration test"},
+        )
+        assert response.status_code == 200, response.text
+
+    # An approval on its own advances nothing; the run is what consumes it.
+    assert await _actions_of_type(sessionmaker_for, "notify_passengers") == []
+
+    _run(client)
+
+    executed = await _actions_of_type(sessionmaker_for, "notify_passengers")
+    assert len(executed) == 8, "every approved notification should have run exactly once"
+    assert {status for status, _ in executed} == {"success"}
+    assert all(assurance_id is not None for _, assurance_id in executed), (
+        "an executed action must name the evaluation that authorised it"
+    )
+
+
+async def test_the_group_resolves_only_once_every_required_approval_is_given(client):
+    """The exact reported stall, as a regression.
+
+    Seven approvals leave the eighth member held. The group is then `executing` with
+    `awaiting_approval_count` at one — which is precisely what was reported — and it must **not**
+    read `resolved`. Approving the last one and running again must finish it.
+    """
+    _open(client)
+    state = _run(client)
+    held = _held(client, state)
+    assert len(held) == 8
+
+    for evaluation_id in held[:7]:
+        response = client.post(
+            f"{PREFIX}/assurance/{evaluation_id}/decision",
+            json={"decision": "approved", "reason": "approved by the integration test"},
+        )
+        assert response.status_code == 200, response.text
+
+    partial = _run(client)
+    assert partial["state"] == "executing"
+    assert partial["awaiting_approval_count"] == 1
+    assert partial["state"] != "resolved", "one outstanding approval must hold the group open"
+    states = sorted(member["state"] for member in partial["members"])
+    assert states.count("resolved") == 7
+    assert states.count("awaiting_approval") == 1
+
+    response = client.post(
+        f"{PREFIX}/assurance/{held[7]}/decision",
+        json={"decision": "approved", "reason": "the last one"},
+    )
+    assert response.status_code == 200, response.text
+
+    finished = _run(client)
+    assert finished["state"] == "resolved", finished.get("blocked_reason")
+    assert finished["awaiting_approval_count"] == 0
+    assert all(member["state"] == "resolved" for member in finished["members"])
+
+
+async def test_a_held_evaluation_cannot_be_approved_twice_into_a_second_execution(client):
+    """A repeated approval replays; it must not authorise a second send."""
+    _open(client)
+    state = _run(client)
+    evaluation_id = _held(client, state)[0]
+    body = {"decision": "approved", "reason": "approved by the integration test"}
+
+    first = client.post(f"{PREFIX}/assurance/{evaluation_id}/decision", json=body)
+    second = client.post(f"{PREFIX}/assurance/{evaluation_id}/decision", json=body)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["decision"] == "approved"
+
+
+# ------------------------------------------------------- re-opening a finished cascade
+#
+# `open_incident` deduplicates on `uq_incident_active_per_flight`, which is partial over ACTIVE
+# states. A terminal member has released its slot, so delegating idempotency to it opened a *second*
+# incident per flight once the cascade had finished: sixteen incidents in an eight-flight group,
+# `awaiting_approval_count` counting copies the flight list never showed, a derived state that could
+# never be `resolved` again, and 409s from every later run while the duplicates it had already
+# committed stayed behind. Re-running the Phase 3 script was enough to trigger it.
+
+
+async def test_reopening_a_resolved_cascade_creates_no_second_incident(client, sessionmaker_for):
+    state = _drive(client)
+    assert state["state"] == "resolved"
+    before = await _incidents_in_group(sessionmaker_for)
+    assert before == 8
+
+    again = _open(client)
+
+    assert again["opened_incident_ids"] == []
+    assert len(again["members"]) == 8
+    assert await _incidents_in_group(sessionmaker_for) == before
+
+
+async def test_a_resolved_cascade_stays_addressable_after_a_repeat_open_and_run(
+    client, sessionmaker_for
+):
+    """The whole point: a re-run must be a no-op, not a permanent 409."""
+    _drive(client)
+    _open(client)
+
+    state = _run(client)
+
+    assert state["state"] == "resolved"
+    assert state["awaiting_approval_count"] == 0
+    assert await _incidents_in_group(sessionmaker_for) == 8
+    detail = _detail(client)
+    assert len(detail["flights"]) == 8, "a duplicated member would show twice here"
+    assert detail["rollups"]["flights_affected"] == 8

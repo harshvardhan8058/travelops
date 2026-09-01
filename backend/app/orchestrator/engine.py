@@ -38,6 +38,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contract import PlanTask
+from app.assurance.blocking import is_approvable, unapprovable_reasons
 from app.assurance.contract import AssuranceResult
 from app.config import LLMMode, ResolvedModes, Settings, get_modes, get_settings
 from app.db.scenario_queries import load_delay_risk_inputs
@@ -2058,6 +2059,32 @@ class Orchestrator:
 
         task_row.state = TaskState.needs_human
         await self._session.flush()
+
+        # A gate that asks for a person is an approval request. A gate blocked on evidence or on a
+        # conflict is not one, and must not be filed as one: `may_approve_action` forbids approving
+        # past a missing fact, so parking here would wait for a decision the system itself refuses
+        # to accept. `POST /assurance/{id}/decision` answers every such attempt with 409, the
+        # incident never leaves `awaiting_approval`, and a cascade whose other members resolved sits
+        # in `executing` for ever with `awaiting_approval_count` stuck above zero. That is the
+        # Phase 3 stall this branch exists to end.
+        #
+        # Same principle as the unavailable-gate branch above: an authorisation boundary nobody may
+        # cross is a block, and it says which fact to fix rather than waiting for a signature that
+        # cannot help. Nothing is approved automatically and no risk-only hold is affected.
+        if not is_approvable(outcome.result):
+            await self._block(
+                ctx,
+                reason=_unapprovable_reason(task_row.action_type, outcome.result),
+                detail={
+                    "plan_task_id": task_row.id,
+                    "assurance_id": evaluation.id,
+                    "action_type": task_row.action_type,
+                    "blocking": [name.value for name in outcome.result.blocking],
+                    "unapprovable_reasons": unapprovable_reasons(outcome.result),
+                },
+            )
+            return
+
         await self._transition(
             ctx,
             IncidentState.awaiting_approval,
@@ -2111,6 +2138,31 @@ class Orchestrator:
 
         decision = await self._human_decision(int(evaluation_id))
         if decision is None:
+            # An incident parked on an evaluation nobody may approve is not resting, it is stuck:
+            # `POST /assurance/{id}/decision` refuses it with 409, so no run will ever find a
+            # decision here. `_step_assuring` no longer creates that state, but a database written
+            # before it did still contains it, and those incidents have to be able to finish.
+            # Recovering them here rather than leaving them to a manual repair is the difference
+            # between a cascade that can be driven to a conclusion and one that cannot.
+            recorded = await self._session.get(AssuranceEvaluation, int(evaluation_id))
+            if recorded is not None:
+                result = _result_from_row(recorded)
+                if not is_approvable(result):
+                    held_task = await self._session.get(PlanTaskRow, int(plan_task_id))
+                    action_type = held_task.action_type if held_task else "this action"
+                    await self._block(
+                        ctx,
+                        reason=_unapprovable_reason(action_type, result),
+                        detail={
+                            "plan_task_id": plan_task_id,
+                            "assurance_id": evaluation_id,
+                            "action_type": action_type,
+                            "unapprovable_reasons": unapprovable_reasons(result),
+                            "recovered_from": "awaiting_approval",
+                        },
+                    )
+                    return
+
             # Not an error. Waiting for a person is a legitimate resting state.
             #
             # A plan approval needs no special case here: Stream A's approval service writes a
@@ -2655,6 +2707,22 @@ def _task_state_for(status: ActionStatus) -> TaskState:
         ActionStatus.skipped: TaskState.skipped,
         ActionStatus.needs_human: TaskState.needs_human,
     }[status]
+
+
+def _unapprovable_reason(action_type: str, result: AssuranceResult) -> str:
+    """Why this action is blocked rather than held, naming the fact to fix.
+
+    One wording for both entry points — the fresh hold in `_step_assuring` and the recovery of an
+    incident already parked by an older build in `_step_awaiting_approval` — so an operator reading
+    a timeline cannot tell which path produced it, because operationally it is the same fact.
+    """
+    named = ", ".join(unapprovable_reasons(result))
+    return (
+        f"{action_type} cannot be authorised, and cannot be approved by a person: "
+        f"{named or 'the gate blocked on evidence or a conflict'}. Approval covers risk, never "
+        "failed evidence or an unresolved conflict — the underlying fact must change, which "
+        "produces a new evaluation."
+    )
 
 
 def _result_from_row(row: AssuranceEvaluation) -> AssuranceResult:
