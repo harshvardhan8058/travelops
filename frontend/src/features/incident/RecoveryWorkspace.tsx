@@ -23,6 +23,7 @@ import { PlayCircle } from 'lucide-react';
 import { api, ApiError } from '@/api/client';
 import type { AssuranceEvaluation, HumanDecision, IncidentDetail, RunResponse } from '@/api/types';
 import { dataUnavailable, pollUnlessMissing } from '@/api/unavailable';
+import { outstandingDemand, resolvedWithOutstandingDemand } from './outstandingDemand';
 import {
   ErrorState,
   LoadingState,
@@ -156,6 +157,15 @@ function Header({
   const latest = stamps.length > 1 ? (stamps[stamps.length - 1] ?? null) : null;
   const isTerminal = isTerminalIncident(incident);
   const blockedReason = runBlockedReason(incident);
+  /*
+   * `resolved` is the workflow's word and it is correct: every task was dispatched. It is not a
+   * claim that every passenger was accommodated, and on this cascade the two come apart — the
+   * hotel allocation secures 71 of 87 rooms and records the shortfall rather than failing, so the
+   * run finishes still owing something. The header said RESOLVED while a task further down the
+   * same screen said NEEDS HUMAN, and nothing reconciled them.
+   */
+  const outstanding = outstandingDemand(incident.actions);
+  const resolvedOwing = resolvedWithOutstandingDemand(incident.state, incident.actions);
 
   return (
     <>
@@ -188,6 +198,12 @@ function Header({
               status={incident.state}
               label={`workflow ${incident.state.replace(/_/g, ' ')}`}
             />
+            {resolvedOwing && (
+              <StateBadge
+                status="needs_human"
+                label={`${outstanding.length} action${outstanding.length === 1 ? '' : 's'} still needs a person`}
+              />
+            )}
             <StateBadge status={incident.severity} label={`severity ${incident.severity}`} />
           </span>
         }
@@ -250,6 +266,28 @@ function Header({
           </div>
         }
       />
+
+      {resolvedOwing && (
+        <Notice tone="warn" divider="none" className="rounded border">
+          <span className="text-fg">
+            Resolved, with operational demand still outstanding.{' '}
+          </span>
+          The workflow finished and every task was dispatched. These were carried out as far as they
+          could be and record a decision for a person; nothing below has been abandoned, and nothing
+          has been fulfilled beyond what is stated.
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {outstanding.map((item) => (
+              <li key={item.actionId} className="flex flex-col gap-0.5">
+                <MonoValue className="text-caption">
+                  {item.actionType ?? `action #${item.actionId}`}
+                </MonoValue>
+                {/* The service's own sentence, verbatim. It names the remaining choices. */}
+                <span className="text-caption text-fg-secondary">{item.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
 
       {runError && (
         <Notice tone="crit" alert divider="none" className="rounded border">
