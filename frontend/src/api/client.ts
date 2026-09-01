@@ -11,6 +11,7 @@
 import type {
   ActionDetail,
   AssuranceResponse,
+  BookingLookupResponse,
   CandidateComparisonResponse,
   CandidatePlansResponse,
   CascadeGraph,
@@ -81,6 +82,7 @@ function fixtureNameFor(path: string): string | null {
   }
   if (/^\/incident-groups\/[^/]+$/.test(path)) return 'incident_group_detail';
   if (/^\/reports\/[^/]+$/.test(path)) return 'report';
+  if (/^\/bookings\/[^/]+$/.test(path)) return 'booking';
   return null;
 }
 
@@ -137,6 +139,12 @@ export const api = {
   systemMode: () => request<SystemMode>('/system/mode'),
   ready: () => request<ReadyStatus>('/health/ready'),
   flights: () => request<FlightsResponse>('/flights'),
+  /**
+   * The trip behind a booking reference, for the passenger view. 404 with `details.resolution`
+   * when the reference does not exist — `dataUnavailable()` turns that into an empty state
+   * rather than an error screen, the same as every other "not yet on file" 404 in this API.
+   */
+  booking: (pnr: string) => request<BookingLookupResponse>(`/bookings/${encodeURIComponent(pnr)}`),
   sources: () => request<SourcesResponse>('/sources'),
   incidentGroups: () => request<IncidentGroupsResponse>('/incident-groups'),
 

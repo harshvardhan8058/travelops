@@ -1,0 +1,49 @@
+{
+  "generated_by": "wave0-fixture",
+  "note": "Matches the live bengaluru_storm dataset's K4X8YR itinerary: 6E 811 VOBL -> VABB (delayed, the open incident) then 6E 9202 VABB -> VIDP (still scheduled), the same broken-connection pair incident_group_impacts.json scores for this pnr.",
+  "pnr": "K4X8YR",
+  "passenger_reference": "PAX-00176",
+  "cabin": "premium",
+  "segments": [
+    {
+      "segment_order": 1,
+      "flight_id": 2,
+      "flight_number": "6E 811",
+      "origin_icao": "VOBL",
+      "destination_icao": "VABB",
+      "scheduled_departure": "2026-08-20T15:55:00Z",
+      "estimated_departure": "2026-08-20T17:45:00Z",
+      "delay_minutes": 110,
+      "status": "delayed",
+      "incident_reference": "INC-2026-0820-VOBL-04",
+      "provenance": {
+        "kind": "fixture",
+        "provider": "fixture",
+        "source_ref": "fixture:bengaluru_storm:flight:6E811",
+        "observed_at": null,
+        "retrieved_at": null,
+        "is_stale": false
+      }
+    },
+    {
+      "segment_order": 2,
+      "flight_id": 202,
+      "flight_number": "6E 9202",
+      "origin_icao": "VABB",
+      "destination_icao": "VIDP",
+      "scheduled_departure": "2026-08-20T18:35:00Z",
+      "estimated_departure": null,
+      "delay_minutes": 0,
+      "status": "scheduled",
+      "incident_reference": null,
+      "provenance": {
+        "kind": "fixture",
+        "provider": "fixture",
+        "source_ref": "fixture:bengaluru_storm:flight:6E9202",
+        "observed_at": null,
+        "retrieved_at": null,
+        "is_stale": false
+      }
+    }
+  ]
+}

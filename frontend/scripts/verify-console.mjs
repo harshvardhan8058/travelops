@@ -178,8 +178,14 @@ const ROUTES = [
   },
   {
     path: '/passenger/K4X8YR',
-    name: 'Passenger operational view',
-    expect: ['K4X8YR', 'persisted_records', 'No confirmed booking update is available'],
+    name: 'Passenger view',
+    // The passenger route renders in its own shell, not the operator's `AppShell`, so it never
+    // carries the Decision Timeline this file otherwise expects per viewport — see
+    // `PassengerShell` for why. `persisted_records` reaches the DOM only inside the collapsed
+    // "More detail" section, which the loop below opens before reading text, exactly as it does
+    // for the Policy route's own disclosure.
+    noOperatorChrome: true,
+    expect: ['K4X8YR', 'persisted_records', 'has not been confirmed for this booking'],
     expectExactCase: ['persisted_records'],
   },
   {
@@ -397,7 +403,12 @@ for (const viewport of VIEWPORTS) {
         `${route.name} fits ${viewport.width} without horizontal overflow`,
         `document overflow: ${layout.documentOverflow}; main overflow: ${layout.mainOverflow}`,
       );
-    } else if (layout.timelineVisible !== viewport.timelineVisible) {
+    } else if (
+      // The passenger route carries no Decision Timeline at any viewport — it is not part of the
+      // operator shell this check otherwise verifies. `noOperatorChrome` routes are exempt.
+      !route.noOperatorChrome &&
+      layout.timelineVisible !== viewport.timelineVisible
+    ) {
       record(
         'FAIL',
         `${route.name} uses the expected timeline layout at ${viewport.width}`,

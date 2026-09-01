@@ -14,7 +14,13 @@ describe('approvalScopeFor', () => {
     expect(approvalScopeFor('/assurance', null)).toBe('group');
     expect(approvalScopeFor('/cascade/GRP-1', null)).toBe('group');
     expect(approvalScopeFor('/what-if/GRP-1', null)).toBe('group');
-    expect(approvalScopeFor('/passenger/K4X8YR', null)).toBe('group');
+  });
+
+  it('never sees the passenger route at all', () => {
+    // `/passenger/:bookingRef` renders in its own shell; `App()` branches to it before the
+    // operator console — the only caller of `approvalScopeFor` — even renders. This function
+    // has no opinion about that path any more, and does not need one.
+    expect(approvalScopeFor('/passenger/K4X8YR', null)).not.toBe('incident');
   });
 
   it('never falls through to a hardcoded demo incident on a screen that names none', () => {

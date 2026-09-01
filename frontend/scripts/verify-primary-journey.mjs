@@ -147,7 +147,7 @@ async function pageBody(page, openDetails = false) {
   return page.locator('body').innerText();
 }
 
-async function assertHealthyPage(page, observed, expected, absent = [], openDetails = false) {
+async function assertHealthyPage(page, observed, expected, absent = [], openDetails = false, options = {}) {
   const body = await pageBody(page, openDetails);
   const missing = expected.filter((token) => !contains(body, token));
   const unexpected = absent.filter((token) => contains(body, token));
@@ -156,7 +156,9 @@ async function assertHealthyPage(page, observed, expected, absent = [], openDeta
   assert(fixtureReads.length === 0, `${fixtureReads.length} fixture request(s)`);
   assert(missing.length === 0, `missing from page: ${missing.join(', ')}`);
   assert(unexpected.length === 0, `unexpected on page: ${unexpected.join(', ')}`);
-  assertSourceStrip(body);
+  // The passenger route renders in its own customer-portal shell, not the operator console, so it
+  // carries none of the operator's runtime-mode chips this check otherwise requires.
+  if (!options.skipSourceStrip) assertSourceStrip(body);
   return body;
 }
 
@@ -196,13 +198,21 @@ async function physicalFlightStatus(incidentReference) {
   }
 }
 
-async function inspectAtViewport(name, path, viewport, expected, absent = [], openDetails = false) {
+async function inspectAtViewport(
+  name,
+  path,
+  viewport,
+  expected,
+  absent = [],
+  openDetails = false,
+  options = {},
+) {
   const page = await context.newPage();
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   const observed = watch(page);
   try {
     await goto(page, path);
-    await assertHealthyPage(page, observed, expected, absent, openDetails);
+    await assertHealthyPage(page, observed, expected, absent, openDetails, options);
     const layout = await page.evaluate(() => {
       const main = document.querySelector('main');
       const timeline = document.querySelector('aside[aria-label="Decision timeline"]');
@@ -251,9 +261,12 @@ async function inspectAtViewport(name, path, viewport, expected, absent = [], op
       layout.nestedVertical.length === 0,
       `nested vertical scroll containers: ${layout.nestedVertical.join(', ')}`,
     );
+    // The passenger route carries no Decision Timeline at any viewport — it is not part of the
+    // operator shell this check otherwise verifies.
+    const expectedTimeline = options.expectTimeline ?? viewport.timelineVisible;
     assert(
-      layout.timelineVisible === viewport.timelineVisible,
-      `timeline should be ${viewport.timelineVisible ? 'visible' : 'hidden'}`,
+      layout.timelineVisible === expectedTimeline,
+      `timeline should be ${expectedTimeline ? 'visible' : 'hidden'}`,
     );
     record('PASS', `${name} at ${viewport.width}x${viewport.height}`, 'no overflow, nested scroll, fixture read, or runtime error');
   } finally {
@@ -418,8 +431,15 @@ try {
   await assertHealthyPage(
     page,
     observed,
-    [passenger.pnr, 'A decision is still needed', 'You do not need to do anything in TravelOps right now.', 'No confirmed booking update is available'],
+    [
+      passenger.pnr,
+      'A decision is still needed',
+      'You do not need to do anything in TravelOps right now.',
+      'has not been confirmed for this booking',
+    ],
     ['sample booking', 'console-sample', 'An airline colleague is reviewing your rebooking'],
+    false,
+    { skipSourceStrip: true },
   );
 
   let approved = 0;
@@ -517,17 +537,26 @@ try {
     [
       'Passenger View',
       `/passenger/${passenger.pnr}`,
-      [passenger.pnr, 'review complete', 'Our review of this disruption is complete', 'The review has finished, but that does not mean your booking changed.', 'No confirmed booking update is available', 'persisted_records'],
+      [
+        passenger.pnr,
+        'review complete',
+        'Our review of this disruption is complete',
+        'The review has finished, but that does not mean your booking changed.',
+        'has not been confirmed for this booking',
+        'Operational workflow: resolved.',
+        'persisted_records',
+      ],
       ['sample booking', 'console-sample', 'An airline colleague is reviewing your rebooking'],
       true,
+      { skipSourceStrip: true, expectTimeline: false },
     ],
     ['Replay', `/replay/${incidentReference}`, [incidentReference, 'frames'], [], false],
     ['Provenance', '/sources', ['Provenance', 'Source ledger', 'Registered sources'], [], false],
   ];
 
   for (const viewport of VIEWPORTS) {
-    for (const [name, path, expected, absent, openDetails] of finalRoutes) {
-      await inspectAtViewport(name, path, viewport, expected, absent, openDetails);
+    for (const [name, path, expected, absent, openDetails, options] of finalRoutes) {
+      await inspectAtViewport(name, path, viewport, expected, absent, openDetails, options ?? {});
     }
   }
 

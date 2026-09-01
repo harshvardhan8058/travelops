@@ -32,22 +32,47 @@ try {
   await page.goto(`${BASE}/passenger/K4X8YR`, { waitUntil: 'networkidle', timeout: 45000 });
   await page.waitForTimeout(1000);
 
-  await page.getByText('View references, sources, and timestamps', { exact: true }).click();
+  await page
+    .getByText('View how this booking was prioritised, plus references and sources', {
+      exact: true,
+    })
+    .click();
   await page.waitForTimeout(100);
 
   const main = await page.locator('main').innerText();
   const required = [
+    // The trip itself — `GET /bookings/{pnr}`'s own fixture, and the reason this route now has
+    // one: this contract carries the flight facts `incident_group_impacts.json` never did.
     'K4X8YR',
+    '6E 811',
+    'VOBL',
+    'VABB',
+    'VIDP',
+    'Current disruption',
+    'What happened',
+    'Current confirmed status',
+    'What TravelOps is doing',
+    'What to expect next',
+    // The fabrication guard: present regardless of the linked incident's recorded state.
+    'has not been confirmed for this booking',
+    // The secondary, collapsed technical section — proves the priority-ranking fixture reached
+    // the DOM, not just the trip.
     'persisted_records',
-    'group summary source',
-    'passenger impact · persisted records',
-    'No confirmed booking update is available',
   ];
   const forbidden = [
     'PASSENGER_IMPACT_UNAVAILABLE',
+    'BOOKING_UNAVAILABLE',
     'sample booking',
     'console-sample',
     'An airline colleague is reviewing your rebooking',
+    // Operator vocabulary the spec names explicitly. None of it belongs on this screen.
+    'orchestration',
+    'assurance gate',
+    'plan task',
+    'action id',
+    'decision log',
+    'schema id',
+    'workflow engine',
   ];
   const missing = required.filter((token) => !main.toLowerCase().includes(token.toLowerCase()));
   const unexpected = forbidden.filter((token) => main.toLowerCase().includes(token.toLowerCase()));
@@ -57,6 +82,9 @@ try {
   if (errors.length > 0) throw new Error(`console errors: ${errors.join(' | ')}`);
   if (missing.length > 0) throw new Error(`missing from <main>: ${missing.join(', ')}`);
   if (unexpected.length > 0) throw new Error(`unexpected in <main>: ${unexpected.join(', ')}`);
+  if (!fixtureReads.some((url) => url.endsWith('/fixtures/booking.json'))) {
+    throw new Error('booking fixture was not requested');
+  }
   if (!fixtureReads.some((url) => url.endsWith('/fixtures/incident_group_detail.json'))) {
     throw new Error('current-group fixture was not requested');
   }
@@ -67,7 +95,7 @@ try {
     throw new Error(`${apiReads.length} live API request(s) in fixture mode`);
 
   console.log(
-    '[PASS] Passenger View renders the persisted-impact fixture without a booking outcome',
+    '[PASS] Passenger View renders the booking, disruption, and priority fixtures with no fabricated outcome',
   );
   console.log(`       ${fixtureReads.length} fixture reads, 0 live API reads, 0 runtime errors`);
 } catch (error) {
