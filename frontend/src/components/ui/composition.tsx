@@ -506,6 +506,8 @@ export function ReasonField({
   placeholder,
   rows = 2,
   maxLength = 2000,
+  invalid,
+  error,
 }: {
   id: string;
   label?: string;
@@ -516,8 +518,14 @@ export function ReasonField({
   placeholder?: string;
   rows?: number;
   maxLength?: number;
+  /** Override the default empty-value validation, for forms that validate after an attempted write. */
+  invalid?: boolean;
+  /** Validation copy announced and associated with the textarea when present. */
+  error?: ReactNode;
 }) {
   const empty = value.trim().length === 0;
+  const isInvalid = invalid ?? empty;
+  const errorId = `${id}-error`;
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-caption uppercase text-fg-muted">
@@ -529,12 +537,18 @@ export function ReasonField({
         rows={rows}
         maxLength={maxLength}
         disabled={disabled}
-        aria-invalid={empty}
+        aria-invalid={isInvalid}
+        aria-describedby={error ? errorId : undefined}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className={FIELD_SHELL}
+        className={clsx(FIELD_SHELL, isInvalid && 'border-state-crit')}
       />
       {hint && <p className="text-caption text-fg-muted">{hint}</p>}
+      {error && (
+        <p id={errorId} role="alert" className="text-caption text-state-crit">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

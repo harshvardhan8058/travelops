@@ -87,7 +87,7 @@ export function StepLedger({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <table className="w-full border-collapse text-body">
+          <table className="w-full table-fixed border-collapse text-body [&_td]:break-words [&_th]:break-words">
             <caption className="sr-only">
               Planned agent steps, one row per task, with the gate decision and the recorded outcome
             </caption>
@@ -136,12 +136,14 @@ export function StepLedger({
                         type="button"
                         {...keyboard.itemProps(index)}
                         onClick={() => onSelect(step.taskId)}
-                        className="flex items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        className="flex min-w-0 items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                       >
                         <MonoValue muted className="w-4 shrink-0">
                           {step.taskOrder}
                         </MonoValue>
-                        <span className="text-body text-fg">{step.actionType}</span>
+                        <span className="min-w-0 break-all text-body text-fg">
+                          {step.actionType}
+                        </span>
                       </button>
                     </th>
                     <td className="px-3">

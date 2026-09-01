@@ -153,7 +153,15 @@ function Header({
             )}
           </span>
         }
-        status={<StateBadge status={incident.severity} label={`severity ${incident.severity}`} />}
+        status={
+          <span className="flex flex-wrap items-center gap-2">
+            <StateBadge
+              status={incident.state}
+              label={`workflow ${incident.state.replace(/_/g, ' ')}`}
+            />
+            <StateBadge status={incident.severity} label={`severity ${incident.severity}`} />
+          </span>
+        }
         meta={
           <>
             <Labelled label="incident">
@@ -206,7 +214,12 @@ function Header({
             </div>
           </Toolbar>
         }
-        footer={<StateRail rail={incident.state_rail} current={incident.state} />}
+        footer={
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="text-caption uppercase text-fg-muted">Recovery workflow</span>
+            <StateRail rail={incident.state_rail} current={incident.state} />
+          </div>
+        }
       />
 
       {runError && (
@@ -279,9 +292,19 @@ export function RecoveryWorkspace() {
   useEffect(() => {
     if (!incident?.plan || selectedTaskId !== null) return;
     const tasks = incident.plan.tasks;
+    if (assuranceQuery.isLoading) return;
+
+    const pendingEvaluationIds = new Set(
+      (assuranceQuery.data?.evaluations ?? [])
+        .filter((evaluation) => evaluation.decision === 'needs_human' && !evaluation.human_decision)
+        .map((evaluation) => evaluation.id),
+    );
+    const decisionNeeded = tasks.find(
+      (task) => task.assurance_id !== null && pendingEvaluationIds.has(task.assurance_id),
+    );
     const blocked = tasks.find((task) => task.state === 'needs_human');
-    setSelectedTaskId(blocked?.id ?? tasks[0]?.id ?? null);
-  }, [incident, selectedTaskId]);
+    setSelectedTaskId(decisionNeeded?.id ?? blocked?.id ?? tasks[0]?.id ?? null);
+  }, [assuranceQuery.data, assuranceQuery.isLoading, incident, selectedTaskId]);
 
   const decisionMutation = useMutation({
     mutationFn: async (input: {

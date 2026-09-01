@@ -35,28 +35,55 @@ function passenger(overrides: Partial<PassengerImpact> = {}): PassengerImpact {
 }
 
 describe('passenger journey projection', () => {
-  it('reports incidents awaiting approval from the group count without claiming a booking change', () => {
+  it('describes a pending decision without operator or booking-change language', () => {
     const state = passengerJourneyState(group({ state: 'planning', awaiting_approval_count: 8 }));
-    expect(state).toMatchObject({ token: 'awaiting_approval', pendingHuman: true });
-    expect(state.detail).toContain('8 incidents');
-    expect(state.detail.toLowerCase()).not.toMatch(/rebooked|confirmed booking/);
-  });
-
-  it('calls the workflow resolved without calling the booking rebooked or confirmed', () => {
-    const state = passengerJourneyState(group({ state: 'resolved' }));
-    expect(state).toMatchObject({ token: 'resolved', workflowComplete: true });
+    expect(state).toMatchObject({
+      token: 'awaiting_approval',
+      label: 'waiting for a decision',
+      headline: 'A decision is still needed',
+    });
     expect(`${state.headline} ${state.detail}`.toLowerCase()).not.toMatch(
-      /rebooked|ticketed|room assigned/,
+      /operator|orchestrat|rebooked|confirmed booking/,
     );
-    expect(state.detail).toContain('does not confirm a booking change');
+    expect(state.detail).toContain('You do not need to do anything');
   });
 
-  it('does not convert blocked or failed workflow state into a passenger outcome', () => {
+  it('calls the disruption review complete without calling the booking rebooked or confirmed', () => {
+    const state = passengerJourneyState(group({ state: 'resolved' }));
+    expect(state).toMatchObject({
+      token: 'resolved',
+      label: 'review complete',
+      headline: 'Our review of this disruption is complete',
+    });
+    expect(`${state.headline} ${state.detail}`.toLowerCase()).not.toMatch(
+      /rebooked|ticketed|room assigned|workflow/,
+    );
+    expect(state.detail).toContain('does not mean your booking changed');
+  });
+
+  it('uses critical states and plain language for blocked or failed reviews', () => {
     for (const terminal of ['blocked', 'failed'] as const) {
       const state = passengerJourneyState(group({ state: terminal }));
       expect(state.token).toBe(terminal);
-      expect(state.detail).toContain('No booking change');
+      expect(state.headline).toBe('We could not complete the disruption review');
+      expect(state.label).not.toBe('review complete');
+      expect(`${state.label} ${state.detail}`.toLowerCase()).not.toMatch(
+        /\bsuccess\b|operator|terminal exception/,
+      );
     }
+  });
+
+  it('uses plain in-progress wording while work continues', () => {
+    expect(passengerJourneyState(group({ state: 'executing' }))).toMatchObject({
+      token: 'executing',
+      label: 'work in progress',
+      headline: 'Work on this disruption is in progress',
+    });
+    expect(passengerJourneyState(group({ state: 'planning' }))).toMatchObject({
+      token: 'planning',
+      label: 'review in progress',
+      headline: 'We are reviewing this disruption',
+    });
   });
 
   it('matches the recorded PNR case-insensitively and returns no synthetic fallback', () => {

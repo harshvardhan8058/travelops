@@ -95,6 +95,7 @@ export const CHECK_ORDER: readonly CheckName[] = [
 // ---------------------------------------------------------------- system
 export interface SystemMode {
   llm_mode: 'live' | 'fixture' | 'off';
+  flight_status_mode: 'live' | 'fixture';
   weather_mode: 'live' | 'fixture';
   notification_mode: 'console' | 'mailtrap' | 'gmail';
   policy_mode: 'demo' | 'charter' | 'verified';
@@ -129,9 +130,9 @@ export interface AirportConditions {
   visibility_m: number | null;
   ceiling_ft: number | null;
   precipitation: string | null;
-  risk_index: number;
-  risk_level: RiskLevel;
-  observation_age_minutes: number;
+  risk_index: number | null;
+  risk_level: RiskLevel | null;
+  observation_age_minutes: number | null;
   provenance: Provenance;
 }
 
@@ -146,10 +147,10 @@ export interface FlightRow {
   delay_minutes: number;
   block_time_minutes: number;
   status: string;
-  risk_index: number;
-  risk_level: RiskLevel;
+  risk_index: number | null;
+  risk_level: RiskLevel | null;
   passengers: number;
-  connections_at_risk: number;
+  connections_at_risk: number | null;
   incident_reference: string | null;
   provenance: Provenance;
 }

@@ -56,6 +56,7 @@ export function App() {
   const clock = useUtcClock();
   const { pathname } = useLocation();
   const incidentId = useRouteIncidentId(DEMO_INCIDENT);
+  const usesNoApprovalScope = pathname === '/scenarios/new' || pathname === '/sources';
   const usesGroupApprovalScope =
     pathname === '/' ||
     pathname === '/assurance' ||
@@ -71,7 +72,7 @@ export function App() {
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
     refetchInterval: 10_000,
-    enabled: !usesGroupApprovalScope,
+    enabled: !usesGroupApprovalScope && !usesNoApprovalScope,
   });
 
   const { data: currentGroup } = useQuery({
@@ -100,7 +101,15 @@ export function App() {
           ? 'incidents await operator approval in the current group'
           : `actions require an operator decision for ${incidentId}`
       }
-      timeline={<DecisionTimeline incidentId={incidentId} />}
+      timeline={
+        usesNoApprovalScope ? (
+          <div className="flex h-full items-center justify-center px-4 text-center text-caption text-fg-muted">
+            Open an incident to see its recorded decision timeline.
+          </div>
+        ) : (
+          <DecisionTimeline incidentId={incidentId} />
+        )
+      }
     >
       <Routes>
         <Route path="/" element={<CommandCenter />} />

@@ -1,5 +1,5 @@
 /**
- * Browser verification of the console at 1920x1080, against a real API.
+ * Browser verification of the console at the three supported demo viewports, against a real API.
  *
  *     npm run verify:console -- http://127.0.0.1:5173
  *
@@ -7,7 +7,7 @@
  *
  *   1. every route renders without a runtime or console error;
  *   2. the real figures reach the DOM, so an empty screen cannot pass;
- *   3. nothing overflows horizontally at projector width;
+ *   3. neither the document nor its main content overflows horizontally at a supported width;
  *   4. no route is still a placeholder;
  *   5. no fixture fallback is silently in play while the console claims to be live.
  *
@@ -55,6 +55,11 @@ const VERIFY_API_BASE = process.env.VERIFY_API_BASE_URL?.replace(/\/$/, '');
  * red because it disagrees with the bundle about where the API lives teaches people to ignore it.
  */
 const CONTRACT_API_BASE = VERIFY_API_BASE || BROWSER_API_BASE || 'http://127.0.0.1:8000/api/v1';
+const VIEWPORTS = [
+  { name: 'projector', width: 1920, height: 1080, timelineVisible: true },
+  { name: 'desktop', width: 1600, height: 900, timelineVisible: true },
+  { name: 'laptop', width: 1366, height: 768, timelineVisible: false },
+];
 
 /**
  * Policy expectations read from the contract instead of pinned to one pack.
@@ -164,10 +169,19 @@ const ROUTES = [
   {
     path: '/passenger/K4X8YR',
     name: 'Passenger operational view',
-    expect: ['K4X8YR', 'persisted_records', 'No passenger booking outcome is available'],
+    expect: ['K4X8YR', 'persisted_records', 'No confirmed booking update is available'],
     expectExactCase: ['persisted_records'],
   },
-  { path: '/sources', name: 'Provenance ledger', expect: [] },
+  {
+    path: '/sources',
+    name: 'Provenance ledger',
+    expect: ['Provenance', 'Source ledger', 'Registered sources'],
+  },
+  {
+    path: '/scenarios/new',
+    name: 'Scenario Builder',
+    expect: ['Scenario builder', 'published scenario lifecycle'],
+  },
 ];
 
 /**
@@ -274,8 +288,10 @@ if (BROWSER_API_BASE && VERIFY_API_BASE && BROWSER_API_BASE !== VERIFY_API_BASE)
   });
 }
 
-for (const route of ROUTES) {
-  const page = await context.newPage();
+for (const viewport of VIEWPORTS) {
+  for (const route of ROUTES) {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
   page.on('console', (message) => {
@@ -286,11 +302,24 @@ for (const route of ROUTES) {
     await page.goto(`${BASE}${route.path}`, { waitUntil: 'networkidle', timeout: 45000 });
     await page.waitForTimeout(2500);
 
+    // Audit disclosures are secondary by design, but their contract values and contrast still belong
+    // to this gate. Opening them also proves the disclosure remains operable at every viewport.
+    await page.locator('details').evaluateAll((nodes) => {
+      for (const node of nodes) node.open = true;
+    });
+    await page.waitForTimeout(100);
+
     const body = await page.evaluate(() => document.body.innerText);
     const contrast = await page.evaluate(CONTRAST_PROBE);
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth + 1,
-    );
+    const layout = await page.evaluate(() => {
+      const main = document.querySelector('main');
+      const timeline = document.querySelector('aside[aria-label="Decision timeline"]');
+      return {
+        documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+        mainOverflow: Boolean(main && main.scrollWidth > main.clientWidth + 1),
+        timelineVisible: Boolean(timeline && getComputedStyle(timeline).display !== 'none'),
+      };
+    });
     const placeholder = /not yet built|placeholder/i.test(body);
 
     // Routes whose expected values belong to the contract rather than to this file read them now.
@@ -329,8 +358,18 @@ for (const route of ROUTES) {
           .map((w) => `"${w.text}" ${w.ratio}:1 needs ${w.need} at ${w.px}px`)
           .join('\n       '),
       );
-    } else if (overflow) {
-      record('FAIL', `${route.name} fits 1920 without horizontal overflow`);
+    } else if (layout.documentOverflow || layout.mainOverflow) {
+      record(
+        'FAIL',
+        `${route.name} fits ${viewport.width} without horizontal overflow`,
+        `document overflow: ${layout.documentOverflow}; main overflow: ${layout.mainOverflow}`,
+      );
+    } else if (layout.timelineVisible !== viewport.timelineVisible) {
+      record(
+        'FAIL',
+        `${route.name} uses the expected timeline layout at ${viewport.width}`,
+        `expected timeline ${viewport.timelineVisible ? 'visible' : 'hidden'}, got ${layout.timelineVisible ? 'visible' : 'hidden'}`,
+      );
     } else if (placeholder) {
       record('FAIL', `${route.name} is not a placeholder`, 'placeholder copy found in the DOM');
     } else if (deriveError !== null) {
@@ -364,12 +403,17 @@ for (const route of ROUTES) {
           .map((node) => node.textContent?.trim())
           .slice(0, 4),
       );
-      record('PASS', `${route.name} renders at 1920x1080`, `sections: ${headings.join(' · ')}`);
+      record(
+        'PASS',
+        `${route.name} renders at ${viewport.width}x${viewport.height}`,
+        `${viewport.name}; sections: ${headings.join(' · ')}`,
+      );
     }
   } catch (error) {
     record('FAIL', `${route.name} loads`, String(error).slice(0, 200));
   }
   await page.close();
+  }
 }
 
 // A live console must not be quietly serving committed fixtures.
@@ -403,4 +447,4 @@ if (failures.length > 0) {
   for (const failure of failures) console.log(`  - ${failure.name}`);
   process.exit(1);
 }
-console.log('\nConsole verified at 1920x1080 against the real API.');
+console.log('\nConsole verified at 1920x1080, 1600x900, and 1366x768 against the real API.');

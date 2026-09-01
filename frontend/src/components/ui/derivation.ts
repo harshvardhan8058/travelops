@@ -157,8 +157,12 @@ const RISK_CAVEAT =
  */
 export function flightRiskDerivation(flight: FlightRow, origin?: AirportConditions): Derivation {
   const inputs: DerivationInput[] = [
-    { label: 'risk index', value: String(flight.risk_index), provenance: flight.provenance },
-    { label: 'band', value: flight.risk_level },
+    {
+      label: 'risk index',
+      value: flight.risk_index === null ? 'not assessed' : String(flight.risk_index),
+      provenance: flight.provenance,
+    },
+    { label: 'band', value: flight.risk_level ?? 'not assessed' },
   ];
 
   if (origin) {
@@ -202,7 +206,10 @@ export function flightRiskDerivation(flight: FlightRow, origin?: AirportConditio
   }
 
   return {
-    title: `Risk index ${flight.risk_index} · ${flight.risk_level}`,
+    title:
+      flight.risk_index === null || flight.risk_level === null
+        ? 'Risk not assessed'
+        : `Risk index ${flight.risk_index} · ${flight.risk_level}`,
     subtitle: `${flight.flight_number} · ${flight.origin_icao} -> ${flight.destination_icao}`,
     inputs,
     // `rule` is deliberately omitted rather than filled in: the RULE section renders

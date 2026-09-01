@@ -117,7 +117,7 @@ export function ToolsPanel({ steps }: { steps: AgentStep[] }) {
           description="No action record names a plan task for this incident, so nothing has been dispatched to a service yet."
         />
       ) : (
-        <table className="w-full border-collapse text-body">
+        <table className="w-full table-fixed border-collapse text-body [&_td]:break-words [&_td]:px-2 [&_th]:break-words [&_th]:px-2">
           <caption className="sr-only">
             Tools invoked for this incident, with the outcome of each invocation
           </caption>
@@ -147,7 +147,7 @@ export function ToolsPanel({ steps }: { steps: AgentStep[] }) {
                 className="h-row border-b border-border-subtle last:border-b-0"
               >
                 <th scope="row" className="px-3 text-left font-normal">
-                  <MonoValue>{tool.actionType}</MonoValue>
+                  <MonoValue className="break-all">{tool.actionType}</MonoValue>
                 </th>
                 <td className="px-3 text-right">
                   <Metric

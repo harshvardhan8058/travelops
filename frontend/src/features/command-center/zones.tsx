@@ -73,8 +73,22 @@ export function AirportTile({ airport }: { airport: AirportConditions }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <RiskChip index={airport.risk_index} level={airport.risk_level} />
-        <AgeIndicator minutes={airport.observation_age_minutes} />
+        {airport.risk_index === null || airport.risk_level === null ? (
+          <Absent
+            label="risk not assessed"
+            title="No recorded airport risk assessment is available. This is not a zero score."
+          />
+        ) : (
+          <RiskChip index={airport.risk_index} level={airport.risk_level} />
+        )}
+        {airport.observation_age_minutes === null ? (
+          <Absent
+            label="age not recorded"
+            title="The observation carries no recorded age. Freshness is not inferred."
+          />
+        ) : (
+          <AgeIndicator minutes={airport.observation_age_minutes} />
+        )}
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 border-t border-border-subtle pt-1.5 text-caption text-fg-muted">
@@ -182,39 +196,58 @@ export function FlightBoard({
               <MonoValue muted>{utcMinute(flight.scheduled_departure) ?? '—'}</MonoValue>
             </td>
             <td className="px-3 text-right">
-              <MonoValue muted>{utcMinute(flight.estimated_departure) ?? '—'}</MonoValue>
+              {flight.estimated_departure === null ? (
+                <Absent
+                  label="not estimated"
+                  title="No estimated departure is recorded for this flight."
+                />
+              ) : (
+                <MonoValue muted>
+                  {utcMinute(flight.estimated_departure) ?? 'not recorded'}
+                </MonoValue>
+              )}
             </td>
             <td className="px-3 text-right">
-              {flight.delay_minutes > 0 ? (
-                <MonoValue className="text-state-warn">+{flight.delay_minutes}</MonoValue>
-              ) : (
-                <MonoValue muted>—</MonoValue>
-              )}
+              <MonoValue
+                className={flight.delay_minutes > 0 ? 'text-state-warn' : undefined}
+                muted={flight.delay_minutes === 0}
+              >
+                {flight.delay_minutes > 0 ? `+${flight.delay_minutes}` : flight.delay_minutes}
+              </MonoValue>
             </td>
             <td className="px-3">
               <StateBadge status={flight.status} />
             </td>
             <td className="px-3">
-              {/*
-               * WhyPopover owns the interaction; RiskChip is presentational here and takes
-               * no onClick, because a button inside a button is invalid HTML and would
-               * break the tab order. The derivation comes from the adapter, not from a
-               * sentence written in this file.
-               */}
-              <WhyPopover
-                derivation={flightRiskDerivation(flight, originByIcao.get(flight.origin_icao))}
-              >
-                <RiskChip index={flight.risk_index} level={flight.risk_level} />
-              </WhyPopover>
+              {flight.risk_index === null || flight.risk_level === null ? (
+                <Absent
+                  label="not assessed"
+                  title="No recorded flight risk assessment is available. This is not a zero score."
+                />
+              ) : (
+                <WhyPopover
+                  derivation={flightRiskDerivation(flight, originByIcao.get(flight.origin_icao))}
+                >
+                  <RiskChip index={flight.risk_index} level={flight.risk_level} />
+                </WhyPopover>
+              )}
             </td>
             <td className="px-3 text-right">
               <MonoValue>{flight.passengers}</MonoValue>
             </td>
             <td className="px-3 text-right">
-              {flight.connections_at_risk > 0 ? (
-                <MonoValue className="text-state-warn">{flight.connections_at_risk}</MonoValue>
+              {flight.connections_at_risk === null ? (
+                <Absent
+                  label="not assessed"
+                  title="Connection risk has not been assessed for this flight. This is not zero."
+                />
               ) : (
-                <MonoValue muted>0</MonoValue>
+                <MonoValue
+                  className={flight.connections_at_risk > 0 ? 'text-state-warn' : undefined}
+                  muted={flight.connections_at_risk === 0}
+                >
+                  {flight.connections_at_risk}
+                </MonoValue>
               )}
             </td>
             <td className="px-3">
@@ -226,7 +259,7 @@ export function FlightBoard({
                   <MonoValue className="text-accent">{flight.incident_reference}</MonoValue>
                 </Link>
               ) : (
-                <MonoValue muted>—</MonoValue>
+                <Absent label="none" title="No incident is linked to this flight." />
               )}
             </td>
             <td className="px-3">
@@ -255,7 +288,7 @@ export function NetworkStrip({ network }: { network: AirportConditions[] }) {
   }
 
   return (
-    <div className="flex gap-2 overflow-x-auto p-2.5">
+    <div className="flex w-full min-w-0 max-w-full flex-wrap gap-2 p-2.5">
       {network.map((airport) => (
         <AirportTile key={airport.airport_icao} airport={airport} />
       ))}

@@ -123,10 +123,10 @@ verify-demo: ## Verify the Phase 1 single-incident path against the running stac
 verify-phase2: ## Verify the whole Phase 2 network journey against the running stack
 	$(COMPOSE) exec -T api python - < scripts/verify_phase2.py
 
-verify-console: ## Drive the real console in a headless browser at 1920x1080
+verify-console: ## Drive the real console in a headless browser at all supported demo viewports
 	cd $(FRONTEND) && npm run verify:console -- http://127.0.0.1:5173
 
-verify-journey: ## Drive the complete primary lifecycle through the real API and browser
+verify-journey: ## Drive the UI-authored primary lifecycle through browser controls
 	cd $(FRONTEND) && npm run verify:journey -- http://127.0.0.1:5173
 
 verify-passenger-fixture: ## Verify the Passenger View against committed offline fixtures

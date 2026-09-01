@@ -32,13 +32,16 @@ try {
   await page.goto(`${BASE}/passenger/K4X8YR`, { waitUntil: 'networkidle', timeout: 45000 });
   await page.waitForTimeout(1000);
 
+  await page.getByText('View references, sources, and timestamps', { exact: true }).click();
+  await page.waitForTimeout(100);
+
   const main = await page.locator('main').innerText();
   const required = [
     'K4X8YR',
     'persisted_records',
     'group summary source',
     'passenger impact · persisted records',
-    'No passenger booking outcome is available',
+    'No confirmed booking update is available',
   ];
   const forbidden = [
     'PASSENGER_IMPACT_UNAVAILABLE',

@@ -24,10 +24,11 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 
 import { api, ApiError } from '@/api/client';
 import { dataUnavailable, retryUnlessUnavailable } from '@/api/unavailable';
-import type { ExcludedEvaluation, GroupExposure, PlanCheck } from '@/api/types';
+import type { CoveredEvaluation, ExcludedEvaluation, GroupExposure, PlanCheck } from '@/api/types';
 import { CountBar, Metric } from '@/components/ui/Metric';
 import { planTotalDerivation } from '@/components/ui/derivation';
 import {
@@ -42,6 +43,8 @@ import {
 import {
   Absent,
   Button,
+  DefinitionList,
+  DefinitionRow,
   Labelled,
   Notice,
   NotYetAvailable,
@@ -49,7 +52,6 @@ import {
   PanelBody,
   ReasonField,
   SectionHeading,
-  StatStrip,
   TableFrame,
   TableHead,
 } from '@/components/ui/composition';
@@ -69,9 +71,43 @@ function refusalLabel(code: string): string {
   return REFUSAL_COPY[code] ?? code.replace(/_/g, ' ').toLowerCase();
 }
 
+function IncidentLink({ reference, prefix }: { reference: string; prefix?: string }) {
+  return (
+    <Link
+      to={`/incidents/${reference}`}
+      className="rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {prefix}
+      <MonoValue className="text-accent">{reference}</MonoValue>
+    </Link>
+  );
+}
+
+function CoveredList({ items }: { items: CoveredEvaluation[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="px-2.5 py-2 text-body text-fg-muted">
+        Nothing in this group can be covered by one plan approval.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="flex flex-col gap-1.5 px-2.5 py-2">
+      {items.map((item) => (
+        <li key={item.evaluation_id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <IncidentLink reference={item.incident_reference} />
+          <span className="text-body text-fg">{item.action_type}</span>
+          <span className="text-label uppercase text-fg-muted">{item.risk_tier} risk</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ExcludedList({ items }: { items: ExcludedEvaluation[] }) {
   if (items.length === 0) {
-    return <p className="px-2.5 py-2 text-body text-fg-muted">Nothing excluded.</p>;
+    return <p className="px-2.5 py-2 text-body text-fg-muted">Nothing remains separate.</p>;
   }
   const byReason = new Map<string, ExcludedEvaluation[]>();
   for (const item of items) {
@@ -80,23 +116,41 @@ function ExcludedList({ items }: { items: ExcludedEvaluation[] }) {
   return (
     <div className="flex flex-col gap-2.5 px-2.5 py-2">
       {[...byReason.entries()].map(([code, group]) => (
-        <div key={code} className="flex flex-col gap-1">
+        <section key={code} aria-label={refusalLabel(code)} className="flex flex-col gap-1">
           <h4 className="text-label uppercase text-state-warn">
             {refusalLabel(code)} · {group.length}
           </h4>
-          <ul className="flex flex-col gap-0.5">
+          <ul className="flex flex-col gap-1.5">
             {group.map((item) => (
-              <li key={item.evaluation_id} className="flex flex-wrap items-baseline gap-2">
-                <MonoValue>{item.incident_reference}</MonoValue>
-                <span className="text-body text-fg-primary">{item.action_type}</span>
-                <span className="text-label uppercase text-fg-muted">{item.risk_tier}</span>
+              <li key={item.evaluation_id} className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <IncidentLink reference={item.incident_reference} />
+                  <span className="text-body text-fg-primary">{item.action_type}</span>
+                  <span className="text-label uppercase text-fg-muted">{item.risk_tier} risk</span>
+                </div>
+                <p className="text-caption text-fg-secondary">{item.reason}</p>
               </li>
             ))}
           </ul>
-          <p className="text-body text-fg-secondary">{group[0]?.reason ?? ''}</p>
-        </div>
+        </section>
       ))}
     </div>
+  );
+}
+
+function ExcludedNextActions({ items }: { items: ExcludedEvaluation[] }) {
+  const references = [...new Set(items.map((item) => item.incident_reference))];
+  if (references.length === 0) return null;
+
+  return (
+    <Notice tone="warn" divider="none" className="rounded border">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span>Nothing is coverable here. Review each excluded incident and decide its action:</span>
+        {references.map((reference) => (
+          <IncidentLink key={reference} reference={reference} prefix="Review " />
+        ))}
+      </div>
+    </Notice>
   );
 }
 
@@ -298,7 +352,19 @@ export function GroupApprovalQueue() {
   }));
   const totalTasks = taskContributions.reduce((sum, item) => sum + item.value, 0);
   const awaiting = awaitingContributions.reduce((sum, item) => sum + item.value, 0);
-  const canApprove = api.canWrite && reason.trim().length > 0 && (preview?.covered_count ?? 0) > 0;
+  const coveredCount = preview?.covered_count ?? 0;
+  const excludedCount = preview?.excluded_count ?? 0;
+  const canApprove = api.canWrite && reason.trim().length > 0 && coveredCount > 0;
+  const unknownExposure = [
+    data.exposure.rooms_committed,
+    data.exposure.total_exposure_inr,
+    data.exposure.passengers_affected,
+    data.exposure.external_effects,
+  ].some((value) => value === null || value === undefined);
+  const unresolvedCohorts = data.exposure.unresolved_cohorts ?? [];
+  const hashMismatch =
+    (Boolean(preview?.plan_hash) && preview?.plan_hash !== data.plan_hash) ||
+    Boolean(preview?.excluded.some((item) => item.reason_code === 'PLAN_HASH_MISMATCH'));
 
   return (
     <div className="flex flex-col gap-3">
@@ -334,67 +400,7 @@ export function GroupApprovalQueue() {
             <Labelled label="plan risk tier">
               <MonoValue>{data.plan_risk_tier}</MonoValue>
             </Labelled>
-            <Labelled label="config">
-              <MonoValue muted>{data.config_version}</MonoValue>
-            </Labelled>
-            <Labelled label="config hash">
-              <MonoValue muted>{data.config_hash.slice(0, 12)}</MonoValue>
-            </Labelled>
-            <Labelled label="plan hash">
-              <MonoValue muted>{data.plan_hash.slice(0, 12)}</MonoValue>
-            </Labelled>
           </>
-        }
-        actions={
-          <StatStrip>
-            <div className="flex min-w-[132px] flex-col gap-1 rounded border border-border-subtle bg-inset px-2.5 py-2">
-              <span className="text-caption uppercase text-fg-muted">Tasks</span>
-              <span className="text-subtitle">
-                <Metric
-                  value={totalTasks}
-                  derivation={planTotalDerivation({
-                    label: 'Tasks',
-                    field: 'task_count',
-                    contributions: taskContributions,
-                    configVersion: data.config_version,
-                    configHash: data.config_hash,
-                  })}
-                />
-              </span>
-            </div>
-            <div
-              className={clsx(
-                'flex min-w-[132px] flex-col gap-1 rounded border px-2.5 py-2',
-                awaiting > 0
-                  ? 'border-state-warn/30 bg-state-warn-bg'
-                  : 'border-border-subtle bg-inset',
-              )}
-            >
-              {/* "Tasks", not "incidents": the shell's blocked badge counts incidents awaiting a
-                  person, and two differently-scoped figures under one word is how a reviewer
-                  concludes the console contradicts itself. */}
-              <span
-                className={clsx(
-                  'text-caption uppercase',
-                  awaiting > 0 ? 'text-state-warn' : 'text-fg-muted',
-                )}
-              >
-                Human-gated tasks
-              </span>
-              <span className="text-subtitle">
-                <Metric
-                  value={awaiting}
-                  derivation={planTotalDerivation({
-                    label: 'Tasks whose gate requires a person',
-                    field: 'awaiting_approval_count',
-                    contributions: awaitingContributions,
-                    configVersion: data.config_version,
-                    configHash: data.config_hash,
-                  })}
-                />
-              </span>
-            </div>
-          </StatStrip>
         }
         footer={
           <p className="text-body text-fg-secondary">
@@ -408,87 +414,80 @@ export function GroupApprovalQueue() {
       {/* Always visible: a replay must be able to prove which semantics applied. */}
       {!data.config_hash_uniform && (
         <Notice tone="warn" alert divider="none" className="rounded border">
-          Members were judged under more than one config hash, so the figures above span two sets of
-          gate semantics.
+          Members were judged under more than one config hash, so this record spans two sets of gate
+          semantics.
         </Notice>
       )}
 
-      <Panel title="The six plan checks">
-        <ChecksRow checks={data.checks} />
-        {data.blocking.length > 0 && (
-          <Notice tone="warn">
-            Blocking: {data.blocking.map((name) => name.replace(/_/g, ' ')).join(', ')}
-          </Notice>
-        )}
-        <ExposureRow exposure={data.exposure} />
-      </Panel>
+      {data.blocking.length > 0 && (
+        <Notice tone="warn" alert divider="none" className="rounded border">
+          Plan blockers: {data.blocking.map((name) => name.replace(/_/g, ' ')).join(', ')}. A
+          signature can accept measured exposure, but it cannot override failed evidence or a
+          conflict.
+        </Notice>
+      )}
 
-      <Panel
-        title="Per incident"
-        actions={
-          <MonoValue muted className="text-caption">
-            {data.incidents.length}
-          </MonoValue>
-        }
-      >
-        <TableFrame caption="Each member incident in the group, with its plan and how many task gates require a person. This is a plan property; the page header separately reports incidents whose workflows still await approval.">
-          <TableHead
-            columns={[
-              { key: 'incident', label: 'Incident' },
-              { key: 'variant', label: 'Variant' },
-              { key: 'tasks', label: 'Tasks', align: 'right' },
-              { key: 'awaiting', label: 'Human-gated', hint: 'tasks', align: 'right' },
-              { key: 'decisions', label: 'Decisions', hint: 'gate outcome per task' },
-            ]}
-          />
-          <tbody>
-            {data.incidents.map((incident) => {
-              const segments = [
-                { label: 'execute', tone: 'ok' as const, count: 0 },
-                { label: 'execute flagged', tone: 'warn' as const, count: 0 },
-                { label: 'needs human', tone: 'crit' as const, count: 0 },
-              ];
-              for (const task of incident.tasks) {
-                const index =
-                  task.decision === 'execute' ? 0 : task.decision === 'execute_flagged' ? 1 : 2;
-                const segment = segments[index];
-                if (segment) segment.count += 1;
-              }
-              return (
-                <tr key={incident.incident_reference} className="border-b border-border-subtle">
-                  <th scope="row" className="px-3 py-1.5 text-left font-normal">
-                    <MonoValue>{incident.incident_reference}</MonoValue>
-                  </th>
-                  <td className="px-3 py-1.5 text-fg-secondary">
-                    {incident.variant_key ?? <Absent label="no variant" />}
-                  </td>
-                  <td className="px-3 py-1.5 text-right">
-                    <MonoValue>{incident.task_count}</MonoValue>
-                  </td>
-                  <td className="px-3 py-1.5 text-right">
-                    <MonoValue
-                      className={clsx(incident.awaiting_approval_count > 0 && 'text-state-warn')}
-                    >
-                      {incident.awaiting_approval_count}
-                    </MonoValue>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <CountBar segments={segments} total={incident.task_count} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </TableFrame>
-      </Panel>
+      {hashMismatch && (
+        <Notice tone="crit" alert divider="none" className="rounded border">
+          Plan hash mismatch: this preview does not match the current plan record. Review the
+          excluded incidents; this approval will not cover stale evaluations.
+        </Notice>
+      )}
 
-      <Panel title="Plan approval">
+      {(unknownExposure || unresolvedCohorts.length > 0) && (
+        <Notice tone="warn" alert divider="none" className="rounded border">
+          Exposure is not fully established. Unknown values are treated as a breach, never as zero
+          {unresolvedCohorts.length > 0
+            ? `; ${unresolvedCohorts.length} cohort${
+                unresolvedCohorts.length === 1 ? ' is' : 's are'
+              } unresolved.`
+            : '.'}
+        </Notice>
+      )}
+
+      <Panel title="Human decision">
         <PanelBody gap="loose">
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded border border-accent-border bg-accent-subtle px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-label uppercase text-accent">Decision to make</p>
+              <p className="mt-0.5 text-subtitle text-fg">
+                {coveredCount > 0
+                  ? `Approve ${coveredCount} low/medium risk action${coveredCount === 1 ? '' : 's'}`
+                  : 'No actions can be approved as a group'}
+              </p>
+              <p className="mt-1 max-w-3xl text-body text-fg-secondary">
+                The server partition below is the scope. One reason is written to every covered
+                evaluation; excluded actions remain separate and must be reviewed on their own
+                incident.
+              </p>
+            </div>
+            <StateBadge
+              status={coveredCount > 0 ? 'needs_human' : 'blocked'}
+              label={`${coveredCount} covered · ${excludedCount} separate`}
+            />
+          </div>
+
+          <section
+            aria-labelledby="group-impact-heading"
+            className="rounded border border-border-subtle"
+          >
+            <div className="border-b border-border-subtle px-3 py-1.5">
+              <h3 id="group-impact-heading" className="text-label uppercase text-fg-secondary">
+                Risk and measured impact
+              </h3>
+              <p className="mt-0.5 text-caption text-fg-muted">
+                Plan tier <MonoValue>{data.plan_risk_tier}</MonoValue>. These are the recorded
+                figures the exposure check judged; unknown values are not rendered as zero.
+              </p>
+            </div>
+            <ExposureRow exposure={data.exposure} />
+          </section>
+
           <p className="text-body text-fg-secondary">
             A plan approval covers <strong className="text-fg">low and medium risk</strong> actions
             only. High risk always requires its own action-level approval, and no approval ever
-            covers a failed check — an operator may accept exposure, but may not assert a fact the
-            evidence does not support.
+            covers failed evidence or a conflict. There is deliberately no group reject action
+            because the server contract does not define one.
           </p>
 
           {/*
@@ -510,21 +509,7 @@ export function GroupApprovalQueue() {
                   Would be covered
                 </SectionHeading>
               </div>
-              {preview && preview.covered.length > 0 ? (
-                <ul className="flex flex-col gap-1 px-2.5 py-2">
-                  {preview.covered.map((item) => (
-                    <li key={item.evaluation_id} className="flex flex-wrap items-baseline gap-2">
-                      <MonoValue>{item.incident_reference}</MonoValue>
-                      <span className="text-body text-fg">{item.action_type}</span>
-                      <span className="text-label uppercase text-fg-muted">{item.risk_tier}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="px-2.5 py-2 text-body text-fg-muted">
-                  Nothing in this group can be covered by a single plan approval.
-                </p>
-              )}
+              <CoveredList items={preview?.covered ?? []} />
             </section>
 
             <section
@@ -540,6 +525,8 @@ export function GroupApprovalQueue() {
             </section>
           </div>
 
+          {coveredCount === 0 && <ExcludedNextActions items={preview?.excluded ?? []} />}
+
           {preview?.refusal && (
             <Notice tone="warn" divider="none" className="rounded border">
               {refusalLabel(preview.refusal)}
@@ -547,14 +534,16 @@ export function GroupApprovalQueue() {
             </Notice>
           )}
 
-          <ReasonField
-            id="group-approval-reason"
-            value={reason}
-            onChange={setReason}
-            disabled={!api.canWrite}
-            placeholder="Written to every decision this approval records"
-            hint="One reason is recorded against every decision this approval creates. It cannot be edited afterwards."
-          />
+          {coveredCount > 0 && (
+            <ReasonField
+              id="group-approval-reason"
+              value={reason}
+              onChange={setReason}
+              disabled={!api.canWrite}
+              placeholder="Written to every decision this approval records"
+              hint="Required. The same reason is recorded against every covered decision and cannot be edited afterwards."
+            />
+          )}
 
           {failure && (
             <Notice tone="crit" alert divider="none" className="rounded border">
@@ -574,7 +563,7 @@ export function GroupApprovalQueue() {
            * When there IS something to cover, the button states the count in its label so the
            * operator commits to a specific number of actions rather than to the word "approve".
            */}
-          {(preview?.covered_count ?? 0) > 0 && (
+          {coveredCount > 0 && (
             <Button
               variant="primary"
               size="md"
@@ -591,9 +580,7 @@ export function GroupApprovalQueue() {
             >
               {approve.isPending
                 ? 'Recording…'
-                : `Approve ${preview?.covered_count} low/medium action${
-                    preview?.covered_count === 1 ? '' : 's'
-                  }`}
+                : `Approve ${coveredCount} low/medium action${coveredCount === 1 ? '' : 's'}`}
             </Button>
           )}
         </PanelBody>
@@ -605,6 +592,182 @@ export function GroupApprovalQueue() {
           </Notice>
         )}
       </Panel>
+
+      <details className="min-w-0 rounded border border-border-subtle bg-surface">
+        <summary className="cursor-pointer px-3 py-2 text-label uppercase text-fg-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          Audit details · checks, incident counts and record identifiers
+        </summary>
+        <div className="min-w-0 border-t border-border-subtle">
+          <section
+            className="grid gap-3 px-3 py-2.5 md:grid-cols-2"
+            aria-label="Record identifiers"
+          >
+            <DefinitionList width="lg">
+              <DefinitionRow label="group" width="lg">
+                <MonoValue>{data.group_reference}</MonoValue>
+              </DefinitionRow>
+              <DefinitionRow label="config version" width="lg">
+                <MonoValue muted className="break-all">
+                  {data.config_version}
+                </MonoValue>
+              </DefinitionRow>
+              <DefinitionRow label="config hash" width="lg">
+                <MonoValue muted className="break-all">
+                  {data.config_hash}
+                </MonoValue>
+              </DefinitionRow>
+              <DefinitionRow label="plan hash" width="lg">
+                <MonoValue muted className="break-all">
+                  {data.plan_hash}
+                </MonoValue>
+              </DefinitionRow>
+            </DefinitionList>
+            <DefinitionList width="lg">
+              <DefinitionRow label="plan id" width="lg">
+                {preview?.plan_id === null || preview?.plan_id === undefined ? (
+                  <Absent label="not returned" />
+                ) : (
+                  <MonoValue>{preview.plan_id}</MonoValue>
+                )}
+              </DefinitionRow>
+              <DefinitionRow label="preview hash" width="lg">
+                {preview?.plan_hash ? (
+                  <MonoValue muted className="break-all">
+                    {preview.plan_hash}
+                  </MonoValue>
+                ) : (
+                  <Absent label="not returned" />
+                )}
+              </DefinitionRow>
+              <DefinitionRow label="evaluated" width="lg">
+                <MonoValue muted>{data.evaluated_at}</MonoValue>
+              </DefinitionRow>
+              <DefinitionRow label="hash semantics" width="lg">
+                <span className="text-caption text-fg-secondary">
+                  {data.config_hash_uniform ? 'uniform across members' : 'mixed across members'}
+                </span>
+              </DefinitionRow>
+            </DefinitionList>
+          </section>
+
+          <section className="border-t border-border-subtle" aria-labelledby="audit-checks-heading">
+            <div className="px-3 py-2">
+              <h3 id="audit-checks-heading" className="text-label uppercase text-fg-secondary">
+                Six plan checks
+              </h3>
+            </div>
+            <ChecksRow checks={data.checks} />
+          </section>
+
+          <section
+            className="border-t border-border-subtle"
+            aria-labelledby="audit-incidents-heading"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+              <h3 id="audit-incidents-heading" className="text-label uppercase text-fg-secondary">
+                Per incident
+              </h3>
+              <div className="flex flex-wrap items-center gap-3 text-caption text-fg-muted">
+                <span>
+                  tasks{' '}
+                  <Metric
+                    value={totalTasks}
+                    derivation={planTotalDerivation({
+                      label: 'Tasks',
+                      field: 'task_count',
+                      contributions: taskContributions,
+                      configVersion: data.config_version,
+                      configHash: data.config_hash,
+                    })}
+                  />
+                </span>
+                <span>
+                  human-gated{' '}
+                  <Metric
+                    value={awaiting}
+                    derivation={planTotalDerivation({
+                      label: 'Tasks whose gate requires a person',
+                      field: 'awaiting_approval_count',
+                      contributions: awaitingContributions,
+                      configVersion: data.config_version,
+                      configHash: data.config_hash,
+                    })}
+                  />
+                </span>
+              </div>
+            </div>
+            <TableFrame caption="Each member incident in the group, with its plan and how many task gates require a person. This is a plan property; the page header separately reports incidents whose workflows still await approval.">
+              <TableHead
+                columns={[
+                  { key: 'incident', label: 'Incident' },
+                  { key: 'variant', label: 'Variant' },
+                  { key: 'tasks', label: 'Tasks', align: 'right' },
+                  { key: 'awaiting', label: 'Human-gated', hint: 'tasks', align: 'right' },
+                  { key: 'decisions', label: 'Decisions', hint: 'gate outcome per task' },
+                ]}
+              />
+              <tbody>
+                {data.incidents.map((incident) => {
+                  const segments = [
+                    { label: 'execute', tone: 'ok' as const, count: 0 },
+                    { label: 'execute flagged', tone: 'warn' as const, count: 0 },
+                    { label: 'needs human', tone: 'crit' as const, count: 0 },
+                  ];
+                  for (const task of incident.tasks) {
+                    const index =
+                      task.decision === 'execute' ? 0 : task.decision === 'execute_flagged' ? 1 : 2;
+                    const segment = segments[index];
+                    if (segment) segment.count += 1;
+                  }
+                  return (
+                    <tr key={incident.incident_reference} className="border-b border-border-subtle">
+                      <th scope="row" className="px-3 py-1.5 text-left font-normal">
+                        <IncidentLink reference={incident.incident_reference} />
+                      </th>
+                      <td className="px-3 py-1.5 text-fg-secondary">
+                        {incident.variant_key ?? <Absent label="no variant" />}
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <MonoValue>{incident.task_count}</MonoValue>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <MonoValue
+                          className={clsx(
+                            incident.awaiting_approval_count > 0 && 'text-state-warn',
+                          )}
+                        >
+                          {incident.awaiting_approval_count}
+                        </MonoValue>
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <CountBar segments={segments} total={incident.task_count} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </TableFrame>
+          </section>
+
+          <section
+            className="border-t border-border-subtle px-3 py-2.5"
+            aria-labelledby="audit-scope-heading"
+          >
+            <h3 id="audit-scope-heading" className="text-label uppercase text-fg-secondary">
+              Approval scope record IDs
+            </h3>
+            <ul className="mt-1.5 grid gap-1 md:grid-cols-2">
+              {[...(preview?.covered ?? []), ...(preview?.excluded ?? [])].map((item) => (
+                <li key={item.evaluation_id} className="min-w-0 text-caption text-fg-secondary">
+                  <IncidentLink reference={item.incident_reference} /> · {item.action_type} · task{' '}
+                  <MonoValue muted>{item.plan_task_id}</MonoValue> · evaluation{' '}
+                  <MonoValue muted>{item.evaluation_id}</MonoValue>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </details>
     </div>
   );
 }

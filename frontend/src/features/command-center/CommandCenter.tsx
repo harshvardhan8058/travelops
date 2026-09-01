@@ -98,7 +98,7 @@ function BoardSkeleton() {
           <LoadingState label="Loading network" />
         </div>
       </Panel>
-      <Panel title="Flight board">
+      <Panel title="Physical flight status board">
         <div className="h-[420px]">
           <LoadingState label="Loading flights" />
         </div>
@@ -138,6 +138,9 @@ export function CommandCenter() {
       const aNormal = NORMAL_STATUSES.has(a.status) ? 1 : 0;
       const bNormal = NORMAL_STATUSES.has(b.status) ? 1 : 0;
       if (aNormal !== bNormal) return aNormal - bNormal;
+      if (a.risk_index === null && b.risk_index === null) return 0;
+      if (a.risk_index === null) return 1;
+      if (b.risk_index === null) return -1;
       return b.risk_index - a.risk_index;
     });
   }, [flights, filter]);
@@ -179,6 +182,9 @@ export function CommandCenter() {
             </Labelled>
             <Labelled label="cascades">
               <MonoValue>{groups.length}</MonoValue>
+            </Labelled>
+            <Labelled label="status scope">
+              <MonoValue muted>physical flight operation</MonoValue>
             </Labelled>
             <Labelled label="transport">
               <MonoValue muted>{api.usingFixtures ? 'fixture files' : 'real API'}</MonoValue>
@@ -280,7 +286,7 @@ export function CommandCenter() {
       </Panel>
 
       <Panel
-        title="Flight board"
+        title="Physical flight status board"
         actions={
           <Toolbar>
             <FilterChips
@@ -364,7 +370,7 @@ function GroupCard({ group }: { group: IncidentGroupSummary }) {
         >
           <MonoValue className="text-subtitle text-accent">{group.reference}</MonoValue>
         </Link>
-        <StateBadge status={group.state} />
+        <StateBadge status={group.state} label={`workflow ${group.state.replace(/_/g, ' ')}`} />
         <StateBadge status={group.severity} label={`severity ${group.severity}`} />
         {group.awaiting_approval_count > 0 && (
           <StateBadge

@@ -5,72 +5,66 @@ export interface PassengerJourneyState {
   label: string;
   headline: string;
   detail: string;
-  pendingHuman: boolean;
-  workflowComplete: boolean;
 }
 
 /**
  * Passenger-friendly wording derived only from the current group record.
  *
- * `resolved` means the recovery workflow finished. It does not mean this booking was rebooked,
+ * `resolved` means the disruption review finished. It does not mean this booking was rebooked,
  * refunded, ticketed, or assigned a room; no endpoint publishes those outcomes today.
  */
 export function passengerJourneyState(group: IncidentGroupSummary): PassengerJourneyState {
   if (group.state === 'resolved') {
     return {
       token: 'resolved',
-      label: 'recovery workflow resolved',
-      headline: 'The disruption recovery workflow is complete',
-      detail:
-        'TravelOps has finished the recorded operational workflow. This does not confirm a booking change; no passenger outcome contract has published one.',
-      pendingHuman: false,
-      workflowComplete: true,
+      label: 'review complete',
+      headline: 'Our review of this disruption is complete',
+      detail: 'The review has finished, but that does not mean your booking changed.',
     };
   }
 
-  if (group.state === 'blocked' || group.state === 'failed') {
+  if (group.state === 'blocked') {
     return {
-      token: group.state,
-      label: `recovery ${group.state}`,
-      headline: `The recovery workflow is ${group.state}`,
-      detail:
-        'The operational workflow reached a terminal exception. No booking change or passenger option is inferred from that state.',
-      pendingHuman: false,
-      workflowComplete: true,
+      token: 'blocked',
+      label: 'review needs attention',
+      headline: 'We could not complete the disruption review',
+      detail: 'A problem stopped the review before it could be completed.',
+    };
+  }
+
+  if (group.state === 'failed') {
+    return {
+      token: 'failed',
+      label: 'review unsuccessful',
+      headline: 'We could not complete the disruption review',
+      detail: 'A problem stopped the review before it could be completed.',
     };
   }
 
   if (group.awaiting_approval_count > 0 || group.state === 'awaiting_approval') {
     return {
       token: 'awaiting_approval',
-      label: 'incidents awaiting operator approval',
-      headline: 'The recovery is waiting on an operator',
-      detail: `${group.awaiting_approval_count} incident${group.awaiting_approval_count === 1 ? '' : 's'} in this disruption group still await operator approval. Nothing on this booking is represented as confirmed.`,
-      pendingHuman: true,
-      workflowComplete: false,
+      label: 'waiting for a decision',
+      headline: 'A decision is still needed',
+      detail:
+        'The review is paused while a decision is made. You do not need to do anything in TravelOps right now.',
     };
   }
 
   if (group.state === 'executing') {
     return {
       token: 'executing',
-      label: 'recovery executing',
-      headline: 'TravelOps is executing the approved recovery',
-      detail:
-        'Operational actions are in progress. No booking outcome is shown until a passenger contract publishes one.',
-      pendingHuman: false,
-      workflowComplete: false,
+      label: 'work in progress',
+      headline: 'Work on this disruption is in progress',
+      detail: 'The review is moving forward.',
     };
   }
 
   return {
     token: group.state,
-    label: `recovery ${group.state.replace(/_/g, ' ')}`,
-    headline: 'TravelOps is assessing the disruption',
-    detail:
-      'The operational workflow is still being prepared or assured. No booking change has been published.',
-    pendingHuman: false,
-    workflowComplete: false,
+    label: 'review in progress',
+    headline: 'We are reviewing this disruption',
+    detail: 'We are still working through the available information.',
   };
 }
 
