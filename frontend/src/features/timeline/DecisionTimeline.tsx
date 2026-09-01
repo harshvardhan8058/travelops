@@ -65,11 +65,18 @@ function Entry({ entry, isLast }: { entry: TimelineEntry; isLast: boolean }) {
   );
 }
 
-export function DecisionTimeline({ incidentId }: { incidentId: string }) {
+export function DecisionTimeline({ incidentId }: { incidentId: string | null }) {
+  /*
+   * `null` means the surface beside this rail is not about an incident — the Scenario Center, the
+   * Scenario Builder. The query is disabled rather than pointed at a stand-in: substituting the
+   * demo incident showed another incident's decisions next to a screen that never mentions it, and
+   * 404ed for it after a demo reset removed it.
+   */
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['timeline', incidentId],
-    queryFn: () => api.timeline(incidentId),
+    queryFn: () => api.timeline(incidentId as string),
     refetchInterval: 5_000,
+    enabled: incidentId !== null,
   });
 
   return (
@@ -79,7 +86,14 @@ export function DecisionTimeline({ incidentId }: { incidentId: string }) {
         {data && <MonoValue muted>{data.entries.length}</MonoValue>}
       </header>
 
-      {isLoading && <LoadingState label="Loading timeline" />}
+      {incidentId === null && (
+        <EmptyState
+          title="No incident in scope"
+          description="This screen is not about one incident. Open a cascade or an incident to follow its decisions."
+        />
+      )}
+
+      {incidentId !== null && isLoading && <LoadingState label="Loading timeline" />}
 
       {error && (
         <ErrorState

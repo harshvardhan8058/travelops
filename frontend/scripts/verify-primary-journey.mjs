@@ -82,7 +82,23 @@ function assertSourceStrip(body) {
   assert(/LLM\s+(LIVE|FIXTURE|OFF)/i.test(normalised), 'effective LLM mode is not visible');
   assert(/FLT\s+(LIVE|FIXTURE)/i.test(normalised), 'effective flight-status mode is not visible');
   assert(/WX\s+(LIVE|FIXTURE)/i.test(normalised), 'effective weather mode is not visible');
-  assert(/NOTIFY\s+(LIVE|SIMULATED)/i.test(normalised), 'effective notification mode is not visible');
+  /*
+   * NOTIFY publishes the backend's own word for the transport — `console`, `mailtrap`, `gmail` —
+   * while the live/simulated distinction is carried by the chip's posture and its tooltip.
+   * `api/runtimeModes.ts` is deliberate about that: it renders what `/system/mode` returned and
+   * never substitutes a friendlier synonym, so `NOTIFY CONSOLE` says more than `NOTIFY SIMULATED`
+   * did — it names which transport is in play as well as the fact that nothing was delivered.
+   *
+   * This assertion therefore checks the strip is populated with a value the contract can actually
+   * publish. Whether that value may read `live` is a semantic question owned by
+   * `runtimeModes.test.ts`, which pins `real_email_enabled` — not the mode string — as the only
+   * thing that earns a live posture. Widening the alternation here does not loosen that: a chip
+   * that wrongly claimed delivery would still fail there.
+   */
+  assert(
+    /NOTIFY\s+(LIVE|SIMULATED|CONSOLE|MAILTRAP|GMAIL)/i.test(normalised),
+    'effective notification mode is not visible',
+  );
 }
 
 const browser = await chromium.launch({ args: ['--no-sandbox'] });

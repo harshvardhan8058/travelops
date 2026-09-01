@@ -68,14 +68,27 @@ export function GroupRunControl({
         : null;
   const result = advance.data ?? open.data;
   const complete = rollupStatus?.is_complete ?? false;
+  // Same sentence the incident workspace uses, so the console does not describe fixture mode two
+  // different ways depending on which surface an operator happens to be looking at.
+  const blockedReason = !api.canWrite
+    ? 'Fixtures are being served. Point the console at the live API to advance the workflow.'
+    : undefined;
 
   return (
     <Panel>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
+        {/*
+          `title` carries the reason a disabled control is disabled. Both buttons were silently
+          disabled while fixtures were served — a control that refuses without saying why is the
+          interaction people file bugs about, and every other write surface in the console explains
+          itself through `Button`'s `disabledReason`. These are raw buttons for their own uppercase
+          caption styling, so the same job is done with `title` and `aria-describedby` copy below.
+        */}
         <button
           type="button"
           onClick={() => open.mutate()}
           disabled={pending || !api.canWrite}
+          title={blockedReason}
           className={clsx(
             'flex items-center gap-1.5 rounded-sm border px-2 py-1 text-caption uppercase',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
@@ -91,6 +104,7 @@ export function GroupRunControl({
           type="button"
           onClick={() => advance.mutate()}
           disabled={pending || !api.canWrite}
+          title={blockedReason}
           className={clsx(
             'flex items-center gap-1.5 rounded-sm border px-2 py-1 text-caption uppercase',
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
@@ -101,6 +115,8 @@ export function GroupRunControl({
           <Play size={12} strokeWidth={1.5} aria-hidden />
           {advance.isPending ? 'Advancing' : 'Advance disruption'}
         </button>
+
+        {blockedReason && <span className="text-caption text-state-warn">{blockedReason}</span>}
 
         <span className="flex items-center gap-1.5 text-caption">
           {complete ? (

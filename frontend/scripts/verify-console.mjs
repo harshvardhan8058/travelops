@@ -182,6 +182,29 @@ const ROUTES = [
     name: 'Scenario Builder',
     expect: ['Scenario builder', 'published scenario lifecycle'],
   },
+  {
+    path: '/scenarios',
+    name: 'Scenario Center',
+    /*
+     * The demo control surface. Three kinds of token, chosen so an empty or fabricated screen
+     * cannot pass:
+     *
+     *   recorded_dataset_selection  the catalogue's `basis` literal. It is a type-level statement
+     *                               that a simulation is a SELECTION over recorded rows rather than
+     *                               a generated disruption, so it is exactly the claim this screen
+     *                               must not soften.
+     *   bengaluru_severe_weather    a simulation id, which only reaches the DOM if the catalogue
+     *                               resolved against real flight rows.
+     *   reset demo data             the phrase the server compares. Rendering it is what makes the
+     *                               destructive control state its own precondition, and a
+     *                               CSS-uppercased copy would be a phrase the API rejects.
+     *
+     * All three are asserted verbatim: they are machine tokens, and the first and third would be
+     * actively misleading if the console dressed them up.
+     */
+    expect: ['recorded_dataset_selection', 'bengaluru_severe_weather', 'reset demo data'],
+    expectExactCase: ['recorded_dataset_selection', 'bengaluru_severe_weather', 'reset demo data'],
+  },
 ];
 
 /**

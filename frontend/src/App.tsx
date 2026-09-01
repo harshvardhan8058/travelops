@@ -13,6 +13,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/api/client';
+import { approvalScopeFor } from '@/approvalScope';
 import { AppShell } from '@/components/ui/AppShell';
 import { CommandCenter } from '@/features/command-center/CommandCenter';
 import { CascadeExplorer } from '@/features/cascade/CascadeExplorer';
@@ -28,19 +29,31 @@ import { ImpactExplorer } from '@/features/impact/ImpactExplorer';
 import { WhatIfScreen } from '@/features/cascade/WhatIfScreen';
 import { AgentConsole } from '@/features/agent/AgentConsole';
 import { ScenarioBuilder } from '@/features/scenario-builder/ScenarioBuilder';
+import { ScenarioCenter } from '@/features/scenario-center/ScenarioCenter';
 import { PassengerDisruptionView } from '@/features/passenger/PassengerDisruptionView';
 
 /** Used only when the current route names no incident, e.g. the Command Center. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
-function useRouteIncidentId(fallback: string): string {
+/**
+ * The incident this route is about, or `null` when it is not about one.
+ *
+ * Returning `null` rather than a fallback is the point. It used to substitute `DEMO_INCIDENT` for
+ * every unmatched route, which meant a screen with no incident — the Scenario Center, the Scenario
+ * Builder — still fetched a hardcoded incident's timeline and assurance. Two consequences, both
+ * wrong: the rail beside those screens showed an unrelated incident's decisions, and immediately
+ * after a demo reset (when that incident does not exist) the console issued 404s for an entity
+ * nothing on screen had asked about.
+ *
+ * `impact` is in the list because that screen is incident-scoped too. There is no `/replay/group`
+ * route: Replay carries its own incident/group toggle, and a second entry path to the same screen
+ * would be the duplicate seam this integration exists to avoid.
+ */
+function useRouteIncidentId(): string | null {
   const { pathname } = useLocation();
-  // `impact` joins the list because that screen is incident-scoped too. There is no `/replay/group`
-  // route: Replay carries its own incident/group toggle, and a second entry path to the same screen
-  // would be the duplicate seam this integration exists to avoid.
   const match = /^\/(?:incidents|policy|replay|reports|plans|impact|agent)\/([^/]+)/.exec(pathname);
   const captured = match?.[1];
-  return captured ? decodeURIComponent(captured) : fallback;
+  return captured ? decodeURIComponent(captured) : null;
 }
 
 function useUtcClock(): string {
@@ -55,12 +68,16 @@ function useUtcClock(): string {
 export function App() {
   const clock = useUtcClock();
   const { pathname } = useLocation();
-  const incidentId = useRouteIncidentId(DEMO_INCIDENT);
-  const usesNoApprovalScope = pathname === '/scenarios/new' || pathname === '/sources';
-  const usesGroupApprovalScope =
-    pathname === '/' ||
-    pathname === '/assurance' ||
-    /^\/(?:cascade|what-if|passenger)\//.test(pathname);
+  const routeIncidentId = useRouteIncidentId();
+  /*
+   * Every surface that is not about one incident reads the current GROUP instead, and the surfaces
+   * that are about no disruption at all read neither. `approvalScope.ts` owns that decision and
+   * states why; keeping it in one pure function is what makes it testable.
+   */
+  const approvalScope = approvalScopeFor(pathname, routeIncidentId);
+  const usesGroupApprovalScope = approvalScope === 'group';
+  // Only used by the incident-scoped copy below, which never renders under group scope.
+  const incidentId = routeIncidentId ?? DEMO_INCIDENT;
 
   const { data: mode } = useQuery({
     queryKey: ['system-mode'],
@@ -72,14 +89,14 @@ export function App() {
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
     refetchInterval: 10_000,
-    enabled: !usesGroupApprovalScope && !usesNoApprovalScope,
+    enabled: approvalScope === 'incident',
   });
 
   const { data: currentGroup } = useQuery({
     queryKey: ['current-group'],
     queryFn: api.currentGroup,
     refetchInterval: 10_000,
-    enabled: usesGroupApprovalScope,
+    enabled: approvalScope === 'group',
   });
 
   return (
@@ -101,15 +118,9 @@ export function App() {
           ? 'incidents await operator approval in the current group'
           : `actions require an operator decision for ${incidentId}`
       }
-      timeline={
-        usesNoApprovalScope ? (
-          <div className="flex h-full items-center justify-center px-4 text-center text-caption text-fg-muted">
-            Open an incident to see its recorded decision timeline.
-          </div>
-        ) : (
-          <DecisionTimeline incidentId={incidentId} />
-        )
-      }
+      // `null` on a screen that is not about an incident, so the rail says so instead of showing
+      // another incident's decisions or 404ing for one that does not exist.
+      timeline={<DecisionTimeline incidentId={routeIncidentId} />}
     >
       <Routes>
         <Route path="/" element={<CommandCenter />} />
@@ -153,6 +164,12 @@ export function App() {
          * the current group's persisted passenger-priority records and keeps booking outcome fields
          * explicitly unavailable because no passenger outcome endpoint serves them.
          */}
+        {/*
+         * The Scenario Center is the demo's front door: it reports what is in the database, starts a
+         * catalogued simulation through the existing scenario lifecycle, and restores the dataset.
+         * Like `/scenarios/new` it is not incident-scoped, so it stays out of the regex above.
+         */}
+        <Route path="/scenarios" element={<ScenarioCenter />} />
         <Route path="/scenarios/new" element={<ScenarioBuilder />} />
         <Route path="/passenger/:bookingRef" element={<PassengerDisruptionView />} />
         <Route path="*" element={<Navigate to="/" replace />} />
