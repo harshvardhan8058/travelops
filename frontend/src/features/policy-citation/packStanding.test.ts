@@ -544,11 +544,24 @@ describe('no surface derives policy standing for itself', () => {
       new URL('../../../scripts/verify-console.mjs', import.meta.url),
       'utf8',
     );
+    /*
+     * Scoped to the Policy route entry alone.
+     *
+     * This used to slice from `name: 'Policy'` all the way to `name: 'Provenance ledger'`, which
+     * spans every route declared in between — so an unrelated route mentioning "demo" failed a
+     * guard about the POLICY route pinning pack literals. That is a false positive, and the pressure
+     * it creates is to delete the assertion, which is exactly how this guard would stop checking
+     * anything.
+     *
+     * Each route object carries exactly one `name:`, so bounding the slice at the NEXT `name:`
+     * isolates the entry under test. Narrower and therefore stronger: it now fails only for the
+     * reason it is named after.
+     */
+    const policyAt = verifier.indexOf("name: 'Policy'");
+    expect(policyAt, "the verifier no longer declares a route named 'Policy'").toBeGreaterThan(-1);
+    const nextRouteAt = verifier.indexOf("name: '", policyAt + "name: 'Policy'".length);
     const policyRoute = stripComments(
-      verifier.slice(
-        verifier.indexOf("name: 'Policy'"),
-        verifier.indexOf("name: 'Provenance ledger'"),
-      ),
+      verifier.slice(policyAt, nextRouteAt === -1 ? undefined : nextRouteAt),
     );
     // Derived, not pinned.
     expect(policyRoute).toMatch(/derive:\s*policyExpectations/);

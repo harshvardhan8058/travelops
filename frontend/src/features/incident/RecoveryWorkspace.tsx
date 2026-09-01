@@ -36,6 +36,7 @@ import { elapsedDerivation } from '@/components/ui/derivation';
 import { Button, Labelled, Notice, PageHeader, Toolbar } from '@/components/ui/composition';
 import { utcClock } from '@/components/ui/format';
 import { AssurancePanel } from '@/features/assurance/AssurancePanel';
+import { preferredTaskId } from '@/features/assurance/authorizationState';
 import { PlanAssuranceMatrix } from '@/features/assurance/PlanAssuranceMatrix';
 import { EvidenceColumn } from './EvidenceColumn';
 import { PlanColumn } from './PlanColumn';
@@ -101,6 +102,34 @@ function recordedStamps(incident: IncidentDetail): { at: string; label: string }
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
+/**
+ * Terminal states cannot advance. The backend returns a note saying so rather than erroring, but
+ * there is no reason to offer the control.
+ */
+function isTerminalIncident(incident: IncidentDetail): boolean {
+  return (
+    incident.state === 'resolved' || incident.state === 'blocked' || incident.state === 'failed'
+  );
+}
+
+/**
+ * Why the workflow cannot be advanced, or `undefined` when it can.
+ *
+ * Lifted out of `Header` because there are now two places that offer the run: the header, and the
+ * assurance panel once an approval is recorded and un-executed. Two copies of this condition would
+ * eventually disagree, and the visible symptom would be one enabled button and one disabled button
+ * for the same action — so the derivation is shared and the wording is identical in both.
+ */
+function runBlockedReason(incident: IncidentDetail): string | undefined {
+  if (!api.canWrite) {
+    return 'Fixtures are being served. Point the console at the live API to advance the workflow.';
+  }
+  if (isTerminalIncident(incident)) {
+    return `This incident is terminal in ${incident.state} and cannot advance.`;
+  }
+  return undefined;
+}
+
 function Header({
   incident,
   onRun,
@@ -117,16 +146,8 @@ function Header({
   const first = stamps[0] ?? null;
   // Needs two distinct records to be an interval; one record is a point in time, not a duration.
   const latest = stamps.length > 1 ? (stamps[stamps.length - 1] ?? null) : null;
-  // Terminal states cannot advance: the backend returns a note saying so rather than erroring,
-  // but there is no reason to offer the control.
-  const isTerminal =
-    incident.state === 'resolved' || incident.state === 'blocked' || incident.state === 'failed';
-
-  const runBlockedReason = !api.canWrite
-    ? 'Fixtures are being served. Point the console at the live API to advance the workflow.'
-    : isTerminal
-      ? `This incident is terminal in ${incident.state} and cannot advance.`
-      : undefined;
+  const isTerminal = isTerminalIncident(incident);
+  const blockedReason = runBlockedReason(incident);
 
   return (
     <>
@@ -196,12 +217,12 @@ function Header({
                 onClick={onRun}
                 disabled={isRunning || isTerminal || !api.canWrite}
                 aria-disabled={isRunning || isTerminal || !api.canWrite}
-                disabledReason={runBlockedReason}
+                disabledReason={blockedReason}
               >
                 {isRunning ? 'Running…' : 'Run workflow'}
               </Button>
               <span className="max-w-[240px] text-right text-caption text-fg-muted">
-                {runBlockedReason ?? 'advances the workflow one run'}
+                {blockedReason ?? 'advances the workflow one run'}
               </span>
             </div>
           </Toolbar>
@@ -278,10 +299,19 @@ export function RecoveryWorkspace() {
    */
   useEffect(() => {
     if (!incident?.plan || selectedTaskId !== null) return;
-    const tasks = incident.plan.tasks;
-    const blocked = tasks.find((task) => task.state === 'needs_human');
-    setSelectedTaskId(blocked?.id ?? tasks[0]?.id ?? null);
-  }, [incident, selectedTaskId]);
+    /*
+     * Wait for the evaluations before choosing.
+     *
+     * The choice needs them: a task in `needs_human` is not necessarily waiting for a person — it is
+     * also the state of a task whose gate said `execute` and whose service then failed. Selecting on
+     * task state alone landed the operator on `reserve_hotel_block`, stalled on a
+     * SERVICE_NOT_IMPLEMENTED refusal, while `notify_passengers` was the task actually holding for
+     * their decision. Choosing before the evaluations arrive would make that the permanent choice,
+     * because this effect only ever selects once.
+     */
+    if (assuranceQuery.isLoading) return;
+    setSelectedTaskId(preferredTaskId(incident.plan.tasks, assuranceQuery.data?.evaluations ?? []));
+  }, [incident, assuranceQuery.data, assuranceQuery.isLoading, selectedTaskId]);
 
   const decisionMutation = useMutation({
     mutationFn: async (input: {
@@ -507,6 +537,15 @@ export function RecoveryWorkspace() {
               onSubmitDecision={(assuranceId, decision, reason) =>
                 decisionMutation.mutate({ assuranceId, decision, reason })
               }
+              /*
+               * The SAME run mutation the header uses, including its idempotency key — not a second
+               * path to execution. What is new is that the operator can ask for it from where they
+               * just authorised the action, instead of having to know that the control four hundred
+               * pixels up the page is the thing that makes an approval take effect.
+               */
+              onRun={() => runMutation.mutate()}
+              isRunning={runMutation.isPending}
+              runBlockedReason={runBlockedReason(incident)}
             />
           )}
         </div>

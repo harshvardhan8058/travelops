@@ -15,6 +15,9 @@ import type {
   CandidatePlansResponse,
   CascadeGraph,
   DecisionResponse,
+  DemoDatasetResponse,
+  DemoResetResponse,
+  DemoSimulationsResponse,
   ExplanationResponse,
   FlightsResponse,
   GroupAssuranceResponse,
@@ -300,4 +303,41 @@ export const api = {
   /** The per-entity impact the services recorded. Without it the UI can only see a sentence. */
   actionDetail: (incidentId: string, actionId: number) =>
     request<ActionDetail>(`/incidents/${incidentId}/actions/${actionId}`),
+
+  // ------------------------------------------------------------------ Phase 5: demo control
+
+  /**
+   * What is in the database right now, read back rather than assumed.
+   *
+   * Deliberately absent from `FIXTURE_MAP`, like `passengerDisruption` and for a sharper version of
+   * the same reason. This is a *control* surface: its entire purpose is to report the state of a
+   * real database and act on it. A committed fixture would answer "22 flights are seeded" from a
+   * file while the database was empty, which is the one claim this screen exists to make truthfully.
+   * In fixture mode the call fails loudly and the screen says the control surface needs the live
+   * API — which is also the honest answer, since `canWrite` is false there and nothing could be
+   * seeded, started or reset anyway.
+   */
+  demoDataset: () => request<DemoDatasetResponse>('/demo/dataset'),
+
+  /**
+   * The simulation catalogue, resolved against the dataset as it is right now.
+   *
+   * Not fixtured for the same reason: a catalogue is only meaningful as a set of selections that
+   * resolve against rows that exist. Published members carry each flight's RECORDED delay, so the
+   * console can POST a simulation to `/scenarios` without composing an operational fact of its own.
+   */
+  demoSimulations: () => request<DemoSimulationsResponse>('/demo/simulations'),
+
+  /**
+   * Destructive. Restores the dataset and stops — it does NOT also open a cascade.
+   *
+   * `confirm` must equal the server's phrase; a typed phrase rather than a boolean means the control
+   * cannot be satisfied by a stray click or by a request body replayed from a log. The server
+   * re-checks it, so the client-side check is an affordance and not the guard.
+   */
+  resetDemoData: (confirm: string, actorId = 'operator-1') =>
+    request<DemoResetResponse>('/demo/reset', {
+      method: 'POST',
+      body: JSON.stringify({ confirm, actor_id: actorId }),
+    }),
 };

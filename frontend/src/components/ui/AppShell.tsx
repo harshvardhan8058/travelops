@@ -17,6 +17,7 @@ import {
   History,
   LayoutDashboard,
   ListChecks,
+  MonitorPlay,
   Scale,
   GitCompare,
   Luggage,
@@ -31,6 +32,7 @@ import { clsx } from 'clsx';
 import { MonoValue, ProvenanceDot, StateBadge } from './primitives';
 import { PackStandingChip } from '@/features/policy-citation/PackStandingView';
 import type { SystemMode } from '@/api/types';
+import { deriveModeChips, type ModeChipView, type ModePosture } from '@/api/runtimeModes';
 
 const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Ops Board' },
@@ -45,8 +47,13 @@ const NAV = [
   { to: '/replay/INC-2026-0820-VOBL-01', icon: History, label: 'Replay' },
   { to: '/reports/INC-2026-0820-VOBL-01', icon: FileText, label: 'Report' },
   { to: '/sources', icon: Database, label: 'Provenance ledger' },
-  // Phase 5. Both are keyed on their own reference rather than an incident, so they sit at the end
-  // rather than beside the incident-scoped entries.
+  // Phase 5. None of these is keyed on an incident, so they sit at the end rather than beside the
+  // incident-scoped entries.
+  //
+  // The Scenario Center comes before the builder deliberately: it is where a demo starts, and
+  // starting a catalogued simulation is the common case. Authoring one by hand is the specialist
+  // path, so it follows.
+  { to: '/scenarios', icon: MonitorPlay, label: 'Scenario center' },
   { to: '/scenarios/new', icon: Wand2, label: 'Scenario builder' },
   // A real seeded booking, in the same spirit as the incident and group references above: the demo
   // dataset is fixed-seed, so this reference resolves every time it is seeded. It is a booking the
@@ -67,7 +74,9 @@ function Rail() {
           to={to}
           title={label}
           aria-label={label}
-          end={to === '/'}
+          // `/scenarios` needs an exact match as much as `/` does: without it, `/scenarios/new`
+          // would light up the Scenario Center too and the rail would show two active surfaces.
+          end={to === '/' || to === '/scenarios'}
           className={({ isActive }) =>
             clsx(
               'flex h-9 w-9 items-center justify-center rounded-sm transition-colors duration-hover ease-out',
@@ -85,20 +94,50 @@ function Rail() {
   );
 }
 
-function ModeChip({ label, value, tone }: { label: string; value: string; tone?: string }) {
+/**
+ * The one place a posture becomes a colour.
+ *
+ * Typed as a total `Record`, so adding a posture to the contract fails the build here rather than
+ * falling through to an unstyled chip. `off` and `simulated` share amber because they share a
+ * meaning an operator acts on — nothing real is happening on that adapter — while the chip's value
+ * keeps them distinguishable.
+ */
+const POSTURE_TONE: Record<ModePosture, string> = {
+  live: 'text-state-ok',
+  fixture: 'text-state-info',
+  simulated: 'text-state-warn',
+  off: 'text-state-warn',
+  unknown: 'text-fg-muted',
+};
+
+function ModeChip({ chip }: { chip: ModeChipView }) {
+  // The server's own degradation sentence when there is one, so the tooltip never paraphrases it.
+  const title = chip.degradation ? `${chip.detail}\n\n${chip.degradation}` : chip.detail;
+
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5">
-      <span className="text-caption uppercase text-fg-muted">{label}</span>
-      <MonoValue className={clsx('uppercase', tone)}>{value}</MonoValue>
+    <span
+      className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5"
+      title={title}
+    >
+      <span className="text-caption uppercase text-fg-muted">{chip.label}</span>
+      <MonoValue className={clsx('uppercase', POSTURE_TONE[chip.posture])}>
+        {chip.value ?? '…'}
+      </MonoValue>
+      {chip.degradation && (
+        <span
+          aria-label={`${chip.label} degraded`}
+          className="text-caption leading-none text-state-warn"
+        >
+          !
+        </span>
+      )}
     </span>
   );
 }
 
 function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
-  const llm = mode?.llm_mode ?? '…';
-  // Off is not an error state — it is a supported operating mode and a demo asset.
-  const llmTone =
-    llm === 'live' ? 'text-state-ok' : llm === 'fixture' ? 'text-state-info' : 'text-state-warn';
+  // Every chip is derived from `/system/mode`; none is asserted by the shell.
+  const chips = deriveModeChips(mode);
 
   return (
     <header className="flex h-topbar shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-3">
@@ -108,9 +147,9 @@ function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
       </div>
 
       <div className="ml-2 flex items-center gap-2">
-        <ModeChip label="LLM" value={llm} tone={llmTone} />
-        <ModeChip label="WX" value={mode?.weather_mode ?? '…'} />
-        <ModeChip label="NOTIFY" value={mode?.notification_mode ?? '…'} />
+        {chips.map((chip) => (
+          <ModeChip key={chip.label} chip={chip} />
+        ))}
       </div>
 
       {/*

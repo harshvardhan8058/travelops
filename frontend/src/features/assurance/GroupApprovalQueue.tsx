@@ -30,6 +30,8 @@ import { dataUnavailable, retryUnlessUnavailable } from '@/api/unavailable';
 import type { ExcludedEvaluation, GroupExposure, PlanCheck } from '@/api/types';
 import { CountBar, Metric } from '@/components/ui/Metric';
 import { planTotalDerivation } from '@/components/ui/derivation';
+import { GroupRunControl } from '@/features/cascade/GroupRunControl';
+import { summariseGroupApproval, type GroupAuthorizationSummary } from './authorizationState';
 import {
   CheckStateBadge,
   EmptyState,
@@ -197,7 +199,9 @@ export function GroupApprovalQueue() {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<string | null>(null);
+  /** A server refusal of the whole approval. Distinct from an approval that succeeded. */
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<GroupAuthorizationSummary | null>(null);
 
   const current = useQuery({ queryKey: ['current-group'], queryFn: () => api.currentGroup() });
   const groupRef = current.data?.reference ?? '';
@@ -219,16 +223,28 @@ export function GroupApprovalQueue() {
     onSuccess: (result) => {
       setFailure(null);
       setReason('');
-      setOutcome(
-        result.refusal
-          ? `${refusalLabel(result.refusal)}. ${result.refusal_reason ?? ''}`.trim()
-          : `Recorded ${result.covered_count} decision${result.covered_count === 1 ? '' : 's'}; ` +
-              `${result.excluded_count} still need their own.`,
-      );
+      if (result.refusal) {
+        // The server declined to record the approval at all. Not an outcome to celebrate.
+        setRefusal(`${refusalLabel(result.refusal)}. ${result.refusal_reason ?? ''}`.trim());
+        setOutcome(null);
+      } else {
+        setRefusal(null);
+        setOutcome(summariseGroupApproval(result));
+      }
+      /*
+       * The group record itself changes, not only its assurance: `awaiting_approval_count` and the
+       * workflow badge in this page's own header are read from `['current-group']`, and the cascade
+       * screen reads `['incident-group']`. Invalidating only the assurance key left this screen
+       * showing the pre-approval counts it had just changed.
+       */
       void queryClient.invalidateQueries({ queryKey: ['group-assurance', groupRef] });
+      void queryClient.invalidateQueries({ queryKey: ['current-group'] });
+      void queryClient.invalidateQueries({ queryKey: ['incident-group'] });
+      void queryClient.invalidateQueries({ queryKey: ['incident-groups'] });
     },
     onError: (error) => {
       setOutcome(null);
+      setRefusal(null);
       setFailure(
         error instanceof ApiError
           ? `${error.code}: ${error.message}`
@@ -561,10 +577,58 @@ export function GroupApprovalQueue() {
               {failure}
             </Notice>
           )}
-          {outcome && (
-            <Notice tone="ok" divider="none" className="rounded border" alert>
-              {outcome}
+          {refusal && (
+            <Notice tone="warn" alert divider="none" className="rounded border">
+              {refusal}
             </Notice>
+          )}
+          {outcome && (
+            /*
+             * The handoff, stated at group scope.
+             *
+             * This used to read "Recorded 4 decisions; 2 still need their own" in an ok-toned band —
+             * true, and it stopped one sentence short of the thing that matters: nothing had run.
+             * `POST /incident-groups/{ref}/assurance/decision` writes one decision per covered
+             * evaluation and dispatches nothing, so the honest state after a successful approval is
+             * "authorized, not executed", and the next step is a control the operator must press.
+             */
+            <div
+              className={clsx(
+                'rounded-sm border px-2 py-1.5',
+                outcome.awaitingExecution
+                  ? 'border-state-warn/30 bg-state-warn-bg'
+                  : 'border-border-subtle bg-inset',
+              )}
+              role="alert"
+            >
+              <span
+                className={clsx(
+                  'text-label uppercase',
+                  outcome.awaitingExecution ? 'text-state-warn' : 'text-fg-secondary',
+                )}
+              >
+                {outcome.headline}
+              </span>
+              <p
+                className={clsx(
+                  'mt-1 text-body',
+                  outcome.awaitingExecution ? 'text-state-warn' : 'text-fg-secondary',
+                )}
+              >
+                {outcome.detail}
+              </p>
+              {outcome.awaitingExecution && (
+                <div className="mt-2">
+                  {/*
+                    The group's own execution control, reused rather than reimplemented. It is the
+                    surface that advances a cascade, and it already disclaims that it approves
+                    nothing — putting it here closes the gap between authorising the work and running
+                    it, without creating a second way to execute.
+                  */}
+                  <GroupRunControl groupRef={groupRef} rollupStatus={null} />
+                </div>
+              )}
+            </div>
           )}
 
           {/*
