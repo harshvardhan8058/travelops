@@ -17,6 +17,7 @@ import {
   History,
   LayoutDashboard,
   ListChecks,
+  MonitorPlay,
   Scale,
   GitCompare,
   Luggage,
@@ -29,9 +30,9 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 import { MonoValue, ProvenanceDot, StateBadge } from './primitives';
-import { effectiveStatuses, type EffectiveStatus } from './sourceStatus';
 import { PackStandingChip } from '@/features/policy-citation/PackStandingView';
 import type { SystemMode } from '@/api/types';
+import { deriveModeChips, type ModeChipView, type ModePosture } from '@/api/runtimeModes';
 
 const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Ops Board' },
@@ -46,8 +47,13 @@ const NAV = [
   { to: '/replay/INC-2026-0820-VOBL-01', icon: History, label: 'Replay' },
   { to: '/reports/INC-2026-0820-VOBL-01', icon: FileText, label: 'Report' },
   { to: '/sources', icon: Database, label: 'Provenance ledger' },
-  // Phase 5. Both are keyed on their own reference rather than an incident, so they sit at the end
-  // rather than beside the incident-scoped entries.
+  // Phase 5. None of these is keyed on an incident, so they sit at the end rather than beside the
+  // incident-scoped entries.
+  //
+  // The Scenario Center comes before the builder deliberately: it is where a demo starts, and
+  // starting a catalogued simulation is the common case. Authoring one by hand is the specialist
+  // path, so it follows.
+  { to: '/scenarios', icon: MonitorPlay, label: 'Scenario center' },
   { to: '/scenarios/new', icon: Wand2, label: 'Scenario builder' },
   { to: '/passenger/K4X8YR', icon: Luggage, label: 'Passenger view' },
 ] as const;
@@ -64,7 +70,9 @@ function Rail() {
           to={to}
           title={label}
           aria-label={label}
-          end={to === '/'}
+          // `/scenarios` needs an exact match as much as `/` does: without it, `/scenarios/new`
+          // would light up the Scenario Center too and the rail would show two active surfaces.
+          end={to === '/' || to === '/scenarios'}
           className={({ isActive }) =>
             clsx(
               'flex h-9 w-9 items-center justify-center rounded-sm transition-colors duration-hover ease-out',
@@ -82,51 +90,50 @@ function Rail() {
   );
 }
 
-const STATUS_TONE: Record<EffectiveStatus['tone'], string> = {
-  ok: 'text-state-ok',
-  info: 'text-state-info',
-  warn: 'text-state-warn',
-  neutral: 'text-fg-muted',
+/**
+ * The one place a posture becomes a colour.
+ *
+ * Typed as a total `Record`, so adding a posture to the contract fails the build here rather than
+ * falling through to an unstyled chip. `off` and `simulated` share amber because they share a
+ * meaning an operator acts on — nothing real is happening on that adapter — while the chip's value
+ * keeps them distinguishable.
+ */
+const POSTURE_TONE: Record<ModePosture, string> = {
+  live: 'text-state-ok',
+  fixture: 'text-state-info',
+  simulated: 'text-state-warn',
+  off: 'text-state-warn',
+  unknown: 'text-fg-muted',
 };
 
-function SourceStatus({ status }: { status: EffectiveStatus }) {
+function ModeChip({ chip }: { chip: ModeChipView }) {
+  // The server's own degradation sentence when there is one, so the tooltip never paraphrases it.
+  const title = chip.degradation ? `${chip.detail}\n\n${chip.degradation}` : chip.detail;
+
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5"
-      title={status.description}
+      className="inline-flex items-center gap-1.5 rounded-sm border border-border-subtle bg-inset px-1.5 py-0.5"
+      title={title}
     >
-      <span className="text-caption uppercase text-fg-muted">{status.label}</span>
-      <MonoValue className={STATUS_TONE[status.tone]}>{status.value}</MonoValue>
-      <span className="sr-only">. {status.description}</span>
+      <span className="text-caption uppercase text-fg-muted">{chip.label}</span>
+      <MonoValue className={clsx('uppercase', POSTURE_TONE[chip.posture])}>
+        {chip.value ?? '…'}
+      </MonoValue>
+      {chip.degradation && (
+        <span
+          aria-label={`${chip.label} degraded`}
+          className="text-caption leading-none text-state-warn"
+        >
+          !
+        </span>
+      )}
     </span>
   );
 }
 
-function SourceStrip({ mode }: { mode?: SystemMode }) {
-  return (
-    <footer
-      aria-label="Effective source and notification modes"
-      className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border-subtle bg-surface px-3 py-1.5"
-    >
-      <NavLink
-        to="/sources"
-        className="mr-1 shrink-0 rounded-sm text-caption uppercase text-fg-muted underline decoration-dotted underline-offset-2 transition-colors duration-hover ease-out hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        aria-label="Open source ledger for effective mode provenance"
-      >
-        effective modes
-      </NavLink>
-      {effectiveStatuses(mode).map((status) => (
-        <SourceStatus key={status.label} status={status} />
-      ))}
-      <span className="min-w-0 text-caption text-fg-muted">
-        Recorded runtime capability; source records and deliveries remain auditable in their own
-        views.
-      </span>
-    </footer>
-  );
-}
-
 function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
+  const chips = deriveModeChips(mode);
+
   return (
     <header className="flex h-topbar min-w-0 shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-3">
       <div className="flex shrink-0 items-baseline gap-2">
@@ -146,6 +153,12 @@ function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
         <PackStandingChip uiLabel={mode?.policy_pack?.ui_label} />
       </div>
 
+      <div className="ml-2 flex flex-wrap items-center gap-2">
+        {chips.map((chip) => (
+          <ModeChip key={chip.label} chip={chip} />
+        ))}
+      </div>
+
       <div className="flex shrink-0 items-center gap-3">
         {mode && (
           <span className="flex items-center gap-1.5" title="Assurance configuration">
@@ -162,6 +175,32 @@ function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
         <MonoValue muted>{clock}</MonoValue>
       </div>
     </header>
+  );
+}
+
+function SourceStrip({ mode }: { mode?: SystemMode }) {
+  const chips = deriveModeChips(mode);
+
+  return (
+    <footer
+      aria-label="Effective source and notification modes"
+      className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border-subtle bg-surface px-3 py-1.5"
+    >
+      <NavLink
+        to="/sources"
+        className="mr-1 shrink-0 rounded-sm text-caption uppercase text-fg-muted underline decoration-dotted underline-offset-2 transition-colors duration-hover ease-out hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        aria-label="Open source ledger for effective mode provenance"
+      >
+        effective modes
+      </NavLink>
+      {chips.map((chip) => (
+        <ModeChip key={chip.label} chip={chip} />
+      ))}
+      <span className="min-w-0 text-caption text-fg-muted">
+        Recorded runtime capability; source records and deliveries remain auditable in their own
+        views.
+      </span>
+    </footer>
   );
 }
 

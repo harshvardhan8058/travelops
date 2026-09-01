@@ -140,7 +140,31 @@ export async function submitScenario(
   options: { runAfterCreate: boolean; actorId?: string; operationKey: string },
 ): Promise<ScenarioLifecycleResult> {
   const actorId = options.actorId ?? 'operator-1';
-  const payload = buildPublishedScenarioRequest(draft, flights, actorId);
+  return runScenarioLifecycle(client, buildPublishedScenarioRequest(draft, flights, actorId), {
+    ...options,
+    actorId,
+  });
+}
+
+/**
+ * The lifecycle itself, over an already-built request.
+ *
+ * Split out of `submitScenario` so a caller that did not author a draft can run the SAME path. The
+ * Scenario Center starts a catalogued simulation, whose payload comes from `GET /demo/simulations`
+ * fully formed — there is no draft to validate and no designator to resolve, because the backend
+ * already resolved the selection against recorded rows. Reimplementing create-then-start-then-verify
+ * for that caller would be the "second lifecycle" this codebase exists not to have, and the two
+ * copies would drift on precisely the `/incident-groups/current` confirmation below, which is the
+ * step that makes navigation honest.
+ *
+ * `submitScenario` keeps its signature, so the Scenario Builder is unchanged.
+ */
+export async function runScenarioLifecycle(
+  client: ScenarioLifecycleClient,
+  payload: ScenarioCreateRequest,
+  options: { runAfterCreate: boolean; actorId?: string; operationKey: string },
+): Promise<ScenarioLifecycleResult> {
+  const actorId = options.actorId ?? 'operator-1';
   const created = await client.createScenario(payload, `${options.operationKey}-create`);
   if (!options.runAfterCreate) {
     return { created, started: null, selected: null, detail: null, route: null };

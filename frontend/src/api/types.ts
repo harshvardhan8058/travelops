@@ -97,6 +97,12 @@ export interface SystemMode {
   llm_mode: 'live' | 'fixture' | 'off';
   flight_status_mode: 'live' | 'fixture';
   weather_mode: 'live' | 'fixture';
+  /**
+   * Observed flight state. Published as the *effective* mode, so a `live` request that degraded
+   * to the snapshot reports `fixture` here and names the reason in `degradations`
+   * (`backend/app/config.py` `RuntimeModes.to_dict`).
+   */
+  flight_status_mode: 'live' | 'fixture';
   notification_mode: 'console' | 'mailtrap' | 'gmail';
   policy_mode: 'demo' | 'charter' | 'verified';
   real_email_enabled: boolean;
@@ -180,6 +186,98 @@ export interface ScenarioCreateRequest {
 
 export interface ScenarioMemberOut extends ScenarioMemberInput {
   flight_number: string;
+}
+
+// ---------------------------------------------------------------- demo control
+/*
+ * The demo control surface. Every capability here already existed behind `python -m app.cli`; what
+ * was missing was a way to see and use it without a terminal.
+ *
+ * The important shape: a simulation is a reproducible SELECTION over the recorded dataset, not a
+ * generated disruption. `SimulationMember.delay_minutes` is the delay the dataset RECORDS, and
+ * `POST /scenarios` refuses any other value — which is what stops this surface inventing the
+ * disruption it claims to react to. So a simulation is POSTed to the existing scenario lifecycle
+ * unmodified; there is no second lifecycle and no simulation engine.
+ */
+
+export interface DatasetTable {
+  table: string;
+  rows: number;
+}
+
+export interface DemoDatasetResponse {
+  /** Derived from the reference tables a demo cannot run without, not a stored flag. */
+  is_seeded: boolean;
+  tables: DatasetTable[];
+  flights: number;
+  bookings: number;
+  booking_segments: number;
+  airports: number;
+  /** The workflow's own output, distinct from the reference rows above. A reset removes these. */
+  incident_groups: number;
+  incidents: number;
+  /** Null is a legitimate answer: no cascade has been opened. */
+  current_group_reference: string | null;
+  reset_allowed: boolean;
+  app_env: string;
+  note: string;
+}
+
+export interface SimulationMember {
+  flight_id: number;
+  flight_number: string;
+  role: ScenarioMemberRole;
+  origin_icao: string;
+  destination_icao: string;
+  /** The RECORDED delay. Passed to `POST /scenarios` unmodified or the scenario is refused. */
+  delay_minutes: number;
+}
+
+export interface SimulationDefinition {
+  id: string;
+  name: string;
+  summary: string;
+  root_cause: string;
+  airport_icao: string;
+  severity: string;
+  /**
+   * The instant this simulation must be declared at — the RECORDED scenario clock, never now.
+   *
+   * Published because the wall clock is the wrong answer and the console cannot know the right one.
+   * The demo dataset's evidence is a fixed-seed snapshot, so an incident opened at the current time
+   * is scored against a METAR that is days old, `sources_fresh` FAILs, and the resulting refusal is
+   * an EVIDENCE refusal — which no operator may approve. Measured before this field existed: a
+   * browser-started simulation deadlocked on `metar:VOBL 15159m old, max 60m`.
+   */
+  effective_at: string;
+  /** Primary first. Empty when the dataset cannot support this definition. */
+  members: SimulationMember[];
+  /** Null when no bookings are recorded — "no records" and "nobody affected" differ. */
+  passengers_affected: number | null;
+  runnable: boolean;
+  blocked_reason: string | null;
+  provenance: Provenance;
+}
+
+export interface DemoSimulationsResponse {
+  catalogue_version: string;
+  simulations: SimulationDefinition[];
+  runnable_count: number;
+  basis: 'recorded_dataset_selection';
+  note: string;
+}
+
+export interface DemoResetResponse {
+  /** Workflow rows removed before the re-seed, by table. */
+  workflow_removed: Record<string, number>;
+  /** Reference rows written by the re-seed, by table. */
+  seeded: Record<string, number>;
+  dataset_digest: string;
+  /** Declared, not opened: after a reset no incident exists yet. */
+  seeded_group_reference: string | null;
+  performed_by: string;
+  performed_at: string;
+  note: string;
 }
 
 export interface ScenarioCreateResponse {

@@ -2,6 +2,7 @@
   "llm_mode": "off",
   "flight_status_mode": "fixture",
   "weather_mode": "fixture",
+  "flight_status_mode": "fixture",
   "notification_mode": "console",
   "policy_mode": "charter",
   "real_email_enabled": false,
