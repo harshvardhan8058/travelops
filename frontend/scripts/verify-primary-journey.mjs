@@ -160,18 +160,14 @@ try {
     'incidents awaiting approval',
     'Human-gated tasks',
   ]);
-  /*
-   * The passenger view now reads `GET /passenger/{booking_ref}/disruption` rather than composing
-   * itself from the group summary and the capped impact contract, so the tokens below are that
-   * screen's own. The guarantee is unchanged and is what these assertions still hold: the recorded
-   * booking is on screen, and no booking OUTCOME is claimed. What is no longer asserted here is the
-   * group-level "incidents awaiting operator approval" count, because a per-booking view does not
-   * show one — the Approval Queue check above owns that figure.
-   */
   await inspectPage(
-    'Passenger view shows the recorded booking without a fabricated outcome',
+    'Passenger view shows recorded priority without a fabricated outcome',
     `/passenger/${passenger.pnr}`,
-    [passenger.pnr, 'No confirmed booking change is published', 'does not mean your booking'],
+    [
+      passenger.pnr,
+      'incidents awaiting operator approval',
+      'No passenger booking outcome is available',
+    ],
     ['sample booking', 'console-sample', 'An airline colleague is reviewing your rebooking'],
   );
 
@@ -246,10 +242,10 @@ try {
     'Passenger view reports workflow completion without inventing booking completion',
     `/passenger/${passenger.pnr}`,
     [
-      'The disruption is closed',
-      'No confirmed booking change is published',
-      'A resolved disruption means the operational workflow finished',
-      'does not mean your booking was changed',
+      'recovery workflow resolved',
+      'The disruption recovery workflow is complete',
+      'No passenger booking outcome is available',
+      'Workflow resolved means the operational workflow finished',
     ],
     ['sample booking', 'console-sample', 'An airline colleague is reviewing your rebooking'],
   );

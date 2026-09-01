@@ -1,45 +1,18 @@
 /**
- * Passenger disruption view — the one screen in this product whose reader is not an operator.
+ * Passenger operational view — `/passenger/:bookingRef`.
  *
- * It renders `GET /passenger/{booking_ref}/disruption`, which is a projection of recorded rows. That
- * makes the design problem here different from every other surface: the reader cannot cross-check
- * anything, so the screen's job is to be *narrower* than the operator console, not friendlier.
- *
- * What that means concretely, and what changed when this stopped being a sample:
- *
- *   - **No name.** The contract has no field for one. The header shows the PNR the reader already
- *     holds and the pseudonymous `PAX-…` reference an agent can quote back.
- *   - **No compensation figure, and no note promising one.** The old screen rendered an
- *     `entitlement_note` explaining where a figure would come from. The endpoint carries no money
- *     field at all, so there is nothing to caption; the policy surface owns that answer.
- *   - **No invented consequences.** The old screen listed hand-written impacts — bags, an overnight
- *     — that no row supported. `deriveConsequences` now builds the list from the recorded connection
- *     assessment and the recorded priority factors, and shows an honest empty state when neither
- *     exists.
- *   - **Every option states its basis.** A reachable later departure is not a seat, and the row says
- *     so next to the option rather than in a footnote.
- *
- * Owner: Stream D.
+ * This route projects only contracts the backend actually serves: the current disruption group and
+ * its persisted passenger-priority rows. It deliberately does not project a trip, seat, rebooking,
+ * refund, hotel assignment, entitlement, or notification outcome because no passenger outcome
+ * endpoint publishes those facts. Workflow resolution and booking resolution are stated separately.
  */
 
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  AlertTriangle,
-  ArrowRight,
-  Check,
-  CircleDot,
-  Clock,
-  Hotel,
-  Plane,
-  RefreshCcw,
-  X,
-} from 'lucide-react';
-import { clsx } from 'clsx';
+import { AlertTriangle, Check, CircleDot, UserRound } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
-import type { PassengerOption, PassengerSegmentOut } from '@/api/types';
 import {
   EmptyState,
   ErrorState,
@@ -58,362 +31,245 @@ import {
   TimelineList,
   Toolbar,
 } from '@/components/ui/composition';
-import { utcMinute } from '@/components/ui/format';
-import {
-  actionLabel,
-  deriveActionProgress,
-  deriveConsequences,
-  deriveNextStep,
-  deriveTripStatus,
-  formatDelay,
-  openConsequenceCount,
-  optionBasisNote,
-  summariseOptions,
-} from './passengerView';
-
-const OPTION_ICON: Record<PassengerOption['kind'], typeof Plane> = {
-  alternative_flight: Plane,
-  hotel_room: Hotel,
-};
-
-const ACTION_ICON = {
-  succeeded: Check,
-  executing: RefreshCcw,
-  pending: CircleDot,
-  awaiting_approval: AlertTriangle,
-  failed: X,
-  needs_human: AlertTriangle,
-} as const;
-
-/*
- * `Labelled` is imported from `@/components/ui/composition`. The rule it encodes is unchanged and
- * still load-bearing: `uppercase` goes on the LABEL only, because on the wrapper it case-transformed
- * the values inside — the recorded cause token `weather` became `WEATHER` and `not assigned` became
- * `NOT ASSIGNED`, strings the contract never published. A guard in `scenarioDraft.test.ts` scans
- * this file for that shape.
- */
-
-/** `label N of M`, with `uppercase` kept off both figures for the same reason as `Labelled`. */
-function Ratio({ label, value, total }: { label: string; value: number; total: number }) {
-  return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-caption uppercase text-fg-muted">{label}</span>
-      <MonoValue muted>{value}</MonoValue>
-      <span className="text-caption uppercase text-fg-muted">of</span>
-      <MonoValue muted>{total}</MonoValue>
-    </span>
-  );
-}
-
-/**
- * A scheduled time and its revision, with the revision marked.
- *
- * The original stays on screen struck through rather than being replaced, because a passenger
- * checking a screen against a boarding pass needs to see both to trust either.
- */
-function TimePair({ scheduled, revised }: { scheduled: string; revised: string | null }) {
-  const scheduledClock = utcMinute(scheduled);
-  const revisedClock = utcMinute(revised);
-
-  return (
-    <span className="flex items-baseline gap-1.5">
-      <MonoValue muted className={revisedClock ? 'line-through' : undefined}>
-        {scheduledClock ?? 'not published'}
-      </MonoValue>
-      {revisedClock && (
-        <>
-          <ArrowRight size={10} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
-          <MonoValue className="text-state-warn">{revisedClock}</MonoValue>
-        </>
-      )}
-    </span>
-  );
-}
-
-function SegmentRow({ segment }: { segment: PassengerSegmentOut }) {
-  const delay = formatDelay(segment.delay_minutes);
-
-  return (
-    <li
-      className={clsx(
-        'flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border-subtle px-3 py-2',
-        segment.is_disrupted && 'bg-inset',
-      )}
-    >
-      <span className="flex items-center gap-2">
-        <Plane size={12} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
-        <MonoValue>{segment.flight_number}</MonoValue>
-      </span>
-
-      {/* ICAO, because that is what the record carries. No IATA mapping is invented here. */}
-      <span className="flex items-baseline gap-1.5">
-        <MonoValue muted>{segment.origin_icao}</MonoValue>
-        <ArrowRight size={10} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
-        <MonoValue muted>{segment.destination_icao}</MonoValue>
-      </span>
-
-      <span className="flex items-baseline gap-1.5">
-        <span className="text-caption uppercase text-fg-muted">departs</span>
-        <TimePair scheduled={segment.scheduled_departure} revised={segment.estimated_departure} />
-      </span>
-
-      <span className="flex items-baseline gap-1.5">
-        <span className="text-caption uppercase text-fg-muted">arrives</span>
-        <TimePair scheduled={segment.scheduled_arrival} revised={null} />
-      </span>
-
-      <StateBadge status={segment.status} label={segment.status.replace(/_/g, ' ')} />
-
-      {/*
-        An unpublished delay is named, not printed as zero. `formatDelay` returns null for absent and
-        the string "on time" for a real zero, so the two cannot render the same.
-      */}
-      <span className="flex items-center gap-1.5">
-        <Clock size={11} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
-        {delay === null ? (
-          <span className="text-caption text-fg-muted" title="No revised time has been published.">
-            no new time yet
-          </span>
-        ) : (
-          <span
-            className={clsx(
-              'text-caption',
-              segment.delay_minutes && segment.delay_minutes > 0
-                ? 'text-state-warn'
-                : 'text-fg-secondary',
-            )}
-          >
-            {delay}
-          </span>
-        )}
-      </span>
-
-      <span className="ml-auto">
-        <Labelled label="gate">
-          <MonoValue muted>{segment.gate ?? 'not assigned yet'}</MonoValue>
-        </Labelled>
-      </span>
-    </li>
-  );
-}
-
-/**
- * One recorded option, with the basis it was recorded under.
- *
- * The basis line is not a footnote and not a tooltip. A reachable departure presented without it
- * reads as an available seat, which is the single most damaging thing this screen could imply.
- */
-function OptionRow({ option }: { option: PassengerOption }) {
-  const Icon = OPTION_ICON[option.kind];
-  const firm = option.basis === 'recorded_reservation';
-
-  return (
-    <li className="flex items-start gap-2 border-b border-border-subtle px-3 py-2">
-      <Icon
-        size={14}
-        strokeWidth={1.5}
-        className={clsx('mt-0.5 shrink-0', firm ? 'text-accent' : 'text-fg-muted')}
-        aria-hidden
-      />
-      <div className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="text-body text-fg">{option.label}</span>
-          {option.requires_agent && <StateBadge status="needs_human" label="agent will arrange" />}
-          {!firm && <StateBadge status="skipped" label="not a confirmed booking" />}
-        </span>
-        <p className="mt-0.5 text-caption text-fg-secondary">{optionBasisNote(option)}</p>
-        {option.scheduled_departure && (
-          <p className="mt-0.5 flex items-baseline gap-1.5 text-caption text-fg-muted">
-            <span className="uppercase">departs</span>
-            <MonoValue muted>{utcMinute(option.scheduled_departure) ?? 'not published'}</MonoValue>
-          </p>
-        )}
-        {option.nights !== null && (
-          <p className="mt-0.5 flex items-baseline gap-1.5 text-caption text-fg-muted">
-            <span className="uppercase">nights</span>
-            <MonoValue muted>{option.nights}</MonoValue>
-          </p>
-        )}
-      </div>
-    </li>
-  );
-}
+import { utcStamp } from '@/components/ui/format';
+import { passengerJourneyState, passengerLookup } from './passengerJourney';
 
 export function PassengerDisruptionView() {
   const { bookingRef = '' } = useParams();
 
-  const viewQuery = useQuery({
-    queryKey: ['passenger-disruption', bookingRef],
-    queryFn: () => api.passengerDisruption(bookingRef),
-    enabled: bookingRef !== '',
+  const currentGroup = useQuery({
+    queryKey: ['current-group'],
+    queryFn: api.currentGroup,
+    refetchInterval: 10_000,
+  });
+  const groupRef = currentGroup.data?.reference ?? '';
+
+  const impacts = useQuery({
+    queryKey: ['group-impacts', groupRef, 1000],
+    queryFn: () => api.groupImpacts(groupRef, 1000),
+    enabled: groupRef.length > 0,
+    refetchInterval: 10_000,
   });
 
-  const view = viewQuery.data;
+  const lookup = useMemo(
+    () =>
+      passengerLookup(
+        impacts.data?.passengers ?? [],
+        bookingRef,
+        impacts.data?.returned ?? 0,
+        impacts.data?.passengers_assessed ?? 0,
+      ),
+    [bookingRef, impacts.data],
+  );
+  const passenger = lookup.passenger;
 
-  const tripStatus = useMemo(() => (view ? deriveTripStatus(view) : null), [view]);
-  const nextStep = useMemo(() => (view ? deriveNextStep(view) : null), [view]);
-  const options = useMemo(() => (view ? summariseOptions(view.options) : null), [view]);
-  const progress = useMemo(() => (view ? deriveActionProgress(view.actions) : null), [view]);
-  const consequences = useMemo(() => (view ? deriveConsequences(view) : []), [view]);
-
-  /*
-   * The wording is the one thing that changes for this audience. A reader with no ledger to check
-   * against needs to be told their trip could not be loaded — not handed a correlation id and an
-   * error code as the headline. A 404 is separated from a fault, because "we do not hold that
-   * reference" is actionable and "something broke" is not.
-   */
-  if (viewQuery.error) {
-    const notFound = viewQuery.error instanceof ApiError && viewQuery.error.status === 404;
+  if (currentGroup.isLoading || (groupRef && impacts.isLoading)) {
     return (
-      <Panel title="Your trip">
-        <ErrorState
-          code={viewQuery.error instanceof ApiError ? viewQuery.error.code : 'INTERNAL_ERROR'}
-          message={
-            notFound
-              ? 'We could not find a booking with that reference. Check it against your ticket, ' +
-                'or contact the airline if it looks right.'
-              : 'We could not load your trip just now. Nothing about your booking has changed, ' +
-                'and your options are still open. Please try again.'
-          }
-          correlationId={viewQuery.error instanceof ApiError ? viewQuery.error.correlationId : null}
-          onRetry={notFound ? undefined : () => void viewQuery.refetch()}
-        />
+      <Panel title="Passenger operational view">
+        <div className="h-[420px]">
+          <LoadingState label="Loading recorded passenger impact" />
+        </div>
       </Panel>
     );
   }
 
-  if (viewQuery.isLoading || !view || !tripStatus || !nextStep || !options || !progress) {
+  if (currentGroup.error) {
+    const error = currentGroup.error instanceof ApiError ? currentGroup.error : null;
     return (
-      <Panel title="Your trip">
-        <LoadingState label="Loading your trip" />
-      </Panel>
+      <ErrorState
+        code={error?.code ?? 'GROUP_UNAVAILABLE'}
+        message={error?.message ?? 'The current disruption group could not be loaded.'}
+        correlationId={error?.correlationId ?? null}
+        onRetry={() => void currentGroup.refetch()}
+      />
+    );
+  }
+
+  if (!currentGroup.data) {
+    return (
+      <EmptyState
+        title="No disruption group is available"
+        description="This page will not substitute a sample booking for missing operational data."
+      />
+    );
+  }
+
+  if (impacts.error) {
+    const error = impacts.error instanceof ApiError ? impacts.error : null;
+    return (
+      <ErrorState
+        code={error?.code ?? 'PASSENGER_IMPACT_UNAVAILABLE'}
+        message={error?.message ?? 'Recorded passenger priorities could not be loaded.'}
+        correlationId={error?.correlationId ?? null}
+        onRetry={() => void impacts.refetch()}
+      />
+    );
+  }
+
+  if (!impacts.data) {
+    return <LoadingState label="Loading recorded passenger impact" />;
+  }
+
+  const group = currentGroup.data;
+  const journey = passengerJourneyState(group);
+
+  if (impacts.data.passengers_assessed === 0) {
+    return (
+      <div className="flex flex-col gap-3">
+        <PageHeader
+          eyebrow="Passenger operational view"
+          title={<span className="font-mono tabular-nums">Booking {bookingRef}</span>}
+          status={<StateBadge status={journey.token} label={journey.label} />}
+          meta={
+            <Labelled label="group">
+              <MonoValue>{group.reference}</MonoValue>
+            </Labelled>
+          }
+        />
+        <EmptyState
+          title="Passenger priorities are not recorded yet"
+          description={impacts.data.note}
+        />
+        <Notice tone="muted">
+          No sample booking is shown in its place. Booking options and outcomes are not published by
+          any current endpoint.
+        </Notice>
+      </div>
+    );
+  }
+
+  if (!passenger) {
+    return (
+      <ErrorState
+        code="BOOKING_NOT_IN_IMPACT_RECORDS"
+        message={
+          lookup.responseIsComplete
+            ? `Booking ${bookingRef} is not among the ${impacts.data.passengers_assessed} recorded passenger-priority rows for ${group.reference}. No sample was substituted.`
+            : `Booking ${bookingRef} is not in the ${impacts.data.returned} highest-priority rows returned for ${group.reference}. The group has ${impacts.data.passengers_assessed} assessed passengers, and this capped contract cannot establish whether the booking appears outside the returned slice. No sample was substituted.`
+        }
+        correlationId={null}
+      />
     );
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex min-h-0 flex-col gap-3">
       <PageHeader
-        eyebrow="Your trip"
-        title={<span className="font-mono tabular-nums">{view.booking_ref}</span>}
-        status={<StateBadge status={tripStatus.token} label={tripStatus.label} />}
+        eyebrow="Passenger operational view"
+        title={<span className="font-mono tabular-nums">Booking {passenger.pnr}</span>}
+        status={<StateBadge status={journey.token} label={journey.label} />}
         meta={
           <>
-            {/* Pseudonymous by contract. There is no name field to render. */}
-            <Labelled label="reference">
-              <MonoValue muted>{view.passenger_reference}</MonoValue>
+            <Labelled label="passenger reference">
+              <MonoValue>{passenger.passenger_reference}</MonoValue>
             </Labelled>
-            <Labelled label="cabin">
-              <MonoValue muted>{view.cabin}</MonoValue>
+            <Labelled label="group">
+              <MonoValue>{group.reference}</MonoValue>
             </Labelled>
-            <Labelled label="route">
-              <MonoValue muted>
-                {view.trip.origin_icao} to {view.trip.destination_icao}
-              </MonoValue>
+            <Labelled label="assessment basis">
+              <MonoValue muted>{impacts.data.basis}</MonoValue>
             </Labelled>
-            <Ratio
-              label="legs disrupted"
-              value={tripStatus.disruptedSegments}
-              total={tripStatus.totalSegments}
-            />
+            <Labelled label="computed">
+              <MonoValue muted>{utcStamp(impacts.data.computed_at) ?? 'not recorded'}</MonoValue>
+            </Labelled>
           </>
         }
         actions={
           <Toolbar>
-            {/*
-              `uppercase` sits on the LITERAL label only. It used to wrap the whole line, which
-              case-transformed `provenance.kind` — the contract value `synthetic` reached the screen
-              as `SYNTHETIC`, a string the API never published. The console verifier's passenger
-              case-transform check caught exactly that.
-            */}
             <span className="flex items-center gap-1.5">
               <ProvenanceDot
-                kind={view.provenance.kind}
-                provider={view.provenance.provider}
-                sourceRef={view.provenance.source_ref ?? undefined}
+                kind={group.provenance.kind}
+                provider={group.provenance.provider}
+                sourceRef={group.provenance.source_ref}
               />
-              <span className="text-caption uppercase text-fg-muted">source</span>
-              <MonoValue muted>{view.provenance.kind}</MonoValue>
+              <span className="text-caption uppercase text-fg-muted">group summary source</span>
+            </span>
+            <span className="text-caption uppercase text-fg-muted">
+              passenger impact · {impacts.data.basis.replace(/_/g, ' ')}
             </span>
           </Toolbar>
         }
       />
 
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="flex min-w-0 flex-col gap-3">
-          {/* What happened, from the recorded incident. No narrative is composed for it. */}
+      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="flex min-h-0 flex-col gap-3">
           <Panel title="What happened">
             <PanelBody gap="tight">
-              {view.disruption === null ? (
-                <EmptyState
-                  title="Nothing is recorded against this trip"
-                  description="No disruption has been opened on any flight in this booking."
-                />
+              <p className="text-subtitle text-fg">
+                {group.root_cause.replace(/_/g, ' ')} disruption at {group.airport_icao}
+              </p>
+              <p className="text-body text-fg-secondary">
+                This booking appears in the passenger-priority records for the current disruption
+                group. The cause is an operational category, not a legal finding.
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1">
+                <Labelled label="severity">
+                  <MonoValue>{group.severity}</MonoValue>
+                </Labelled>
+                <Labelled label="group opened">
+                  <MonoValue muted>{utcStamp(group.opened_at) ?? 'not recorded'}</MonoValue>
+                </Labelled>
+              </div>
+            </PanelBody>
+          </Panel>
+
+          <Panel title="Recorded impact priority">
+            <PanelBody gap="tight">
+              <div className="flex flex-wrap items-center gap-3">
+                <UserRound size={16} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
+                <StateBadge status={passenger.priority_band} label={passenger.priority_band} />
+                <Labelled label="priority index">
+                  <MonoValue>{passenger.priority_index}</MonoValue>
+                </Labelled>
+                <Labelled label="rule">
+                  <MonoValue muted>{passenger.rule_version}</MonoValue>
+                </Labelled>
+              </div>
+              <Notice tone="muted" divider="none" className="rounded border">
+                This is a constraint ranking from persisted rows: who has fewer remaining options,
+                not who matters more. It is not a probability and authorises nothing.
+              </Notice>
+              {passenger.factors.length > 0 ? (
+                <TimelineList label="Recorded priority factors">
+                  {passenger.factors.map((factor, index) => (
+                    <TimelineItem
+                      key={`${factor.factor}-${factor.source}`}
+                      tone="info"
+                      isLast={index === passenger.factors.length - 1}
+                    >
+                      <span className="flex flex-wrap items-baseline gap-2">
+                        <span className="text-body text-fg">
+                          {factor.factor.replace(/_/g, ' ')}
+                        </span>
+                        <MonoValue>
+                          {factor.weight >= 0 ? '+' : ''}
+                          {factor.weight}
+                        </MonoValue>
+                      </span>
+                      <p className="mt-0.5 text-caption text-fg-muted">
+                        recorded source: {factor.source}
+                      </p>
+                    </TimelineItem>
+                  ))}
+                </TimelineList>
               ) : (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                  <Labelled label="cause">
-                    <MonoValue>{view.disruption.cause_category}</MonoValue>
-                  </Labelled>
-                  <Labelled label="airport">
-                    <MonoValue muted>{view.disruption.airport_icao}</MonoValue>
-                  </Labelled>
-                  <Labelled label="flight">
-                    <MonoValue muted>{view.disruption.flight_number}</MonoValue>
-                  </Labelled>
-                  <Labelled label="opened">
-                    <MonoValue muted>
-                      {utcMinute(view.disruption.opened_at) ?? 'not published'}
-                    </MonoValue>
-                  </Labelled>
-                  <StateBadge status={view.disruption.state} />
-                </div>
+                <p className="text-body text-fg-muted">
+                  No contributing factors were recorded for this passenger row.
+                </p>
               )}
             </PanelBody>
           </Panel>
 
-          <Panel
-            title="Your flights"
-            actions={
-              <Ratio
-                label="legs"
-                value={tripStatus.totalSegments}
-                total={tripStatus.totalSegments}
-              />
-            }
-          >
-            {view.trip.segments.length === 0 ? (
-              <EmptyState
-                title="No flights are recorded"
-                description="This booking has no segments against it."
-              />
+          <Panel title="Still unassessed">
+            {impacts.data.unassessed_factors.length === 0 ? (
+              <p className="px-3 py-3 text-body text-fg-muted">
+                The impact contract names no unassessed factors.
+              </p>
             ) : (
               <ul>
-                {view.trip.segments.map((segment) => (
-                  <SegmentRow key={segment.segment_id} segment={segment} />
-                ))}
-              </ul>
-            )}
-          </Panel>
-
-          <Panel
-            title="What this means for you"
-            actions={
-              <Ratio
-                label="open"
-                value={openConsequenceCount(consequences)}
-                total={consequences.length}
-              />
-            }
-          >
-            {consequences.length === 0 ? (
-              <EmptyState
-                title="No consequences are recorded yet"
-                description="Nothing has been assessed against your booking so far. This is not the same as nothing being wrong."
-              />
-            ) : (
-              <ul>
-                {consequences.map((entry) => (
+                {impacts.data.unassessed_factors.map((factor) => (
                   <li
-                    key={entry.key}
+                    key={factor.factor}
                     className="flex items-start gap-2 border-b border-border-subtle px-3 py-2"
                   >
                     <AlertTriangle
@@ -422,181 +278,78 @@ export function PassengerDisruptionView() {
                       className="mt-0.5 shrink-0 text-state-warn"
                       aria-hidden
                     />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-body text-fg">{entry.label}</p>
-                      <p className="mt-0.5 text-caption text-fg-secondary">{entry.detail}</p>
+                    <div>
+                      <p className="text-body text-fg">{factor.factor.replace(/_/g, ' ')}</p>
+                      <p className="text-caption text-fg-secondary">{factor.reason}</p>
+                      <p className="text-caption text-fg-muted">
+                        established only by {factor.established_by}
+                      </p>
                     </div>
                   </li>
                 ))}
               </ul>
             )}
           </Panel>
-
-          <Panel
-            title="Your options"
-            actions={<Ratio label="recorded" value={options.total} total={options.total} />}
-          >
-            {view.options.length === 0 ? (
-              <EmptyState
-                title="No options are recorded yet"
-                description="Nothing has been held or found for this booking. Any alternative appears here once it is recorded."
-              />
-            ) : (
-              <ul>
-                {view.options.map((option, index) => (
-                  <OptionRow
-                    key={`${option.kind}-${option.flight_id ?? option.hotel_name ?? index}`}
-                    option={option}
-                  />
-                ))}
-              </ul>
-            )}
-          </Panel>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-3">
-          <Panel title="What happens next">
+        <div className="flex min-h-0 flex-col gap-3">
+          <Panel title="Recovery status">
             <PanelBody gap="tight">
               <div className="flex items-center gap-2">
-                <StateBadge status={nextStep.token} />
-                {view.next_step.driven_by_action_type && (
-                  <MonoValue muted className="text-caption">
-                    {view.next_step.driven_by_action_type}
-                  </MonoValue>
+                {journey.workflowComplete ? (
+                  <Check size={14} strokeWidth={1.5} className="text-state-ok" aria-hidden />
+                ) : (
+                  <CircleDot size={14} strokeWidth={1.5} className="text-state-info" aria-hidden />
                 )}
+                <StateBadge status={journey.token} label={journey.label} />
               </div>
-              <p className="text-subtitle text-fg">{nextStep.headline}</p>
-              <p className="text-body text-fg-secondary">{nextStep.detail}</p>
-              {nextStep.awaitingDecision && (
-                <Notice tone="warn">
-                  Nothing on your booking has changed while this is waiting for a person.
-                </Notice>
-              )}
+              <p className="text-subtitle text-fg">{journey.headline}</p>
+              <p className="text-body text-fg-secondary">{journey.detail}</p>
+              <Labelled label="incidents awaiting operator approval">
+                <MonoValue>{group.awaiting_approval_count}</MonoValue>
+              </Labelled>
             </PanelBody>
-          </Panel>
-
-          <Panel
-            title="What we have done"
-            actions={<Ratio label="done" value={progress.done} total={progress.total} />}
-          >
-            {view.actions.length === 0 ? (
-              <EmptyState
-                title="No steps are recorded"
-                description="No recovery work has been recorded for this disruption yet."
-              />
-            ) : (
-              <div className="py-1.5">
-                <TimelineList label="Recovery steps for this booking">
-                  {view.actions.map((action, index) => {
-                    const Icon = ACTION_ICON[action.state as keyof typeof ACTION_ICON] ?? CircleDot;
-                    return (
-                      <TimelineItem
-                        key={`${action.action_type}-${index}`}
-                        tone={action.awaiting_human ? 'accent' : 'muted'}
-                        time={utcMinute(action.at) ?? '—'}
-                        isLast={index === view.actions.length - 1}
-                        className="px-3"
-                      >
-                        <span className="flex flex-wrap items-center gap-2">
-                          <Icon
-                            size={12}
-                            strokeWidth={1.5}
-                            className="shrink-0 text-fg-muted"
-                            aria-hidden
-                          />
-                          <span className="text-body text-fg">{actionLabel(action)}</span>
-                          <StateBadge
-                            status={action.state}
-                            label={action.state.replace(/_/g, ' ')}
-                          />
-                        </span>
-                        {/*
-                          Scope, stated. "We checked your connection" is true at incident scope;
-                          only a row naming this booking makes something theirs.
-                        */}
-                        <p className="mt-0.5 text-caption text-fg-muted">
-                          {action.applies_to === 'this_booking'
-                            ? 'Recorded against your booking.'
-                            : 'Part of the wider recovery for this flight.'}
-                        </p>
-                        {action.reason_code && (
-                          <MonoValue muted className="text-caption">
-                            {action.reason_code}
-                          </MonoValue>
-                        )}
-                        {action.approval_scope && (
-                          <p className="mt-0.5 text-caption text-fg-muted">
-                            Approved by a person
-                            {action.approval_scope === 'plan' ? ' as part of the whole plan' : ''}.
-                          </p>
-                        )}
-                      </TimelineItem>
-                    );
-                  })}
-                </TimelineList>
-              </div>
+            {journey.pendingHuman && (
+              <Notice tone="warn">
+                A person still has to decide operational actions. This page does not turn that wait
+                into a confirmed passenger change.
+              </Notice>
             )}
           </Panel>
 
-          {/*
-            Factors nothing has established. Named rather than rendered false, so this screen never
-            tells a reader nobody needs rebooking when nobody has looked.
-          */}
-          {view.unassessed_factors.length > 0 && (
-            <Panel title="Not yet assessed">
-              <ul className="flex flex-col gap-2 px-3 py-2">
-                {view.unassessed_factors.map((factor) => (
-                  <li key={factor.factor} className="flex flex-col gap-0.5">
-                    <MonoValue muted className="text-caption">
-                      {factor.factor.replace(/_/g, ' ')}
-                    </MonoValue>
-                    <span className="text-caption text-fg-muted">{factor.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-          )}
-
-          {/*
-            The boundary of what any contract publishes, stated on the screen.
-            
-            Carried forward from the group-derived version of this view, and narrowed to match what
-            the booking endpoint now does publish: recorded actions, recorded rooms and schedule-
-            feasible alternatives are here. A CONFIRMED rebooking, a seat, a refund, an entitlement
-            figure and notification delivery are not, because nothing records them per booking. The
-            most damaging thing this page could do is let a resolved workflow read as a changed
-            ticket, so it says otherwise in as many words.
-          */}
           <Panel title="Booking outcome">
             <PanelBody gap="tight">
               <StateBadge status="unavailable" label="not published" />
-              <p className="text-subtitle text-fg">No confirmed booking change is published</p>
+              <p className="text-subtitle text-fg">No passenger booking outcome is available</p>
               <p className="text-body text-fg-secondary">
-                This page shows the recovery work recorded against your flight. No contract records
-                a confirmed rebooking, seat, refund, entitlement amount, or notification delivery
-                for this booking, so none is shown.
+                The current contracts publish disruption workflow state and passenger priority. They
+                do not publish a rebooking, seat, refund, hotel assignment, entitlement, gate,
+                revised itinerary, or notification delivery for this booking.
               </p>
             </PanelBody>
             <Notice tone="muted">
-              A resolved disruption means the operational workflow finished. It does not mean your
-              booking was changed.
+              Workflow resolved means the operational workflow finished. It does not mean this
+              booking was changed. TravelOps will show an outcome here only when a backend contract
+              records one.
             </Notice>
           </Panel>
 
-          <Panel title="About this page">
+          <Panel title="Source boundary">
             <PanelBody gap="tight">
-              {/*
-                The contract's own basis token, verbatim and un-cased. It is the machine-readable
-                claim about where every figure above came from, so rendering it transformed would
-                misreport the contract — the console verifier asserts its exact casing.
-              */}
-              <Labelled label="basis">
-                <MonoValue>{view.basis}</MonoValue>
+              <Labelled label="passenger impact source">
+                <MonoValue>{impacts.data.basis.replace(/_/g, ' ')}</MonoValue>
               </Labelled>
+              <Labelled label="impact rows">
+                <MonoValue>{impacts.data.passengers_assessed}</MonoValue>
+              </Labelled>
+              <Labelled label="returned">
+                <MonoValue>{impacts.data.returned}</MonoValue>
+              </Labelled>
+              <Labelled label="ruleset hash">
+                <MonoValue muted>{impacts.data.ruleset_hash.slice(0, 12)}</MonoValue>
+              </Labelled>
+              <p className="text-caption text-fg-muted">{impacts.data.note}</p>
             </PanelBody>
-            <Notice tone="muted" icon={false}>
-              {view.note}
-            </Notice>
           </Panel>
         </div>
       </div>
