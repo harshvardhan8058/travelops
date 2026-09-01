@@ -19,6 +19,7 @@ import { FlaskConical } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
 import { ErrorState, LoadingState, MonoValue, Panel } from '@/components/ui/primitives';
+import { NoDisruptionOpen } from '@/components/ui/composition';
 import { WhatIfPanel } from './WhatIfPanel';
 
 export function WhatIfScreen() {
@@ -42,6 +43,18 @@ export function WhatIfScreen() {
           <LoadingState label="Resolving the current disruption" />
         </div>
       </Panel>
+    );
+  }
+
+  /*
+   * A resolved query with no data is `/current` answering "none is started". That is the state
+   * this screen is most often reached in, and it is not an error: What-if re-evaluates recorded
+   * evidence, and an empty dataset has none to re-evaluate. A genuine failure still falls through
+   * to `ErrorState` below.
+   */
+  if (isAlias && !currentQuery.error && currentQuery.isSuccess && !currentQuery.data) {
+    return (
+      <NoDisruptionOpen description="What-if re-evaluates recorded evidence against a changed input. Nothing has been started against this dataset, so there is no evidence to re-evaluate. Start a disruption from the Scenario Center." />
     );
   }
 

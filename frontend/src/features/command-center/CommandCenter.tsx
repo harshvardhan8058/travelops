@@ -28,6 +28,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api, ApiError } from '@/api/client';
 import type { FlightRow, IncidentGroupSummary } from '@/api/types';
+import { dimensionAssessment, groupAssessment } from '@/assessment';
 import {
   EmptyState,
   ErrorState,
@@ -350,11 +351,24 @@ export function CommandCenter() {
 }
 
 function GroupCard({ group }: { group: IncidentGroupSummary }) {
+  /*
+   * `measure` names which dimensions are findings and which are declared data.
+   *
+   * Flights and passengers come from declared membership and the booking table: they are populated
+   * the moment a group exists and are never the product of an assessment, so they are always
+   * legible as themselves. Connections and crew impact are counted from recorded service actions,
+   * so their zero is only a finding once something has looked — and until this card asked, it
+   * rendered "0 connections at risk" for a cascade nothing had examined.
+   */
+  const connections = dimensionAssessment(group.rollup_status, 'connections', 'connections');
+  const crew = dimensionAssessment(group.rollup_status, 'crew', 'crew impact');
+  const assessment = groupAssessment(group.rollup_status);
+
   const tiles = [
-    { field: 'flights_affected', label: 'Flights' },
-    { field: 'passengers_affected', label: 'Passengers' },
-    { field: 'connections_at_risk', label: 'Connections' },
-    { field: 'crew_pairings_affected', label: 'Crew pairings' },
+    { field: 'flights_affected', label: 'Flights', measure: null },
+    { field: 'passengers_affected', label: 'Passengers', measure: null },
+    { field: 'connections_at_risk', label: 'Connections', measure: connections },
+    { field: 'crew_pairings_affected', label: 'Crew pairings', measure: crew },
   ] as const;
 
   return (
@@ -394,19 +408,48 @@ function GroupCard({ group }: { group: IncidentGroupSummary }) {
         </Labelled>
       </div>
 
+      {assessment.isPartial && (
+        <Notice tone="warn" divider="none" className="rounded border">
+          <span className="text-fg">Partial assessment. </span>
+          {assessment.incidents === 0
+            ? 'This cascade is declared but no incident is open against it yet, so none of the figures below are findings.'
+            : `${assessment.fullyAssessed} of ${assessment.incidents} incidents fully assessed, ${assessment.awaiting} awaiting.`}
+          {assessment.flightsWithoutIncident > 0 &&
+            ` ${assessment.flightsWithoutIncident} declared flight${assessment.flightsWithoutIncident === 1 ? ' has' : 's have'} no incident open.`}{' '}
+          <Link to={`/cascade/${group.reference}`} className="underline hover:no-underline">
+            Advance the disruption
+          </Link>{' '}
+          to assess the declared incidents.
+        </Notice>
+      )}
+
       <StatStrip>
         {tiles.map((tile) => {
-          const value = group.rollups?.[tile.field];
+          const raw = group.rollups?.[tile.field];
+          const value = typeof raw === 'number' ? raw : null;
+          /*
+           * An unassessed dimension renders as the design system's absent value — an em dash —
+           * rather than as its own number. The number is real, but it is a count of findings that
+           * do not exist yet, and showing it as a measurement is the claim this card must not make.
+           */
+          const measured = tile.measure === null || tile.measure.isMeasured;
           return (
             <MetricTile
               key={tile.field}
               label={tile.label}
-              value={typeof value === 'number' ? value : null}
-              derivation={countDerivation(tile.label, typeof value === 'number' ? value : null, {
+              value={measured ? value : null}
+              derivation={countDerivation(tile.label, measured ? value : null, {
                 endpoint: 'GET /incident-groups',
                 field: `rollups.${tile.field}`,
                 provenance: group.provenance,
               })}
+              footnote={
+                tile.measure && tile.measure.note ? (
+                  <span className={measured ? undefined : 'text-state-warn'}>
+                    {measured ? tile.measure.note : 'not assessed'}
+                  </span>
+                ) : undefined
+              }
             />
           );
         })}

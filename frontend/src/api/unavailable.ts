@@ -91,8 +91,37 @@ export function resolveUnavailable(
  * the console already knows the answer to, and it holds the screen on a spinner before the empty
  * state an operator could have acted on immediately. `AgentConsole` already sets `retry: false` on
  * its plans query for this reason; this puts the rule in one place.
+ *
+ * No 404 is retried, classified or not. The docstring above always claimed that, and the rule
+ * underneath it only skipped the retry for a 404 whose details carried a resolution — so an
+ * *unclassified* 404, the `"incident not found"` raised for a reference the nav still links to
+ * after a dataset restore, fell through to `failureCount < 2`. Against react-query's zero-based
+ * counter that is three attempts: this helper made the very errors it exists to quieten noisier
+ * than the app default of one retry. A missing resource does not become present on the second
+ * ask; only the transient classes below are worth a second request.
  */
 export function retryUnlessUnavailable(failureCount: number, error: unknown): boolean {
   if (dataUnavailable(error) !== null) return false;
-  return failureCount < 2;
+  if (error instanceof ApiError && error.status === 404) return false;
+  return failureCount < 1;
+}
+
+/**
+ * A `refetchInterval` that stops once the answer is known to be "not yet".
+ *
+ * react-query re-arms a polling interval on error as readily as on success, so a screen polling a
+ * resource that does not exist reissues the same 404 every few seconds for as long as it is open —
+ * the shell's assurance and timeline reads, at ten and five seconds, against an incident reference
+ * the nav hardcodes and a dataset restore deletes. Every one of those requests logs to the browser
+ * console, and none of them can change the answer: the resource appears because an operator starts
+ * something, and that navigates.
+ *
+ * Only 404s stop the poll. A 5xx or a network drop is exactly the transient case polling is for.
+ */
+export function pollUnlessMissing(intervalMs: number) {
+  return (query: { state: { error: unknown } }): number | false => {
+    const error = query.state.error;
+    if (error instanceof ApiError && error.status === 404) return false;
+    return intervalMs;
+  };
 }

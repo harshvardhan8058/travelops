@@ -109,7 +109,21 @@ async def _load_incident(session: AsyncSession, key: str) -> Incident:
     if incident is None and key.isdigit():
         incident = await session.get(Incident, int(key))
     if incident is None:
-        raise EntityNotFound("incident not found", details={"incident": key})
+        # `resolution` is what makes this classifiable as a not-yet state rather than a fault.
+        # The console's nav links to a fixed incident reference because it has nowhere to read a
+        # live one from, and the Scenario Center's Restore control deletes it — so this 404 is a
+        # routine consequence of the product's own front door, and the screen reaching it should
+        # say what to do instead of reporting a load failure.
+        raise EntityNotFound(
+            "incident not found",
+            details={
+                "incident": key,
+                "resolution": (
+                    "No incident carries this reference. Start a disruption from the Scenario "
+                    "Center, then open it from the Command Center."
+                ),
+            },
+        )
     return incident
 
 

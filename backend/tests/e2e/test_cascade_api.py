@@ -123,6 +123,34 @@ class TestGroupList:
         assert response.status_code == 200
         assert response.json()["reference"] == GROUP_REF
 
+    def test_the_current_group_is_null_not_404_when_none_is_started(self, client, cascade):
+        """A group that exists but has never been started is not current, and that is not an error.
+
+        The Scenario Center's Restore control leaves precisely this state, and four polling
+        surfaces read this endpoint. A 404 here put a permanent stream of failed requests in the
+        browser console for a condition every one of those screens renders calmly, and could not
+        be told apart from a genuine fault without parsing an error body.
+        """
+        response = client.get(f"{PREFIX}/incident-groups/current")
+        assert response.status_code == 200
+        assert response.json() is None
+
+    def test_rollup_status_names_which_assessments_ran(self, client, cascade):
+        """`is_complete` says something is missing; these say what.
+
+        Without them a client rendering `connections_at_risk: 0` has to choose between two
+        opposite sentences -- "assessed, none at risk" and "not looked at yet" -- with nothing in
+        the payload to choose by. The group here is opened but never advanced, so both
+        assessments are recorded against zero of its incidents.
+        """
+        client.post(f"{PREFIX}/incident-groups/{cascade}/open")
+
+        status = client.get(f"{PREFIX}/incident-groups/current").json()["rollup_status"]
+        assert status["incidents_in_group"] == 2
+        assert status["incidents_assessed_connections"] == 0
+        assert status["incidents_assessed_crew"] == 0
+        assert status["is_complete"] is False
+
     def test_an_unknown_group_is_a_404_not_an_empty_shell(self, client, cascade):
         response = client.get(f"{PREFIX}/incident-groups/GRP-NOPE")
         assert response.status_code == 404

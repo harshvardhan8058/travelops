@@ -42,7 +42,7 @@ export interface ScenarioLifecycleClient {
     actorId?: string,
     idempotencyKey?: string,
   ): Promise<ScenarioStartResponse>;
-  currentGroup(): Promise<IncidentGroupSummary>;
+  currentGroup(): Promise<IncidentGroupSummary | null>;
   incidentGroup(reference: string): Promise<IncidentGroupDetail>;
 }
 
@@ -180,6 +180,18 @@ export async function runScenarioLifecycle(
       `${options.operationKey}-start`,
     );
     selected = await client.currentGroup();
+    /*
+     * `null` here means the scenario reported as started is not the current group — the same
+     * failure `CURRENT_GROUP_MISMATCH` names, with nothing to name it against. Raising the same
+     * code keeps one story for "start returned 200 and the console still cannot land on it".
+     */
+    if (selected === null) {
+      throw new ScenarioSubmissionError(
+        'CURRENT_GROUP_MISMATCH',
+        `Scenario ${created.scenario_reference} started, but /incident-groups/current reports no started group.`,
+        { scenario_reference: created.scenario_reference, current_reference: null },
+      );
+    }
     if (selected.reference !== created.scenario_reference) {
       throw new ScenarioSubmissionError(
         'CURRENT_GROUP_MISMATCH',

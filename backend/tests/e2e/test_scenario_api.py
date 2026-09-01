@@ -251,9 +251,12 @@ async def test_scenario_becomes_current_only_after_start(client, seeded):
     created = client.post(f"{PREFIX}/scenarios", json=_scenario_payload()).json()
     reference = created["scenario_reference"]
 
+    # 200 with a `null` body, not 404: "nothing is started" is an answer to the landing query,
+    # not a missing resource. Asserting the body still proves the authored scenario has not
+    # become current merely by being created.
     before_start = client.get(f"{PREFIX}/incident-groups/current")
-    assert before_start.status_code == 404
-    assert before_start.json()["error"]["code"] == "ENTITY_NOT_FOUND"
+    assert before_start.status_code == 200
+    assert before_start.json() is None
 
     started = client.post(
         f"{PREFIX}/scenarios/{reference}/start",

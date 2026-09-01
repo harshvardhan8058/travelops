@@ -33,19 +33,31 @@ import { MonoValue, ProvenanceDot, StateBadge } from './primitives';
 import { PackStandingChip } from '@/features/policy-citation/PackStandingView';
 import type { SystemMode } from '@/api/types';
 import { deriveModeChips, type ModeChipView, type ModePosture } from '@/api/runtimeModes';
+import { NO_INCIDENT_REASON } from '@/navScope';
 
+/*
+ * `incident: true` marks an entry the rail cannot address on its own.
+ *
+ * Seven of these are keyed on an incident and the rail has nowhere to read a live reference from,
+ * so each carried a hardcoded `INC-2026-0820-VOBL-01`. The Scenario Center's Restore control
+ * deletes that incident and the rail went on offering all seven links to it — every one a screen
+ * that issued three or four requests for an entity the operator had just removed and reported them
+ * as load failures. `navScope.ts` resolves the reference from the flight board, which is the only
+ * endpoint publishing the flight -> incident link; when nothing is open the entry is disabled and
+ * says so, which is one fewer dead end than a link that 404s on arrival.
+ */
 const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Ops Board' },
   { to: '/cascade/current', icon: GitFork, label: 'Cascade' },
-  { to: '/incidents/INC-2026-0820-VOBL-01', icon: ListChecks, label: 'Recovery workspace' },
-  { to: '/agent/INC-2026-0820-VOBL-01', icon: Bot, label: 'Agent operations' },
-  { to: '/impact/INC-2026-0820-VOBL-01', icon: Users, label: 'Impact' },
+  { to: '/incidents/:id', icon: ListChecks, label: 'Recovery workspace', incident: true },
+  { to: '/agent/:id', icon: Bot, label: 'Agent operations', incident: true },
+  { to: '/impact/:id', icon: Users, label: 'Impact', incident: true },
   { to: '/assurance', icon: ShieldCheck, label: 'Approval queue' },
   { to: '/what-if/current', icon: FlaskConical, label: 'What-if' },
-  { to: '/plans/INC-2026-0820-VOBL-01', icon: GitCompare, label: 'Plan comparison' },
-  { to: '/policy/INC-2026-0820-VOBL-01', icon: Scale, label: 'Policy & citations' },
-  { to: '/replay/INC-2026-0820-VOBL-01', icon: History, label: 'Replay' },
-  { to: '/reports/INC-2026-0820-VOBL-01', icon: FileText, label: 'Report' },
+  { to: '/plans/:id', icon: GitCompare, label: 'Plan comparison', incident: true },
+  { to: '/policy/:id', icon: Scale, label: 'Policy & citations', incident: true },
+  { to: '/replay/:id', icon: History, label: 'Replay', incident: true },
+  { to: '/reports/:id', icon: FileText, label: 'Report', incident: true },
   { to: '/sources', icon: Database, label: 'Provenance ledger' },
   // Phase 5. None of these is keyed on an incident, so they sit at the end rather than beside the
   // incident-scoped entries.
@@ -58,34 +70,57 @@ const NAV = [
   { to: '/passenger/K4X8YR', icon: Luggage, label: 'Passenger view' },
 ] as const;
 
-function Rail() {
+function Rail({ incidentInScope }: { incidentInScope: string | null }) {
   return (
     <nav
       aria-label="Primary"
       className="flex w-rail shrink-0 flex-col items-center gap-1 border-r border-border-subtle bg-inset py-2"
     >
-      {NAV.map(({ to, icon: Icon, label }) => (
-        <NavLink
-          key={to}
-          to={to}
-          title={label}
-          aria-label={label}
-          // `/scenarios` needs an exact match as much as `/` does: without it, `/scenarios/new`
-          // would light up the Scenario Center too and the rail would show two active surfaces.
-          end={to === '/' || to === '/scenarios'}
-          className={({ isActive }) =>
-            clsx(
-              'flex h-9 w-9 items-center justify-center rounded-sm transition-colors duration-hover ease-out',
-              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-              isActive
-                ? 'bg-accent-subtle text-accent'
-                : 'text-fg-muted hover:bg-raised hover:text-fg-secondary',
-            )
-          }
-        >
-          <Icon size={20} strokeWidth={1.5} aria-hidden />
-        </NavLink>
-      ))}
+      {NAV.map((entry) => {
+        const { icon: Icon, label } = entry;
+        const needsIncident = 'incident' in entry && entry.incident === true;
+
+        if (needsIncident && incidentInScope === null) {
+          return (
+            <span
+              key={entry.to}
+              title={`${label} — ${NO_INCIDENT_REASON}`}
+              aria-label={`${label}, unavailable: ${NO_INCIDENT_REASON}`}
+              aria-disabled="true"
+              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-sm text-fg-subtle opacity-40"
+            >
+              <Icon size={20} strokeWidth={1.5} aria-hidden />
+            </span>
+          );
+        }
+
+        const to = needsIncident
+          ? entry.to.replace(':id', encodeURIComponent(incidentInScope as string))
+          : entry.to;
+
+        return (
+          <NavLink
+            key={entry.to}
+            to={to}
+            title={label}
+            aria-label={label}
+            // `/scenarios` needs an exact match as much as `/` does: without it, `/scenarios/new`
+            // would light up the Scenario Center too and the rail would show two active surfaces.
+            end={to === '/' || to === '/scenarios'}
+            className={({ isActive }) =>
+              clsx(
+                'flex h-9 w-9 items-center justify-center rounded-sm transition-colors duration-hover ease-out',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                isActive
+                  ? 'bg-accent-subtle text-accent'
+                  : 'text-fg-muted hover:bg-raised hover:text-fg-secondary',
+              )
+            }
+          >
+            <Icon size={20} strokeWidth={1.5} aria-hidden />
+          </NavLink>
+        );
+      })}
     </nav>
   );
 }
@@ -212,6 +247,7 @@ export function AppShell({
   blockedCount,
   blockedSingular,
   blockedPlural,
+  incidentInScope,
   children,
 }: {
   mode?: SystemMode;
@@ -220,13 +256,15 @@ export function AppShell({
   blockedCount: number;
   blockedSingular: string;
   blockedPlural: string;
+  /** The incident the rail's incident-scoped entries address, or `null` when none is open. */
+  incidentInScope: string | null;
   children: ReactNode;
 }) {
   const degradations = mode?.degradations ?? [];
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden bg-base text-fg">
-      <Rail />
+      <Rail incidentInScope={incidentInScope} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar mode={mode} clock={clock} />
