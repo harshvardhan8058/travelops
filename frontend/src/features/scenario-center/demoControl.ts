@@ -47,18 +47,30 @@ export function resetConfirmationMatches(typed: string): boolean {
 /**
  * Turn a published simulation into the scenario request that starts it.
  *
- * Every operational value is copied. `effectiveAt` must be an ISO-8601 instant; the caller supplies
- * it because the clock is not this module's to read.
+ * Every operational value is copied, **including the instant**.
+ *
+ * `effective_at` deliberately cannot be supplied by the caller. It used to be a parameter, and the
+ * Scenario Center passed `new Date().toISOString()` — which looked obviously right and was the one
+ * defect that made a browser-started demo unfinishable. The dataset's evidence is a fixed-seed
+ * snapshot recorded against the scenario's own date, so an incident opened "now" is evaluated
+ * against a METAR that is however many days old this machine is. `sources_fresh` FAILs with
+ * `SOURCE_STALE`, and an evidence failure is refused by `enforce_action_approval` with 409
+ * `NOT_APPROVABLE_EVIDENCE` — approval covers risk, never failed evidence. The cascade then parks
+ * on a hold no operator can clear.
+ *
+ * Removing the parameter is the fix, not a workaround: the recorded clock is a property of the
+ * selection, the backend reads it from the seeded group row, and there is now no way for this module
+ * to express a wall-clock time. `demoControl.test.ts` asserts the source reads no clock at all.
  */
 export function simulationToScenarioRequest(
   simulation: SimulationDefinition,
-  options: { effectiveAt: string; actorId?: string },
+  options: { actorId?: string } = {},
 ): ScenarioCreateRequest {
   return {
     root_cause: simulation.root_cause,
     airport_icao: simulation.airport_icao,
     severity: simulation.severity,
-    effective_at: options.effectiveAt,
+    effective_at: simulation.effective_at,
     actor_id: options.actorId ?? 'operator-1',
     members: simulation.members.map((member) => ({
       // Verbatim. Recomputing any of these would be inventing the disruption.

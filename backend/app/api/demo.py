@@ -268,8 +268,35 @@ async def _active_incidents_on(session: AsyncSession, flight_ids: list[int]) -> 
     return list(references)
 
 
+async def _scenario_clock(session: AsyncSession) -> datetime | None:
+    """The recorded scenario clock: the seeded group's `opened_at`.
+
+    Read from the row rather than derived, because it is the SAME value `app.cli._inject` reads,
+    and a second copy would drift from the evidence it has to agree with. That function's own
+    docstring says why it matters: the timestamp "flows into the incident's `opened_at`, and from
+    there into the Delay Risk `as_of` — which is what makes the storm score against the observation
+    that was current when it hit".
+
+    `None` when the dataset has not been seeded, in which case no simulation can be declared at all.
+    """
+    opened_at = (
+        await session.execute(
+            select(IncidentGroup.opened_at).where(
+                IncidentGroup.reference == INCIDENT_GROUP_REFERENCE
+            )
+        )
+    ).scalar_one_or_none()
+    if opened_at is None:
+        return None
+    return opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=UTC)
+
+
 async def _resolve(
-    session: AsyncSession, definition: _Definition, *, onward: set[int]
+    session: AsyncSession,
+    definition: _Definition,
+    *,
+    onward: set[int],
+    clock: datetime | None,
 ) -> SimulationDefinitionOut:
     """Turn a shape into a runnable definition, or into an honest refusal.
 
@@ -281,7 +308,14 @@ async def _resolve(
         candidates = [flight for flight in candidates if flight.id in onward]
 
     blocked: str | None = None
-    if not candidates:
+    if clock is None:
+        # Without the recorded scenario clock there is no honest instant to declare this at,
+        # and the wall clock produces an unapprovable evidence refusal. Refused, not guessed.
+        blocked = (
+            "the seeded disruption group is missing, so the recorded scenario clock cannot "
+            "be read. Reset the demo data to restore it."
+        )
+    elif not candidates:
         blocked = (
             f"no flights depart {definition.airport_icao} in the current dataset"
             if not definition.require_onward_connections
@@ -340,6 +374,10 @@ async def _resolve(
         root_cause=definition.root_cause,
         airport_icao=definition.airport_icao,
         severity=definition.severity,
+        # The recorded clock when it is readable. When it is not, this definition is already
+        # blocked, so the value is never acted on — but the field is non-optional, and the epoch
+        # rather than `now()` keeps a blocked entry from ever looking declarable.
+        effective_at=clock if clock is not None else datetime(1970, 1, 1, tzinfo=UTC),
         members=members if blocked is None else [],
         passengers_affected=(
             await _passengers_on(session, [member.flight_id for member in members])
@@ -417,7 +455,10 @@ async def list_demo_simulations(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DemoSimulationsResponse:
     onward = await _flight_ids_with_onward_segments(session)
-    simulations = [await _resolve(session, definition, onward=onward) for definition in _CATALOGUE]
+    clock = await _scenario_clock(session)
+    simulations = [
+        await _resolve(session, definition, onward=onward, clock=clock) for definition in _CATALOGUE
+    ]
     return DemoSimulationsResponse(
         catalogue_version=CATALOGUE_VERSION,
         simulations=simulations,

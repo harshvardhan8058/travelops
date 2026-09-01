@@ -21,6 +21,8 @@ function simulation(overrides: Partial<SimulationDefinition> = {}): SimulationDe
     root_cause: 'weather',
     airport_icao: 'VOBL',
     severity: 'high',
+    // The RECORDED scenario clock, as the backend publishes it.
+    effective_at: '2026-08-20T15:40:00Z',
     members: [
       {
         flight_id: 1,
@@ -109,9 +111,7 @@ describe('resetConfirmationMatches', () => {
 describe('simulationToScenarioRequest', () => {
   it('copies every published member value verbatim', () => {
     const source = simulation();
-    const request = simulationToScenarioRequest(source, {
-      effectiveAt: '2026-08-20T15:36:00Z',
-    });
+    const request = simulationToScenarioRequest(source);
 
     expect(request.members).toEqual([
       { flight_id: 1, role: 'primary', delay_minutes: 420 },
@@ -120,9 +120,7 @@ describe('simulationToScenarioRequest', () => {
   });
 
   it('never adjusts a recorded delay, which POST /scenarios would refuse', () => {
-    const request = simulationToScenarioRequest(simulation(), {
-      effectiveAt: '2026-08-20T15:36:00Z',
-    });
+    const request = simulationToScenarioRequest(simulation());
 
     expect(request.members.map((m) => m.delay_minutes)).toEqual([420, 110]);
   });
@@ -130,7 +128,6 @@ describe('simulationToScenarioRequest', () => {
   it('carries the published root cause, airport and severity unchanged', () => {
     const request = simulationToScenarioRequest(
       simulation({ root_cause: 'weather', airport_icao: 'VOBL', severity: 'medium' }),
-      { effectiveAt: '2026-08-20T15:36:00Z' },
     );
 
     expect(request.root_cause).toBe('weather');
@@ -139,33 +136,25 @@ describe('simulationToScenarioRequest', () => {
   });
 
   it('preserves member order, so the primary stays first', () => {
-    const request = simulationToScenarioRequest(simulation(), {
-      effectiveAt: '2026-08-20T15:36:00Z',
-    });
+    const request = simulationToScenarioRequest(simulation());
 
     expect(request.members[0]?.role).toBe('primary');
   });
 
-  it('uses the supplied instant and actor', () => {
-    const request = simulationToScenarioRequest(simulation(), {
-      effectiveAt: '2026-08-20T15:36:00Z',
-      actorId: 'operator-7',
-    });
+  it('uses the published instant and the supplied actor', () => {
+    const request = simulationToScenarioRequest(simulation(), { actorId: 'operator-7' });
 
-    expect(request.effective_at).toBe('2026-08-20T15:36:00Z');
+    // The instant comes from the definition; only the actor is the caller's to supply.
+    expect(request.effective_at).toBe('2026-08-20T15:40:00Z');
     expect(request.actor_id).toBe('operator-7');
   });
 
   it('defaults the actor rather than sending an empty one', () => {
-    expect(
-      simulationToScenarioRequest(simulation(), { effectiveAt: '2026-08-20T15:36:00Z' }).actor_id,
-    ).toBe('operator-1');
+    expect(simulationToScenarioRequest(simulation()).actor_id).toBe('operator-1');
   });
 
   it('adds no field the scenario contract does not declare', () => {
-    const request = simulationToScenarioRequest(simulation(), {
-      effectiveAt: '2026-08-20T15:36:00Z',
-    });
+    const request = simulationToScenarioRequest(simulation());
 
     // `extra="forbid"` on the backend model means an invented key is a 422, not a silent ignore.
     expect(Object.keys(request).sort()).toEqual([
@@ -182,9 +171,7 @@ describe('simulationToScenarioRequest', () => {
   });
 
   it('does not carry flight_number, which the scenario contract does not accept', () => {
-    const request = simulationToScenarioRequest(simulation(), {
-      effectiveAt: '2026-08-20T15:36:00Z',
-    });
+    const request = simulationToScenarioRequest(simulation());
 
     expect(request.members[0]).not.toHaveProperty('flight_number');
   });
@@ -319,5 +306,68 @@ describe('datasetHeadlines', () => {
     const headlines = datasetHeadlines(dataset({ incidents: 0, incident_groups: 0 }));
 
     expect(headlines.find((h) => h.label === 'Incidents')?.value).toBe(0);
+  });
+});
+
+describe('the recorded clock, not the wall clock', () => {
+  it('declares the simulation at the instant the server published', () => {
+    const request = simulationToScenarioRequest(
+      simulation({ effective_at: '2026-08-20T15:40:00Z' }),
+    );
+
+    expect(request.effective_at).toBe('2026-08-20T15:40:00Z');
+  });
+
+  it('is not near the current time, which is what the defect produced', () => {
+    const request = simulationToScenarioRequest(simulation());
+    const declared = Date.parse(request.effective_at);
+
+    // The recorded dataset is anchored to its own date. A value close to now means a clock was read.
+    expect(Math.abs(Date.now() - declared)).toBeGreaterThan(3600_000);
+  });
+
+  it('offers no way for a caller to supply an instant', () => {
+    /*
+     * A type-level guarantee, asserted at runtime too. The parameter used to exist and the Scenario
+     * Center passed `new Date().toISOString()` into it, which is the single line that made a
+     * browser-started demo unfinishable: the recorded METAR is anchored to the dataset's date, an
+     * incident opened now fails `sources_fresh`, and a stale-evidence refusal is one no operator is
+     * allowed to approve.
+     */
+    const withAttemptedOverride = simulationToScenarioRequest(
+      simulation({ effective_at: '2026-08-20T15:40:00Z' }),
+      // @ts-expect-error the option does not exist, and must not
+      { effectiveAt: '2099-01-01T00:00:00Z' },
+    );
+
+    expect(withAttemptedOverride.effective_at).toBe('2026-08-20T15:40:00Z');
+  });
+
+  it('reads no clock anywhere in the module', () => {
+    // Source-level, because the honest implementation is one that *cannot* express a wall clock.
+    const source = readFileSync(new URL('./demoControl.ts', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    expect(source).not.toMatch(/new Date\(/);
+    expect(source).not.toMatch(/Date\.now\(/);
+    expect(source).not.toMatch(/toISOString\(/);
+  });
+
+  it('the screen reads no clock for the scenario instant either', () => {
+    const source = readFileSync(new URL('./ScenarioCenter.tsx', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    expect(source).not.toMatch(/new Date\(/);
+    expect(source).not.toMatch(/toISOString\(/);
+  });
+
+  it('the published instant is carried through unchanged for every definition shape', () => {
+    for (const instant of ['2026-08-20T15:40:00Z', '2026-01-02T03:04:05Z']) {
+      expect(simulationToScenarioRequest(simulation({ effective_at: instant })).effective_at).toBe(
+        instant,
+      );
+    }
   });
 });

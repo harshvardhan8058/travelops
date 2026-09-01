@@ -127,6 +127,24 @@ class SimulationDefinitionOut(BaseModel):
     root_cause: TriggerType
     airport_icao: str
     severity: str
+    #: The instant this simulation must be declared at — the recorded scenario clock, NOT now.
+    #:
+    #: This is published rather than left to the caller because the wall clock is the wrong answer
+    #: and the console has no way to know it. Every piece of evidence in the demo dataset is a
+    #: fixed-seed snapshot: the METAR for VOBL is recorded against the scenario's own date. An
+    #: incident opened at the current time is therefore evaluated against an observation that is
+    #: however many days old this machine happens to be, `sources_fresh` FAILs with `SOURCE_STALE`,
+    #: and the gate refuses the action for an EVIDENCE reason.
+    #:
+    #: That refusal is not approvable by anyone — `enforce_action_approval` answers 409
+    #: `NOT_APPROVABLE_EVIDENCE`, because approval covers risk and never failed evidence — so the
+    #: cascade parks on a hold no operator can clear. Measured before this field existed: a
+    #: browser-started simulation reported `metar:VOBL 15159m old, max 60m` and deadlocked.
+    #:
+    #: The value is read from the seeded `incident_group.opened_at`, which is the same row
+    #: `app.cli._inject` reads for exactly this reason. One value, read from the database, rather
+    #: than a second copy of the scenario clock that can drift.
+    effective_at: datetime
     #: Resolved members, primary first. Empty when the dataset cannot support this definition.
     members: list[SimulationMemberOut] = Field(default_factory=list)
     #: Passengers booked on the declared flights, counted from `booking_segment`. Null when no

@@ -239,6 +239,16 @@ export interface SimulationDefinition {
   root_cause: string;
   airport_icao: string;
   severity: string;
+  /**
+   * The instant this simulation must be declared at — the RECORDED scenario clock, never now.
+   *
+   * Published because the wall clock is the wrong answer and the console cannot know the right one.
+   * The demo dataset's evidence is a fixed-seed snapshot, so an incident opened at the current time
+   * is scored against a METAR that is days old, `sources_fresh` FAILs, and the resulting refusal is
+   * an EVIDENCE refusal — which no operator may approve. Measured before this field existed: a
+   * browser-started simulation deadlocked on `metar:VOBL 15159m old, max 60m`.
+   */
+  effective_at: string;
   /** Primary first. Empty when the dataset cannot support this definition. */
   members: SimulationMember[];
   /** Null when no bookings are recorded — "no records" and "nobody affected" differ. */

@@ -129,11 +129,15 @@ export function ScenarioCenter() {
 
   const start = useMutation({
     mutationFn: async (simulation: SimulationDefinition) => {
-      // The instant is supplied here because a clock is not the catalogue's to read. Everything
-      // else in the payload is copied from what the server published.
-      const payload = simulationToScenarioRequest(simulation, {
-        effectiveAt: new Date().toISOString(),
-      });
+      /*
+       * Every value in the payload comes from what the server published, the instant included.
+       *
+       * This used to pass `new Date().toISOString()`, and that single line made a browser-started
+       * demo impossible to finish: the recorded METAR is anchored to the dataset's own date, so an
+       * incident opened now fails `sources_fresh`, and a stale-evidence refusal is one no operator
+       * is permitted to approve. The clock belongs to the recording, not to the browser.
+       */
+      const payload = simulationToScenarioRequest(simulation);
       return runScenarioLifecycle(api, payload, {
         runAfterCreate: true,
         operationKey: operationKey.current,

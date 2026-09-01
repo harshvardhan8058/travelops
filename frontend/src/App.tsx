@@ -34,14 +34,25 @@ import { PassengerDisruptionView } from '@/features/passenger/PassengerDisruptio
 /** Used only when the current route names no incident, e.g. the Command Center. */
 const DEMO_INCIDENT = 'INC-2026-0820-VOBL-01';
 
-function useRouteIncidentId(fallback: string): string {
+/**
+ * The incident this route is about, or `null` when it is not about one.
+ *
+ * Returning `null` rather than a fallback is the point. It used to substitute `DEMO_INCIDENT` for
+ * every unmatched route, which meant a screen with no incident — the Scenario Center, the Scenario
+ * Builder — still fetched a hardcoded incident's timeline and assurance. Two consequences, both
+ * wrong: the rail beside those screens showed an unrelated incident's decisions, and immediately
+ * after a demo reset (when that incident does not exist) the console issued 404s for an entity
+ * nothing on screen had asked about.
+ *
+ * `impact` is in the list because that screen is incident-scoped too. There is no `/replay/group`
+ * route: Replay carries its own incident/group toggle, and a second entry path to the same screen
+ * would be the duplicate seam this integration exists to avoid.
+ */
+function useRouteIncidentId(): string | null {
   const { pathname } = useLocation();
-  // `impact` joins the list because that screen is incident-scoped too. There is no `/replay/group`
-  // route: Replay carries its own incident/group toggle, and a second entry path to the same screen
-  // would be the duplicate seam this integration exists to avoid.
   const match = /^\/(?:incidents|policy|replay|reports|plans|impact|agent)\/([^/]+)/.exec(pathname);
   const captured = match?.[1];
-  return captured ? decodeURIComponent(captured) : fallback;
+  return captured ? decodeURIComponent(captured) : null;
 }
 
 function useUtcClock(): string {
@@ -56,11 +67,23 @@ function useUtcClock(): string {
 export function App() {
   const clock = useUtcClock();
   const { pathname } = useLocation();
-  const incidentId = useRouteIncidentId(DEMO_INCIDENT);
+  const routeIncidentId = useRouteIncidentId();
+  /*
+   * Every surface that is not about one incident reads the current GROUP instead.
+   *
+   * `/scenarios` and `/scenarios/new` join the list because neither is incident-scoped: one starts
+   * cascades and the other authors a disruption that does not exist yet. Without them the shell fell
+   * through to the hardcoded demo incident and polled its assurance from a screen that never
+   * mentions it.
+   */
   const usesGroupApprovalScope =
+    routeIncidentId === null ||
     pathname === '/' ||
     pathname === '/assurance' ||
+    /^\/scenarios(?:\/|$)/.test(pathname) ||
     /^\/(?:cascade|what-if|passenger)\//.test(pathname);
+  // Only used by the incident-scoped copy below, which never renders under group scope.
+  const incidentId = routeIncidentId ?? DEMO_INCIDENT;
 
   const { data: mode } = useQuery({
     queryKey: ['system-mode'],
@@ -101,7 +124,9 @@ export function App() {
           ? 'incidents await operator approval in the current group'
           : `actions require an operator decision for ${incidentId}`
       }
-      timeline={<DecisionTimeline incidentId={incidentId} />}
+      // `null` on a screen that is not about an incident, so the rail says so instead of showing
+      // another incident's decisions or 404ing for one that does not exist.
+      timeline={<DecisionTimeline incidentId={routeIncidentId} />}
     >
       <Routes>
         <Route path="/" element={<CommandCenter />} />

@@ -36,14 +36,50 @@ def _factory(engine):
 
 
 @pytest.fixture
-async def board(seeded):
+async def clock(seeded):
+    """The seeded disruption group, which carries the recorded scenario clock.
+
+    A real seeded dataset always has this row — `app.cli._inject` reads its `opened_at` as the
+    scenario clock, and `GET /demo/simulations` now publishes the same value so a simulation is
+    declared against the instant its evidence was recorded rather than against the wall clock.
+
+    The hand-built fixtures below did not have it, which is exactly the state the catalogue must
+    refuse: with no readable clock there is no honest instant to declare, so every definition comes
+    back blocked. `TestTheClockIsReadFromTheRecordedDataset` asserts that refusal directly.
+    """
+    from app.db.seed import DEMO_DATASET_ID, INCIDENT_GROUP_REFERENCE
+    from app.models.workflow import IncidentGroup
+
+    async with _factory(seeded)() as db:
+        db.add(
+            IncidentGroup(
+                reference=INCIDENT_GROUP_REFERENCE,
+                root_cause="weather",
+                airport_icao="VOBL",
+                severity="high",
+                state="detected",
+                opened_at=DEPARTURE,
+                # Carried because a really seeded row carries it: `seed_demo_dataset` scopes its
+                # cleanup by dataset id, so a row without one survives the delete and then collides
+                # with the re-seeded group on `reference`.
+                demo_dataset_id=DEMO_DATASET_ID,
+            )
+        )
+        await db.commit()
+    return seeded
+
+
+@pytest.fixture
+async def board(clock):
     """A small VOBL departure board with recorded delays, plus one connecting itinerary.
+
+    Depends on `clock` so the dataset carries the recorded scenario clock a real seed always has.
 
     Built through the real models so the catalogue resolves against rows rather than literals. The
     delays differ on purpose: the catalogue promises the most delayed flight leads, and a board
     where every delay matched could not tell a correct ordering from an accidental one.
     """
-    async with _factory(seeded)() as db:
+    async with _factory(clock)() as db:
         second = Flight(
             flight_number="6E 811",
             airline_code="6E",
@@ -206,7 +242,7 @@ class TestTheCatalogueIsResolvedAgainstRealRows:
 
         assert weather["passengers_affected"] == 1
 
-    def test_an_uncountable_figure_is_null_rather_than_zero(self, client, seeded):
+    def test_an_uncountable_figure_is_null_rather_than_zero(self, client, clock):
         """No bookings are seeded here. Claiming 0 passengers would be a fabricated total.
 
         Deliberately on `seeded` rather than `incident`: the `incident` fixture opens a workflow on
@@ -231,7 +267,9 @@ class TestTheCatalogueIsResolvedAgainstRealRows:
         assert "recorded" in note
         assert "cannot invent" in note
 
-    def test_a_flight_already_in_an_active_workflow_blocks_the_simulation(self, client, incident):
+    def test_a_flight_already_in_an_active_workflow_blocks_the_simulation(
+        self, client, clock, incident
+    ):
         """`runnable` must mean "can be started now", not "the dataset has suitable rows".
 
         `POST /scenarios/{ref}/start` refuses a member flight owned by another active workflow with
@@ -250,7 +288,7 @@ class TestTheCatalogueIsResolvedAgainstRealRows:
         # And says how to get out of the state, since both routes out are controls this surface has.
         assert "reset the demo data" in weather["blocked_reason"].lower()
 
-    def test_a_blocked_simulation_is_still_listed_with_its_reason(self, client, incident):
+    def test_a_blocked_simulation_is_still_listed_with_its_reason(self, client, clock, incident):
         """Hiding it would leave an operator wondering where the simulation went."""
         body = _simulations(client)
         ids = [entry["id"] for entry in body["simulations"]]
@@ -261,7 +299,7 @@ class TestTheCatalogueIsResolvedAgainstRealRows:
         )
 
     def test_an_unaffected_definition_stays_runnable_alongside_a_blocked_one(
-        self, client, incident
+        self, client, clock, incident
     ):
         """The conflict is per-flight, so it must not blanket-block the catalogue.
 
@@ -286,7 +324,7 @@ class TestTheCatalogueIsResolvedAgainstRealRows:
 
 class TestAnUnsupportedDefinitionSaysSoRatherThanVanishing:
     def test_the_connection_simulation_is_blocked_without_a_connecting_itinerary(
-        self, client, incident
+        self, client, clock, incident
     ):
         connection = _by_id(_simulations(client), "connection_risk")
 
@@ -307,11 +345,11 @@ class TestAnUnsupportedDefinitionSaysSoRatherThanVanishing:
         assert connection["blocked_reason"] is None
         assert [m["flight_number"] for m in connection["members"]] == ["6E 2134"]
 
-    async def test_a_board_with_no_recorded_delay_is_refused(self, client, seeded):
+    async def test_a_board_with_no_recorded_delay_is_refused(self, client, clock):
         """A cascade in which nothing is late is not a disruption, so it is not offered."""
         import sqlalchemy
 
-        async with _factory(seeded)() as db:
+        async with _factory(clock)() as db:
             flight = (await db.execute(sqlalchemy.select(Flight))).scalars().one()
             flight.estimated_departure = None
             await db.commit()
@@ -328,6 +366,103 @@ class TestAnUnsupportedDefinitionSaysSoRatherThanVanishing:
 
 
 # ---------------------------------------------------------------- the integration that matters
+
+
+class TestTheClockIsReadFromTheRecordedDataset:
+    """The instant a simulation is declared at must be the recorded one, never the wall clock.
+
+    This is the defect that made a browser-started simulation deadlock. Every piece of evidence in
+    the demo dataset is a fixed-seed snapshot, so an incident opened "now" is scored against a METAR
+    that is however many days old this machine happens to be. `sources_fresh` then FAILs with
+    `SOURCE_STALE`, and an evidence failure is refused by `enforce_action_approval` with 409
+    `NOT_APPROVABLE_EVIDENCE` — approval covers risk, never failed evidence. The cascade parks on a
+    hold no operator can clear.
+
+    Measured before this contract carried `effective_at`: `metar:VOBL 15159m old, max 60m`, four
+    incidents, every approval attempt 409, group stuck in `planning`.
+    """
+
+    def test_the_published_instant_is_the_seeded_groups_opened_at(self, client, board):
+        for entry in _simulations(client)["simulations"]:
+            assert entry["effective_at"].startswith("2026-08-20T15:40"), entry["id"]
+
+    def test_the_published_instant_is_not_the_wall_clock(self, client, board):
+        """The load-bearing assertion. A wall-clock value is what caused the deadlock."""
+        now = datetime.now(UTC)
+
+        for entry in _simulations(client)["simulations"]:
+            published = datetime.fromisoformat(entry["effective_at"].replace("Z", "+00:00"))
+            assert abs((now - published).total_seconds()) > 3600, (
+                f"{entry['id']} published an instant within an hour of now, which means it is "
+                "reading a clock rather than the recorded dataset"
+            )
+
+    def test_every_definition_agrees_on_the_instant(self, client, board):
+        """One scenario clock, so two simulations cannot disagree about when the demo happens."""
+        instants = {entry["effective_at"] for entry in _simulations(client)["simulations"]}
+
+        assert len(instants) == 1
+
+    async def test_the_instant_keeps_the_recorded_observation_fresh(self, client, clock, board):
+        """The behavioural root cause, pinned.
+
+        `sources_fresh` measures the METAR's age against the incident's clock. The published instant
+        must therefore sit inside the freshness window of the observation the dataset actually
+        recorded — that is the whole reason it cannot be `now()`, and it is the difference between a
+        demo that reaches human approval and one that parks on `SOURCE_STALE` forever.
+
+        Both ends come from real sources: the observation from the database, the limit from the
+        assurance config on disk. Nothing here restates a number.
+        """
+        import sqlalchemy
+        import yaml
+
+        from app.config import REPO_ROOT
+        from app.models.reference import WeatherObservation
+
+        async with _factory(clock)() as db:
+            observed_at = (
+                (
+                    await db.execute(
+                        sqlalchemy.select(WeatherObservation.observed_at)
+                        .where(WeatherObservation.airport_icao == "VOBL")
+                        .order_by(WeatherObservation.observed_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
+
+        config = yaml.safe_load((REPO_ROOT / "config" / "assurance.v1.yaml").read_text())
+        limit_minutes = config["freshness"]["metar_minutes"]
+
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=UTC)
+
+        for entry in _simulations(client)["simulations"]:
+            published = datetime.fromisoformat(entry["effective_at"].replace("Z", "+00:00"))
+            age_minutes = (published - observed_at).total_seconds() / 60
+
+            assert 0 <= age_minutes <= limit_minutes, (
+                f"{entry['id']} declares an instant {age_minutes:.0f}m after the recorded "
+                f"observation, outside the {limit_minutes}m METAR window — sources_fresh "
+                "would FAIL and the resulting hold would be approvable by nobody"
+            )
+
+    def test_without_the_seeded_group_no_simulation_is_declarable(self, client, seeded):
+        """No readable clock means no honest instant, so the catalogue refuses rather than guesses.
+
+        Deliberately on `seeded`, which has flights but no disruption group — the state the
+        hand-built fixtures were in, and one a partially-truncated database can reach.
+        """
+        body = _simulations(client)
+
+        assert body["runnable_count"] == 0
+        for entry in body["simulations"]:
+            assert entry["runnable"] is False
+            assert "scenario clock" in entry["blocked_reason"]
+            # And it says how to fix it, because both routes out are controls this surface offers.
+            assert "reset the demo data" in entry["blocked_reason"].lower()
 
 
 class TestASimulationFeedsTheRealLifecycle:
@@ -348,7 +483,10 @@ class TestASimulationFeedsTheRealLifecycle:
                 "root_cause": simulation["root_cause"],
                 "airport_icao": simulation["airport_icao"],
                 "severity": simulation["severity"],
-                "effective_at": "2026-08-20T15:36:00Z",
+                # The PUBLISHED instant, not one this test chose. Hardcoding it here would have
+                # hidden the wall-clock defect: the console has to be able to declare a simulation
+                # using only what the catalogue gave it, and this is that value.
+                "effective_at": simulation["effective_at"],
                 "actor_id": "operator-1",
                 # Passed through exactly as published. Nothing is recomputed here.
                 "members": [
@@ -386,7 +524,7 @@ class TestASimulationFeedsTheRealLifecycle:
                 "root_cause": simulation["root_cause"],
                 "airport_icao": simulation["airport_icao"],
                 "severity": simulation["severity"],
-                "effective_at": "2026-08-20T15:36:00Z",
+                "effective_at": simulation["effective_at"],
                 "actor_id": "operator-1",
                 "members": members,
             },
