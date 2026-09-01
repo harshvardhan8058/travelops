@@ -13,6 +13,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/api/client';
+import { approvalScopeFor } from '@/approvalScope';
 import { AppShell } from '@/components/ui/AppShell';
 import { CommandCenter } from '@/features/command-center/CommandCenter';
 import { CascadeExplorer } from '@/features/cascade/CascadeExplorer';
@@ -69,19 +70,12 @@ export function App() {
   const { pathname } = useLocation();
   const routeIncidentId = useRouteIncidentId();
   /*
-   * Every surface that is not about one incident reads the current GROUP instead.
-   *
-   * `/scenarios` and `/scenarios/new` join the list because neither is incident-scoped: one starts
-   * cascades and the other authors a disruption that does not exist yet. Without them the shell fell
-   * through to the hardcoded demo incident and polled its assurance from a screen that never
-   * mentions it.
+   * Every surface that is not about one incident reads the current GROUP instead, and the surfaces
+   * that are about no disruption at all read neither. `approvalScope.ts` owns that decision and
+   * states why; keeping it in one pure function is what makes it testable.
    */
-  const usesGroupApprovalScope =
-    routeIncidentId === null ||
-    pathname === '/' ||
-    pathname === '/assurance' ||
-    /^\/scenarios(?:\/|$)/.test(pathname) ||
-    /^\/(?:cascade|what-if|passenger)\//.test(pathname);
+  const approvalScope = approvalScopeFor(pathname, routeIncidentId);
+  const usesGroupApprovalScope = approvalScope === 'group';
   // Only used by the incident-scoped copy below, which never renders under group scope.
   const incidentId = routeIncidentId ?? DEMO_INCIDENT;
 
@@ -95,14 +89,14 @@ export function App() {
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
     refetchInterval: 10_000,
-    enabled: !usesGroupApprovalScope && routeIncidentId !== null,
+    enabled: approvalScope === 'incident',
   });
 
   const { data: currentGroup } = useQuery({
     queryKey: ['current-group'],
     queryFn: api.currentGroup,
     refetchInterval: 10_000,
-    enabled: usesGroupApprovalScope,
+    enabled: approvalScope === 'group',
   });
 
   return (

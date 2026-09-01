@@ -132,6 +132,7 @@ function ModeChip({ chip }: { chip: ModeChipView }) {
 }
 
 function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
+  // Every chip is derived from `/system/mode`; none is asserted by the shell.
   const chips = deriveModeChips(mode);
 
   return (

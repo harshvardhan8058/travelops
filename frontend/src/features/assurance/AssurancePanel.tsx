@@ -48,8 +48,6 @@ import {
   StateBadge,
   WhyPopover,
 } from '@/components/ui/primitives';
-import { Button } from '@/components/ui/composition';
-import { checkDerivation, decisionDerivation } from '@/components/ui/derivation';
 import {
   Button,
   DefinitionList,
@@ -57,6 +55,7 @@ import {
   Notice,
   ReasonField,
 } from '@/components/ui/composition';
+import { checkDerivation, decisionDerivation } from '@/components/ui/derivation';
 
 const CHECK_LABEL: Record<CheckName, string> = {
   evidence_complete: 'Evidence completeness',

@@ -22,6 +22,8 @@ Endpoint status after the Phase 2 increment:
 | `POST /incident-groups/{ref}/open`, `/run`, `/what-if` | real (Stream A + C) |
 | `/incident-groups/{ref}/assurance` + `POST .../assurance/decision` | real (Stream A + B) |
 | `/flights` | real (Stream A) — persisted flights, null where nothing has been assessed |
+| `/demo/dataset`, `/demo/simulations` | real (Stream A) — read-only demo control |
+| `POST /demo/reset` | real (Stream A) — destructive, demo envs only, typed confirmation |
 | `/sources` | fixture — Stream C's providers and loaders |
 | `/incidents/{ref}/policy` | real (Stream A route, Stream B engine) |
 | `/reports/{id}` | fixture — the Report Generator |
@@ -36,6 +38,7 @@ from fastapi import APIRouter
 
 from app.api import (
     assurance_router,
+    demo,
     fixtures_router,
     flights,
     health,
@@ -61,6 +64,7 @@ router.include_router(replay.router)
 router.include_router(reasoning.router)
 router.include_router(scenarios.router)
 router.include_router(flights.router)
+router.include_router(demo.router)
 
 # Fixture-backed remainder. Each owning stream replaces its section in place, keeping the
 # response shape identical so the frontend never has to change.

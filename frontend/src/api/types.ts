@@ -95,14 +95,13 @@ export const CHECK_ORDER: readonly CheckName[] = [
 // ---------------------------------------------------------------- system
 export interface SystemMode {
   llm_mode: 'live' | 'fixture' | 'off';
-  flight_status_mode: 'live' | 'fixture';
-  weather_mode: 'live' | 'fixture';
   /**
    * Observed flight state. Published as the *effective* mode, so a `live` request that degraded
    * to the snapshot reports `fixture` here and names the reason in `degradations`
    * (`backend/app/config.py` `RuntimeModes.to_dict`).
    */
   flight_status_mode: 'live' | 'fixture';
+  weather_mode: 'live' | 'fixture';
   notification_mode: 'console' | 'mailtrap' | 'gmail';
   policy_mode: 'demo' | 'charter' | 'verified';
   real_email_enabled: boolean;
