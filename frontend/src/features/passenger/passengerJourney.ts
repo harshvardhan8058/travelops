@@ -8,13 +8,20 @@ export interface PassengerJourneyState {
 }
 
 /**
- * Passenger-friendly wording derived only from the current group record.
+ * Passenger-friendly wording derived from a recorded state and whether a decision is pending.
  *
  * `resolved` means the disruption review finished. It does not mean this booking was rebooked,
  * refunded, ticketed, or assigned a room; no endpoint publishes those outcomes today.
+ *
+ * Shared by both callers that need this wording — the group-level projection below, and the
+ * booking's own linked incident in `PassengerDisruptionView` — so there is exactly one mapping
+ * from a recorded state to passenger words, not two copies that could drift apart.
  */
-export function passengerJourneyState(group: IncidentGroupSummary): PassengerJourneyState {
-  if (group.state === 'resolved') {
+export function journeyStateFor(
+  state: string,
+  awaitingApprovalCount: number,
+): PassengerJourneyState {
+  if (state === 'resolved') {
     return {
       token: 'resolved',
       label: 'review complete',
@@ -23,7 +30,7 @@ export function passengerJourneyState(group: IncidentGroupSummary): PassengerJou
     };
   }
 
-  if (group.state === 'blocked') {
+  if (state === 'blocked') {
     return {
       token: 'blocked',
       label: 'review needs attention',
@@ -32,7 +39,7 @@ export function passengerJourneyState(group: IncidentGroupSummary): PassengerJou
     };
   }
 
-  if (group.state === 'failed') {
+  if (state === 'failed') {
     return {
       token: 'failed',
       label: 'review unsuccessful',
@@ -41,7 +48,7 @@ export function passengerJourneyState(group: IncidentGroupSummary): PassengerJou
     };
   }
 
-  if (group.awaiting_approval_count > 0 || group.state === 'awaiting_approval') {
+  if (awaitingApprovalCount > 0 || state === 'awaiting_approval') {
     return {
       token: 'awaiting_approval',
       label: 'waiting for a decision',
@@ -51,7 +58,7 @@ export function passengerJourneyState(group: IncidentGroupSummary): PassengerJou
     };
   }
 
-  if (group.state === 'executing') {
+  if (state === 'executing') {
     return {
       token: 'executing',
       label: 'work in progress',
@@ -61,11 +68,16 @@ export function passengerJourneyState(group: IncidentGroupSummary): PassengerJou
   }
 
   return {
-    token: group.state,
+    token: state,
     label: 'review in progress',
     headline: 'We are reviewing this disruption',
     detail: 'We are still working through the available information.',
   };
+}
+
+/** Thin wrapper over {@link journeyStateFor} for the current-group record. */
+export function passengerJourneyState(group: IncidentGroupSummary): PassengerJourneyState {
+  return journeyStateFor(group.state, group.awaiting_approval_count);
 }
 
 export interface PassengerLookup {

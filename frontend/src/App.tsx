@@ -68,8 +68,31 @@ function useUtcClock(): string {
 }
 
 export function App() {
-  const clock = useUtcClock();
   const { pathname } = useLocation();
+
+  /*
+   * The passenger route is a customer portal, not one more operator screen. It renders its own
+   * shell (`PassengerShell`, not `AppShell`) with no icon rail, no mode chips, no Decision
+   * Timeline and no blocked-actions bar — none of which a passenger can act on or should see —
+   * so it has to branch before any of the operator shell's hooks below run, not just before the
+   * operator's `<Routes>` block. A booking reference is not an incident reference either: feeding
+   * one to the incident-scoped queries below would put a 404 in the console beside a screen that
+   * rendered fine on its own contract.
+   */
+  const passengerMatch = /^\/passenger\/([^/]+)/.exec(pathname);
+  if (passengerMatch) {
+    return (
+      <Routes>
+        <Route path="/passenger/:bookingRef" element={<PassengerDisruptionView />} />
+      </Routes>
+    );
+  }
+
+  return <OperatorConsole pathname={pathname} />;
+}
+
+function OperatorConsole({ pathname }: { pathname: string }) {
+  const clock = useUtcClock();
   const routeIncidentId = useRouteIncidentId();
   /*
    * Every surface that is not about one incident reads the current GROUP instead, and the surfaces
@@ -171,26 +194,18 @@ export function App() {
         <Route path="/plans/:incidentId" element={<PlanComparison />} />
         <Route path="/reports/:incidentId" element={<ReportScreen />} />
         {/*
-         * Phase 5. Neither route is incident-scoped, so neither joins the regex above:
+         * Phase 5. `/scenarios/new` authors a disruption that does not exist yet, so there is no
+         * incident for the timeline to follow, and it is not incident-scoped, so it stays out of
+         * the regex above. The Scenario Center is the demo's front door: it reports what is in the
+         * database, starts a catalogued simulation through the existing scenario lifecycle, and
+         * restores the dataset — also not incident-scoped.
          *
-         *   /scenarios/new        authors a disruption that does not exist yet, so there is no
-         *                         incident for the timeline to follow.
-         *   /passenger/:ref       is keyed on a BOOKING reference, not an incident reference. Adding
-         *                         it to that alternation would feed a PNR to the assurance query and
-         *                         put a 404 in the rail beside a screen that rendered fine.
-         *
-         * The passenger route is keyed on a booking reference, not an incident reference. It reads
-         * the current group's persisted passenger-priority records and keeps booking outcome fields
-         * explicitly unavailable because no passenger outcome endpoint serves them.
-         */}
-        {/*
-         * The Scenario Center is the demo's front door: it reports what is in the database, starts a
-         * catalogued simulation through the existing scenario lifecycle, and restores the dataset.
-         * Like `/scenarios/new` it is not incident-scoped, so it stays out of the regex above.
+         * `/passenger/:bookingRef` is NOT registered here. `App()` branches to it before this
+         * component even renders, because it is a customer portal in its own shell (see
+         * `PassengerShell`), not an operator screen — see the comment at the top of `App()`.
          */}
         <Route path="/scenarios" element={<ScenarioCenter />} />
         <Route path="/scenarios/new" element={<ScenarioBuilder />} />
-        <Route path="/passenger/:bookingRef" element={<PassengerDisruptionView />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

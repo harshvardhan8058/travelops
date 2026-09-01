@@ -29,11 +29,13 @@ const NO_APPROVAL_ROUTES = new Set(['/scenarios', '/scenarios/new', '/sources'])
 
 export function approvalScopeFor(pathname: string, routeIncidentId: string | null): ApprovalScope {
   if (NO_APPROVAL_ROUTES.has(pathname)) return 'none';
+  // `/passenger/:bookingRef` never reaches this function: `App()` branches to it, in its own
+  // shell, before the operator console (the only caller of `approvalScopeFor`) even renders.
   const network =
     routeIncidentId === null ||
     pathname === '/' ||
     pathname === '/assurance' ||
     /^\/scenarios(?:\/|$)/.test(pathname) ||
-    /^\/(?:cascade|what-if|passenger)\//.test(pathname);
+    /^\/(?:cascade|what-if)\//.test(pathname);
   return network ? 'group' : 'incident';
 }

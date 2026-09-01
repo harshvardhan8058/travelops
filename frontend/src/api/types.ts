@@ -165,6 +165,32 @@ export interface FlightsResponse {
   flights: FlightRow[];
 }
 
+// ---------------------------------------------------------------- bookings (passenger view)
+export interface BookingSegment {
+  segment_order: number;
+  flight_id: number;
+  flight_number: string;
+  origin_icao: string;
+  destination_icao: string;
+  scheduled_departure: string;
+  estimated_departure: string | null;
+  /** Derived the same way `FlightRow.delay_minutes` is: the two can never disagree. */
+  delay_minutes: number;
+  status: string;
+  /** The incident an operator would follow from this segment, or `null` if none is open. */
+  incident_reference: string | null;
+  provenance: Provenance;
+}
+
+export interface BookingLookupResponse {
+  pnr: string;
+  /** Matches `PassengerImpact.passenger_reference` for the same booking. */
+  passenger_reference: string;
+  cabin: string;
+  /** Ordered by `segment_order`. A connecting itinerary is two rows, not one collapsed row. */
+  segments: BookingSegment[];
+}
+
 // ---------------------------------------------------------------- authored scenarios
 export type ScenarioMemberRole = 'primary' | 'affected_departure' | 'affected_arrival';
 
