@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/api/client';
 import { approvalScopeFor } from '@/approvalScope';
+import { incidentNavTarget } from '@/navScope';
 import { pollUnlessMissing, retryUnlessUnavailable } from '@/api/unavailable';
 import { AppShell } from '@/components/ui/AppShell';
 import { CommandCenter } from '@/features/command-center/CommandCenter';
@@ -100,6 +101,14 @@ export function App() {
     enabled: approvalScope === 'incident',
   });
 
+  /*
+   * Only the flight board publishes the flight -> incident link, and it answers 200 whether or not
+   * anything is open. Sharing the Command Center's query key means following the rail costs no
+   * extra request on the screen an operator lands on first.
+   */
+  const { data: flights } = useQuery({ queryKey: ['flights'], queryFn: api.flights });
+  const incidentInScope = routeIncidentId ?? incidentNavTarget(flights?.flights);
+
   const { data: currentGroup } = useQuery({
     queryKey: ['current-group'],
     queryFn: api.currentGroup,
@@ -129,6 +138,7 @@ export function App() {
       }
       // `null` on a screen that is not about an incident, so the rail says so instead of showing
       // another incident's decisions or 404ing for one that does not exist.
+      incidentInScope={incidentInScope}
       timeline={<DecisionTimeline incidentId={routeIncidentId} />}
     >
       <Routes>
