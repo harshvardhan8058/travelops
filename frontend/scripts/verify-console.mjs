@@ -164,8 +164,15 @@ const ROUTES = [
   {
     path: '/passenger/K4X8YR',
     name: 'Passenger operational view',
-    expect: ['K4X8YR', 'persisted_records', 'No passenger booking outcome is available'],
-    expectExactCase: ['persisted_records'],
+    /*
+     * This view now reads `GET /passenger/{booking_ref}/disruption`, whose basis token is
+     * `recorded_rows`; it previously composed itself from the capped group-impact contract, whose
+     * token was `persisted_records`. The assertion is the same one either way, and it is the one
+     * that matters here: a contract value must reach the DOM VERBATIM, because a passenger-facing
+     * screen that uppercases a machine token is misreporting what the API said.
+     */
+    expect: ['K4X8YR', 'recorded_rows', 'No confirmed booking change is published'],
+    expectExactCase: ['recorded_rows'],
   },
   { path: '/sources', name: 'Provenance ledger', expect: [] },
 ];
