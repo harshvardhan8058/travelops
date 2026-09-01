@@ -33,6 +33,7 @@
 
 import { AlertTriangle, Ban, CheckCircle2, Info, MinusCircle } from 'lucide-react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 
 import type { DataUnavailable } from '@/api/unavailable';
@@ -662,6 +663,43 @@ export function NotYetAvailable({
           <StateBadge status="pending" label={unavailable.code} />
           <span className="text-caption text-fg-muted">{unavailable.message}</span>
         </span>
+      }
+    />
+  );
+}
+
+// ---------------------------------------------------------------- NoDisruptionOpen
+/**
+ * The answer to "no group is started", on every surface that asks for one.
+ *
+ * `GET /incident-groups/current` answers `null` on a restored dataset, and four surfaces read it:
+ * the shell's blocked-actions bar, the group approval queue, the passenger view, and the Cascade
+ * Explorer's `current` alias. Each used to phrase the same emptiness differently -- one as a load
+ * failure, one as hardcoded prose telling the operator to run a CLI seed -- for the one state the
+ * product's own front door leaves behind.
+ *
+ * The link is the point. A screen that says only "nothing is open" has told the operator what is
+ * missing and not what to do about it, and the Scenario Center is what makes a disruption exist
+ * without a terminal.
+ */
+export function NoDisruptionOpen({
+  title = 'No disruption is open',
+  description = 'Nothing has been started against this dataset yet, so there is no cascade, no evidence and no plan to show. Start one from the Scenario Center.',
+}: {
+  title?: string;
+  description?: string;
+}) {
+  return (
+    <EmptyState
+      title={title}
+      description={description}
+      action={
+        <Link
+          to="/scenarios"
+          className="rounded-md border border-border bg-raised px-3 py-1.5 text-caption text-fg transition-colors hover:bg-inset focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          Open the Scenario Center
+        </Link>
       }
     />
   );

@@ -35,7 +35,6 @@ import { GroupRunControl } from '@/features/cascade/GroupRunControl';
 import { summariseGroupApproval, type GroupAuthorizationSummary } from './authorizationState';
 import {
   CheckStateBadge,
-  EmptyState,
   ErrorState,
   LoadingState,
   MonoValue,
@@ -49,6 +48,7 @@ import {
   DefinitionRow,
   Labelled,
   Notice,
+  NoDisruptionOpen,
   NotYetAvailable,
   PageHeader,
   PanelBody,
@@ -310,11 +310,28 @@ export function GroupApprovalQueue() {
   if (current.isLoading || assurance.isLoading) {
     return <LoadingState label="Loading the approval queue" />;
   }
-  if (current.isError) {
+  /*
+   * A resolved query with no data is `/current` answering "none is started". The copy here used
+   * to be hardcoded and used to instruct the operator to run a CLI seed — for a state the
+   * Scenario Center resolves in the browser, on the screen this now links to.
+   */
+  if (!current.isError && current.isSuccess && !current.data) {
     return (
-      <EmptyState
-        title="No disruption group is open"
-        description="Seed the demo dataset and inject the scenario, then this queue fills from the recorded evaluations."
+      <NoDisruptionOpen description="Nothing has been started against this dataset, so no plan has been evaluated and there is nothing to approve. Start a disruption from the Scenario Center." />
+    );
+  }
+  if (current.isError) {
+    const error = current.error;
+    return (
+      <ErrorState
+        code={error instanceof ApiError ? error.code : 'UNAVAILABLE'}
+        message={
+          error instanceof ApiError
+            ? error.message
+            : 'The current-group endpoint did not respond, so the queue cannot say what is open.'
+        }
+        correlationId={error instanceof ApiError ? error.correlationId : null}
+        onRetry={() => void current.refetch()}
       />
     );
   }

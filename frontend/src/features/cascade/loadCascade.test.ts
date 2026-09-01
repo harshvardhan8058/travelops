@@ -34,8 +34,24 @@ describe('loadCascade', () => {
     expect(currentGroup).toHaveBeenCalledOnce();
     expect(incidentGroup).toHaveBeenCalledWith(summary.reference);
     expect(result).toEqual({ selected: summary, detail });
-    expect(result.detail.flights).toEqual([]);
-    expect(result.detail.crew_pairings).toEqual([]);
+    expect(result.detail?.flights).toEqual([]);
+    expect(result.detail?.crew_pairings).toEqual([]);
+  });
+
+  it('reports an empty dataset as no group rather than fetching a detail for nothing', async () => {
+    /*
+     * `/current` answers `null` on a restored dataset. Fetching detail for a reference of `current`
+     * would 404 for a condition the Cascade Explorer renders calmly, and the screen reported
+     * "could not load cascade" — a load failure — for a database that was simply empty.
+     */
+    const currentGroup = vi.fn(async () => null);
+    const incidentGroup = vi.fn(async () => detail);
+
+    const result = await loadCascade({ currentGroup, incidentGroup }, 'current');
+
+    expect(currentGroup).toHaveBeenCalledOnce();
+    expect(incidentGroup).not.toHaveBeenCalled();
+    expect(result).toEqual({ selected: null, detail: null });
   });
 
   it('loads an explicit reference directly without consulting current selection', async () => {

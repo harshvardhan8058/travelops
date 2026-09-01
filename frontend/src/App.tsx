@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api } from '@/api/client';
 import { approvalScopeFor } from '@/approvalScope';
+import { pollUnlessMissing, retryUnlessUnavailable } from '@/api/unavailable';
 import { AppShell } from '@/components/ui/AppShell';
 import { CommandCenter } from '@/features/command-center/CommandCenter';
 import { CascadeExplorer } from '@/features/cascade/CascadeExplorer';
@@ -88,14 +89,22 @@ export function App() {
   const { data: assurance } = useQuery({
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
-    refetchInterval: 10_000,
+    /*
+     * Stops on a 404. The nav links to a fixed incident reference — it has nowhere to read a live
+     * one from — and the Scenario Center's Restore control deletes it. A plain interval then
+     * reissued the same failing read every ten seconds for as long as the tab stayed open, which
+     * is a console full of errors about a bar that correctly shows nothing.
+     */
+    refetchInterval: pollUnlessMissing(10_000),
+    retry: retryUnlessUnavailable,
     enabled: approvalScope === 'incident',
   });
 
   const { data: currentGroup } = useQuery({
     queryKey: ['current-group'],
     queryFn: api.currentGroup,
-    refetchInterval: 10_000,
+    refetchInterval: pollUnlessMissing(10_000),
+    retry: retryUnlessUnavailable,
     enabled: approvalScope === 'group',
   });
 

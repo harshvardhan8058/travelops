@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { api, ApiError } from '@/api/client';
 import type { TimelineEntry } from '@/api/types';
+import { pollUnlessMissing, retryUnlessUnavailable } from '@/api/unavailable';
 import { EmptyState, ErrorState, LoadingState, MonoValue } from '@/components/ui/primitives';
 import { TimelineItem, TimelineList } from '@/components/ui/composition';
 import { utcClock } from '@/components/ui/format';
@@ -75,7 +76,8 @@ export function DecisionTimeline({ incidentId }: { incidentId: string | null }) 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['timeline', incidentId],
     queryFn: () => api.timeline(incidentId as string),
-    refetchInterval: 5_000,
+    refetchInterval: pollUnlessMissing(5_000),
+    retry: retryUnlessUnavailable,
     enabled: incidentId !== null,
   });
 
@@ -95,7 +97,12 @@ export function DecisionTimeline({ incidentId }: { incidentId: string | null }) 
 
       {incidentId !== null && isLoading && <LoadingState label="Loading timeline" />}
 
-      {error && (
+      {/*
+        `Boolean(...)`, not `error &&`: react-query widens this query's error to `unknown` once
+        `refetchInterval` is a callback, and `unknown && <JSX/>` is not a renderable node. The
+        `instanceof` checks below are what actually read the error, and they are unaffected.
+      */}
+      {Boolean(error) && (
         <ErrorState
           code={error instanceof ApiError ? error.code : 'INTERNAL_ERROR'}
           message="Timeline unavailable"

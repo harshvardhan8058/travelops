@@ -625,6 +625,14 @@ export interface IncidentGroupSummary {
   rollups: Record<string, number>;
   awaiting_approval_count: number;
   provenance: Provenance;
+  /**
+   * Which of the rollups above are findings and which are still unmeasured.
+   *
+   * Optional because the group LIST endpoint has always carried it while older responses may not.
+   * `assessment.ts` treats absent as unknown rather than as zero — an older server saying nothing
+   * is not the same as a server saying nothing ran.
+   */
+  rollup_status?: GroupRollupStatus;
 }
 
 export interface IncidentGroupsResponse {
@@ -728,6 +736,21 @@ export interface GroupRollupStatus {
   /** Named, not counted, so the gap is actionable. */
   flights_without_incident: number[];
   membership_is_declared: boolean;
+  /**
+   * How many member incidents exist, and how many carry each assessment.
+   *
+   * `is_complete` collapses four separate causes into one boolean, which is enough to know that
+   * something is missing and not enough to say what. These are what let a caller tell
+   * `connections_at_risk: 0` meaning "assessed, none at risk" from the same zero meaning "not
+   * looked at yet" — two opposite operational facts that rendered identically until the server
+   * stopped discarding these counters at the serialisation boundary.
+   *
+   * Optional because a response predating the field is a real thing to receive; `assessment.ts`
+   * treats an absent counter as unknown rather than as zero.
+   */
+  incidents_in_group?: number;
+  incidents_assessed_connections?: number;
+  incidents_assessed_crew?: number;
 }
 
 /** One measured dimension of reach, with the service that measured it named. */

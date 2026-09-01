@@ -44,6 +44,17 @@ class RollupStatus(BaseModel):
     #: Declared member flights with no incident open, named rather than counted.
     flights_without_incident: list[int] = Field(default_factory=list)
     membership_is_declared: bool = True
+    #: How many member incidents exist, and how many have each assessment recorded against them.
+    #:
+    #: `is_complete` collapses four separate causes into one boolean, which is enough to know that
+    #: something is missing and not enough to say what. A client rendering `connections_at_risk: 0`
+    #: has to choose between two opposite sentences -- "assessed, none at risk" and "not looked at
+    #: yet" -- and until these counters were published there was nothing in the payload to choose
+    #: with. They are already computed on every call by `cascade_rollup`; this only stops
+    #: discarding them at the serialisation boundary.
+    incidents_in_group: int = 0
+    incidents_assessed_connections: int = 0
+    incidents_assessed_crew: int = 0
 
 
 class GroupRollups(BaseModel):

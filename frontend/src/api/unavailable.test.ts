@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { ApiError } from './client';
-import { dataUnavailable, resolveUnavailable, retryUnlessUnavailable } from './unavailable';
+import {
+  dataUnavailable,
+  pollUnlessMissing,
+  resolveUnavailable,
+  retryUnlessUnavailable,
+} from './unavailable';
 
 /**
  * The three 404s measured against the live API on a cascade that was injected but not advanced.
@@ -174,14 +179,53 @@ describe('retryUnlessUnavailable', () => {
     expect(retryUnlessUnavailable(0, PLANS_404)).toBe(false);
   });
 
-  it('still retries a transient failure, up to a bound', () => {
+  it('still retries a transient failure, up to the app default bound', () => {
+    // One retry, matching `main.tsx`'s `retry: 1`. react-query counts from zero, so this is two
+    // requests. It used to allow three, which made this helper noisier than no helper at all.
     const broken = new ApiError('INTERNAL_ERROR', 'boom', null, 500);
     expect(retryUnlessUnavailable(0, broken)).toBe(true);
-    expect(retryUnlessUnavailable(1, broken)).toBe(true);
-    expect(retryUnlessUnavailable(2, broken)).toBe(false);
+    expect(retryUnlessUnavailable(1, broken)).toBe(false);
   });
 
-  it('retries a missing entity, because that is not a documented state', () => {
-    expect(retryUnlessUnavailable(0, INCIDENT_MISSING_404)).toBe(true);
+  it('does not retry an unclassified 404 either', () => {
+    /*
+     * The docstring always claimed no 404 was retried; the rule underneath it only skipped the
+     * retry for a 404 carrying a `resolution`. So `"incident not found"` — raised for the fixed
+     * reference the nav links to, which a dataset restore deletes — fell through to the transient
+     * branch and cost three requests instead of one. A missing resource is still missing on the
+     * second ask; the retry only doubles what the browser console reports.
+     */
+    expect(retryUnlessUnavailable(0, INCIDENT_MISSING_404)).toBe(false);
+  });
+
+  it('retries a network failure that is not an ApiError at all', () => {
+    // No status to read: this is the transient class the bound exists for.
+    expect(retryUnlessUnavailable(0, new TypeError('Failed to fetch'))).toBe(true);
+  });
+});
+
+describe('pollUnlessMissing', () => {
+  const poll = pollUnlessMissing(10_000);
+  const q = (error: unknown) => ({ state: { error } });
+
+  it('keeps polling while nothing has failed', () => {
+    expect(poll(q(null))).toBe(10_000);
+  });
+
+  it('stops once the resource is missing', () => {
+    /*
+     * react-query re-arms a polling interval on error as readily as on success, so the shell's
+     * assurance read reissued the same 404 every ten seconds — and the timeline every five — for
+     * as long as the tab stayed open, against the fixed incident reference the nav links to. None
+     * of those requests could change the answer: the resource appears when an operator starts
+     * something, and that navigates.
+     */
+    expect(poll(q(INCIDENT_MISSING_404))).toBe(false);
+    expect(poll(q(PLANS_404))).toBe(false);
+  });
+
+  it('keeps polling through a transient failure, which is what polling is for', () => {
+    expect(poll(q(new ApiError('INTERNAL_ERROR', 'boom', null, 500)))).toBe(10_000);
+    expect(poll(q(new TypeError('Failed to fetch')))).toBe(10_000);
   });
 });

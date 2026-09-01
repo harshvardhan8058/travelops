@@ -23,6 +23,8 @@ import {
   ProvenanceDot,
   StateBadge,
 } from '@/components/ui/primitives';
+import { NoDisruptionOpen, Notice } from '@/components/ui/composition';
+import { dimensionAssessment, groupAssessment } from '@/assessment';
 import { Metric, MetricTile } from '@/components/ui/Metric';
 import { countDerivation } from '@/components/ui/derivation';
 import { GraphEdge, GraphLegend, GraphNode, GraphSurface } from '@/components/ui/Graph';
@@ -33,12 +35,21 @@ import { GroupRunControl } from './GroupRunControl';
 import { loadCascade } from './loadCascade';
 import { WhatIfPanel } from './WhatIfPanel';
 
+/*
+ * `measure` names which tiles are findings and which are declared or reference data.
+ *
+ * `null` is not "no assessment" — it is "this dimension is never an assessment". Flights and
+ * passengers come from declared membership and the booking table, and `candidate_hotels` counts
+ * properties at the airport: a search space, not a search result, which is why its footnote says
+ * discovered rather than required or secured. Connections and crew impact are the only two counted
+ * from recorded service actions, so they are the only two whose zero can lie.
+ */
 const ROLLUP_TILES = [
-  { field: 'flights_affected', label: 'Flights' },
-  { field: 'passengers_affected', label: 'Passengers' },
-  { field: 'connections_at_risk', label: 'Connections' },
-  { field: 'crew_pairings_affected', label: 'Crew pairings' },
-  { field: 'candidate_hotels', label: 'Hotels' },
+  { field: 'flights_affected', label: 'Flights', measure: null, footnote: null },
+  { field: 'passengers_affected', label: 'Passengers', measure: null, footnote: null },
+  { field: 'connections_at_risk', label: 'Connections', measure: 'connections', footnote: null },
+  { field: 'crew_pairings_affected', label: 'Crew pairings', measure: 'crew', footnote: null },
+  { field: 'candidate_hotels', label: 'Hotels', measure: null, footnote: 'discovered at airport' },
 ] as const;
 
 function CascadeSkeleton() {
@@ -94,6 +105,9 @@ export function CascadeExplorer() {
   const flightsQuery = useQuery({ queryKey: ['flights'], queryFn: api.flights });
 
   const group = groupQuery.data?.detail;
+  const connections = dimensionAssessment(group?.rollup_status, 'connections', 'connections');
+  const crew = dimensionAssessment(group?.rollup_status, 'crew', 'crew impact');
+  const assessment = groupAssessment(group?.rollup_status);
 
   /**
    * The server's projection is the only graph source. There is no client-side fallback, and that
@@ -115,6 +129,15 @@ export function CascadeExplorer() {
   });
 
   if (groupQuery.isLoading) return <CascadeSkeleton />;
+
+  /*
+   * Two opposite facts that used to render identically. `detail === null` on a resolved query is
+   * `loadCascade` reporting that `/current` answered "none is started" — an empty dataset, which
+   * the Scenario Center exists to fix. Anything else here is a real load failure.
+   */
+  if (!groupQuery.error && groupQuery.data && groupQuery.data.detail === null) {
+    return <NoDisruptionOpen />;
+  }
 
   if (groupQuery.error || !group) {
     const error = groupQuery.error instanceof ApiError ? groupQuery.error : null;
@@ -178,20 +201,51 @@ export function CascadeExplorer() {
           <StateBadge status={group.severity} label={`severity ${group.severity}`} />
           <StateBadge status={group.state} />
         </div>
+        {assessment.isPartial && (
+          <Notice tone="warn" divider="top">
+            <span className="text-fg">Partial assessment. </span>
+            {assessment.incidents === 0
+              ? 'This cascade is declared but no incident is open against it yet, so nothing below has been measured.'
+              : `${assessment.fullyAssessed} of ${assessment.incidents} incidents fully assessed, ${assessment.awaiting} awaiting.`}
+            {assessment.flightsWithoutIncident > 0 &&
+              ` ${assessment.flightsWithoutIncident} declared flight${assessment.flightsWithoutIncident === 1 ? ' has' : 's have'} no incident open.`}{' '}
+            Advance the disruption to run the next deterministic stage and assess the declared
+            incidents.
+          </Notice>
+        )}
         <div className="flex flex-wrap gap-2 border-t border-border-subtle px-3 py-2">
           {ROLLUP_TILES.map((tile) => {
-            const value = group.rollups?.[tile.field];
+            const raw = group.rollups?.[tile.field];
+            const value = typeof raw === 'number' ? raw : null;
+            const measure =
+              tile.measure === null ? null : tile.measure === 'connections' ? connections : crew;
+            /*
+             * An unmeasured dimension renders as the design system's absent value rather than as
+             * its own number. The number is real, but it counts findings that do not exist yet,
+             * and "0 connections at risk" for a cascade nothing has examined is the one sentence
+             * this panel must never say.
+             */
+            const measured = measure === null || measure.isMeasured;
             return (
               <MetricTile
                 key={tile.field}
                 label={tile.label}
-                value={typeof value === 'number' ? value : null}
+                value={measured ? value : null}
                 provenance={{ kind: group.provenance.kind, provider: group.provenance.provider }}
-                derivation={countDerivation(tile.label, typeof value === 'number' ? value : null, {
+                derivation={countDerivation(tile.label, measured ? value : null, {
                   endpoint: 'GET /incident-groups/{id}',
                   field: `rollups.${tile.field}`,
                   provenance: group.provenance,
                 })}
+                footnote={
+                  measure && !measured ? (
+                    <span className="text-state-warn">not assessed</span>
+                  ) : measure && measure.note ? (
+                    measure.note
+                  ) : (
+                    (tile.footnote ?? undefined)
+                  )
+                }
               />
             );
           })}

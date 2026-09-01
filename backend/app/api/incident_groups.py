@@ -126,6 +126,9 @@ def _status(rollup: CascadeRollup, *, computed_at: datetime | None = None) -> Ro
         note=ROLLUP_NOTE,
         flights_without_incident=list(rollup.flights_without_incident),
         membership_is_declared=rollup.membership_is_declared,
+        incidents_in_group=rollup.incidents_in_group,
+        incidents_assessed_connections=rollup.incidents_assessed_connections,
+        incidents_assessed_crew=rollup.incidents_assessed_crew,
     )
 
 
@@ -210,13 +213,31 @@ async def list_incident_groups(
 
 @router.get(
     "/incident-groups/current",
-    response_model=GroupSummary,
-    summary="The disruption group most recently started",
+    response_model=GroupSummary | None,
+    summary="The disruption group most recently started, or null when none is",
 )
 async def current_incident_group(
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> GroupSummary:
+) -> GroupSummary | None:
     """The console's landing query. Excludes authored-but-unstarted empty groups.
+
+    Answers with `null`, not `404`, when nothing is started. "Which group is current" is a
+    question about the whole table rather than a request for one row, and on a freshly restored
+    dataset "none is" is the correct answer to it -- the state the Scenario Center exists to move
+    the operator out of, not a missing resource.
+
+    This used to raise `ENTITY_NOT_FOUND`, and the cost was paid on the demo's own front door. The
+    Scenario Center's Restore control leaves exactly this state, and four surfaces read this
+    endpoint: the shell's blocked-actions bar and the Decision Timeline beside it, the group
+    approval queue, the passenger view, and the Cascade Explorer's `current` alias. Each polls,
+    two of them every ten seconds, so a restored dataset produced a permanent stream of failed
+    requests in the browser console for a condition every one of those screens is designed to
+    render calmly. A 404 also cannot be told apart from a genuine fault by anything downstream
+    without parsing an error body, so the Cascade Explorer reported "could not load cascade" --
+    a load failure -- for a database that was simply empty.
+
+    `null` is not a weaker answer. It moves the condition from the error channel to the data
+    channel, where every caller must handle it explicitly and can say what to do next.
 
     Ordered by when the cascade was most recently **started**, not by when its disruption is
     dated. Those are different questions and this endpoint answers the second one.
@@ -252,10 +273,7 @@ async def current_incident_group(
     )
     group = (await session.execute(stmt)).scalars().first()
     if group is None:
-        raise EntityNotFound(
-            "no started disruption group exists",
-            details={"resolution": "seed the demo dataset, then inject the scenario"},
-        )
+        return None
     rollup = await cascade_rollup(session, group_id=group.id)
     return GroupSummary(
         id=group.id,

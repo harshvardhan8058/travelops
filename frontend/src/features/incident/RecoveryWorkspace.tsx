@@ -22,6 +22,7 @@ import { PlayCircle } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
 import type { AssuranceEvaluation, HumanDecision, IncidentDetail, RunResponse } from '@/api/types';
+import { dataUnavailable, pollUnlessMissing } from '@/api/unavailable';
 import {
   ErrorState,
   LoadingState,
@@ -33,7 +34,14 @@ import {
   WhyPopover,
 } from '@/components/ui/primitives';
 import { elapsedDerivation } from '@/components/ui/derivation';
-import { Button, Labelled, Notice, PageHeader, Toolbar } from '@/components/ui/composition';
+import {
+  Button,
+  Labelled,
+  Notice,
+  NotYetAvailable,
+  PageHeader,
+  Toolbar,
+} from '@/components/ui/composition';
 import { utcClock } from '@/components/ui/format';
 import { AssurancePanel } from '@/features/assurance/AssurancePanel';
 import { preferredTaskId } from '@/features/assurance/authorizationState';
@@ -293,7 +301,7 @@ export function RecoveryWorkspace() {
     queryKey: ['assurance', incidentId],
     queryFn: () => api.assurance(incidentId),
     enabled: incidentId.length > 0,
-    refetchInterval: 10_000,
+    refetchInterval: pollUnlessMissing(10_000),
   });
 
   const incident = incidentQuery.data;
@@ -302,7 +310,7 @@ export function RecoveryWorkspace() {
     queryKey: ['timeline', incidentId],
     queryFn: () => api.timeline(incidentId),
     enabled: incidentId.length > 0,
-    refetchInterval: 10_000,
+    refetchInterval: pollUnlessMissing(10_000),
   });
 
   /*
@@ -416,6 +424,16 @@ export function RecoveryWorkspace() {
   if (incidentQuery.isLoading) return <WorkspaceSkeleton />;
 
   if (incidentQuery.error) {
+    /*
+     * A reference that names no incident is a state, not a fault: the nav links to a fixed one and
+     * a dataset restore deletes it. The server's own resolution sentence is rendered rather than
+     * paraphrased, and a genuine failure still falls through to `ErrorState`.
+     */
+    const unavailable = dataUnavailable(incidentQuery.error);
+    if (unavailable) {
+      return <NotYetAvailable title="No incident under this reference" unavailable={unavailable} />;
+    }
+
     const error = incidentQuery.error instanceof ApiError ? incidentQuery.error : null;
     return (
       <ErrorState

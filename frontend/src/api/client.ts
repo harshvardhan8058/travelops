@@ -183,8 +183,15 @@ export const api = {
 
   // ------------------------------------------------------------------ Phase 2: cascade
 
-  /** The most recently opened group. 404 when nothing is open, never an empty placeholder. */
-  currentGroup: () => request<IncidentGroupSummary>('/incident-groups/current'),
+  /**
+   * The most recently started group, or `null` when none is.
+   *
+   * `null` is a state, not a failure: it is what a freshly restored dataset answers, and the
+   * Scenario Center's Restore control leaves exactly that. Every caller must handle it, which is
+   * the point — it used to be a 404, and four polling surfaces turned one empty table into a
+   * permanent stream of console errors for a condition all four render calmly.
+   */
+  currentGroup: () => request<IncidentGroupSummary | null>('/incident-groups/current'),
 
   /** Persist an authored scenario. The backend validates recorded flight identity and delay. */
   createScenario: (payload: ScenarioCreateRequest, idempotencyKey?: string) =>
