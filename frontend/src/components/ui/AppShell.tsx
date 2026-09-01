@@ -48,10 +48,6 @@ const NAV = [
   // Phase 5. Both are keyed on their own reference rather than an incident, so they sit at the end
   // rather than beside the incident-scoped entries.
   { to: '/scenarios/new', icon: Wand2, label: 'Scenario builder' },
-  // A real seeded booking, in the same spirit as the incident and group references above: the demo
-  // dataset is fixed-seed, so this reference resolves every time it is seeded. It is a booking the
-  // connection assessment names, so the view has a connection to show rather than only a trip. The
-  // operator path to any OTHER passenger is the booking link on the Impact screen.
   { to: '/passenger/K4X8YR', icon: Luggage, label: 'Passenger view' },
 ] as const;
 
