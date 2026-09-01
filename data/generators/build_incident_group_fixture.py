@@ -355,6 +355,13 @@ def build_payload(scenario: CascadeScenario = BENGALURU_STORM) -> dict:
             ),
             "flights_without_incident": [],
             "membership_is_declared": True,
+            # The per-dimension counters behind `is_complete`. A client rendering
+            # `connections_at_risk: 0` has to choose between "assessed, none at risk" and "not
+            # looked at yet", and one boolean over four causes cannot tell it which. This fixture
+            # describes a fully worked cascade, so every incident carries both assessments.
+            "incidents_in_group": len(flights),
+            "incidents_assessed_connections": len(flights),
+            "incidents_assessed_crew": len(flights),
         },
         # Zero because this fixture describes a fully worked cascade: nothing is still held.
         "awaiting_approval_count": 0,

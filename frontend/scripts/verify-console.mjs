@@ -20,6 +20,16 @@
  * Requires `playwright` and a Chromium build. Not part of `npm test`: it needs a running stack, so
  * it is a verification step rather than a unit test.
  *
+ * **Precondition: a WORKED cascade, not merely a seeded and injected one.** Run `scripts/
+ * verify_phase2.py` (or drive the same journey through the console) first. `/assurance` and
+ * `/plans/:id` read the group assurance and plan-candidate endpoints, and those correctly answer
+ * 404 until a plan has been evaluated — so on a freshly injected dataset those two routes render
+ * their documented not-yet state, exactly as designed, while check (1) below still counts the
+ * browser's own 404 line as a console error and fails them. That is a true reading of the rule,
+ * not a bug in it: this gate verifies the console an operator demos, and the demo has been driven.
+ * The precondition is stated here because discovering it from the failure text costs a full
+ * three-viewport run.
+ *
  * `playwright` is pinned as a development dependency so its Chromium revision is reproducible. The
  * web image installs that matching browser and its Linux runtime dependencies during the image build;
  * it is loaded dynamically here so installs that intentionally omit development dependencies still

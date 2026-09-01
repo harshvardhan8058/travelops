@@ -29,7 +29,12 @@ describe('outstandingDemand', () => {
   it('names the action the backend recorded as needing a person', () => {
     const items = outstandingDemand([
       action(),
-      action({ id: 3, action_type: 'reserve_hotel_block', status: 'needs_human', reason: SHORTFALL }),
+      action({
+        id: 3,
+        action_type: 'reserve_hotel_block',
+        status: 'needs_human',
+        reason: SHORTFALL,
+      }),
     ]);
 
     expect(items).toHaveLength(1);

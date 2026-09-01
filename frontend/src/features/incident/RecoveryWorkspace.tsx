@@ -269,9 +269,7 @@ function Header({
 
       {resolvedOwing && (
         <Notice tone="warn" divider="none" className="rounded border">
-          <span className="text-fg">
-            Resolved, with operational demand still outstanding.{' '}
-          </span>
+          <span className="text-fg">Resolved, with operational demand still outstanding. </span>
           The workflow finished and every task was dispatched. These were carried out as far as they
           could be and record a decision for a person; nothing below has been abandoned, and nothing
           has been fulfilled beyond what is stated.

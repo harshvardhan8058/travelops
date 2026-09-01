@@ -21,7 +21,10 @@
     "computed_at": "2026-08-20T15:36:00Z",
     "note": "All 8 incidents across 8 declared flights have been assessed for both connections and crew.",
     "flights_without_incident": [],
-    "membership_is_declared": true
+    "membership_is_declared": true,
+    "incidents_in_group": 8,
+    "incidents_assessed_connections": 8,
+    "incidents_assessed_crew": 8
   },
   "awaiting_approval_count": 0,
   "flights": [

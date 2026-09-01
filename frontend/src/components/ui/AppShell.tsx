@@ -99,26 +99,26 @@ function Rail({ incidentInScope }: { incidentInScope: string | null }) {
           : entry.to;
 
         return (
-        <NavLink
-          key={entry.to}
-          to={to}
-          title={label}
-          aria-label={label}
-          // `/scenarios` needs an exact match as much as `/` does: without it, `/scenarios/new`
-          // would light up the Scenario Center too and the rail would show two active surfaces.
-          end={to === '/' || to === '/scenarios'}
-          className={({ isActive }) =>
-            clsx(
-              'flex h-9 w-9 items-center justify-center rounded-sm transition-colors duration-hover ease-out',
-              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-              isActive
-                ? 'bg-accent-subtle text-accent'
-                : 'text-fg-muted hover:bg-raised hover:text-fg-secondary',
-            )
-          }
-        >
-          <Icon size={20} strokeWidth={1.5} aria-hidden />
-        </NavLink>
+          <NavLink
+            key={entry.to}
+            to={to}
+            title={label}
+            aria-label={label}
+            // `/scenarios` needs an exact match as much as `/` does: without it, `/scenarios/new`
+            // would light up the Scenario Center too and the rail would show two active surfaces.
+            end={to === '/' || to === '/scenarios'}
+            className={({ isActive }) =>
+              clsx(
+                'flex h-9 w-9 items-center justify-center rounded-sm transition-colors duration-hover ease-out',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+                isActive
+                  ? 'bg-accent-subtle text-accent'
+                  : 'text-fg-muted hover:bg-raised hover:text-fg-secondary',
+              )
+            }
+          >
+            <Icon size={20} strokeWidth={1.5} aria-hidden />
+          </NavLink>
         );
       })}
     </nav>
