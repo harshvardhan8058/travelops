@@ -27,7 +27,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Luggage } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
-import { dataUnavailable, retryUnlessUnavailable } from '@/api/unavailable';
+import { dataUnavailable, pollUnlessMissing, retryUnlessUnavailable } from '@/api/unavailable';
 import {
   EmptyState,
   ErrorState,
@@ -56,11 +56,23 @@ function SectionTitle({ children }: { children: string }) {
 export function PassengerDisruptionView() {
   const { bookingRef = '' } = useParams();
 
+  /*
+   * Polled, not fetch-once. The page's own copy tells a passenger "we'll keep this page updated
+   * as the review continues" and "if something changes, it will appear here once it is recorded" —
+   * promises this screen did not keep, because none of its queries re-read after the initial
+   * mount and the app disables refetch-on-focus globally (`main.tsx`). A passenger who opened this
+   * link and left the tab open behind them saw the state from the moment they opened it, however
+   * long the review kept moving. Matches the ten-second cadence the operator console already polls
+   * an incident or a group at (`App.tsx`), and stops polling on a confirmed 404 for the same reason
+   * `pollUnlessMissing` exists there: a booking or incident reference that will never resolve must
+   * not reissue the same failing read forever.
+   */
   const booking = useQuery({
     queryKey: ['booking', bookingRef],
     queryFn: () => api.booking(bookingRef),
     enabled: bookingRef.length > 0,
     retry: retryUnlessUnavailable,
+    refetchInterval: pollUnlessMissing(10_000),
   });
 
   const trip = useMemo(() => summariseTrip(booking.data?.segments ?? []), [booking.data]);
@@ -71,15 +83,22 @@ export function PassengerDisruptionView() {
     queryFn: () => api.incident(incidentRef as string),
     enabled: incidentRef !== null,
     retry: retryUnlessUnavailable,
+    refetchInterval: pollUnlessMissing(10_000),
   });
 
   // Secondary: the network-wide priority ranking, kept only for the collapsed technical section.
-  const currentGroup = useQuery({ queryKey: ['current-group'], queryFn: api.currentGroup });
+  const currentGroup = useQuery({
+    queryKey: ['current-group'],
+    queryFn: api.currentGroup,
+    refetchInterval: pollUnlessMissing(10_000),
+    retry: retryUnlessUnavailable,
+  });
   const groupRef = currentGroup.data?.reference ?? '';
   const impacts = useQuery({
     queryKey: ['group-impacts', groupRef, 1000],
     queryFn: () => api.groupImpacts(groupRef, 1000),
     enabled: groupRef.length > 0,
+    refetchInterval: pollUnlessMissing(10_000),
   });
   const priorityLookup = useMemo(
     () =>
