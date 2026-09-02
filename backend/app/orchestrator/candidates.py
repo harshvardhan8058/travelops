@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.assurance.authorship import authorship_for_generator
 from app.assurance.candidates import CandidateInput, CandidateSet, evaluate_candidates
 from app.assurance.plan_contract import (
     CoverageDeclaration,
@@ -409,6 +410,15 @@ def comparison_payload(result: CandidateSet, plans: list[Plan]) -> dict[str, Any
                 "generator": by_variant[comparison.candidate_id].generator
                 if comparison.candidate_id in by_variant
                 else None,
+                # Decided once, server-side, by the same rule the assurance gate applies. A
+                # comparison table whose authorship column is computed in the browser is how a
+                # reviewer ends up told a plan is "unclassified" when the server knows exactly
+                # what wrote it.
+                "authored_by": authorship_for_generator(
+                    by_variant[comparison.candidate_id].generator
+                    if comparison.candidate_id in by_variant
+                    else None
+                ).value,
                 "prompt_version": by_variant[comparison.candidate_id].prompt_version
                 if comparison.candidate_id in by_variant
                 else None,

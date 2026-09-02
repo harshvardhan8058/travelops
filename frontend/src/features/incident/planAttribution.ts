@@ -11,6 +11,11 @@ export function isDeterministicGenerator(generator: string): boolean {
  * Recognise only generator tokens this repository records with model authorship semantics.
  * Everything else stays unclassified rather than becoming model-authored merely because it is not
  * a known fallback.
+ *
+ * This is now the FALLBACK path. Prefer `planAuthorship`, which reads the server's own decision:
+ * classifying a generator string in the browser is what made the console report "unclassified
+ * generator" for the committed fixture's `fallback-playbook · deterministic` — a plan whose
+ * authorship was never in any doubt on the server.
  */
 export function planGeneratorKind(generator: string): PlanGeneratorKind {
   if (isDeterministicGenerator(generator)) return 'deterministic_fallback';
@@ -18,9 +23,26 @@ export function planGeneratorKind(generator: string): PlanGeneratorKind {
   return 'unclassified';
 }
 
+/**
+ * Authorship of a plan: the server's answer when it gave one, this file's guess when it did not.
+ *
+ * `authored_by` is derived on the server by the same rule the assurance gate applies, so when it
+ * is present there is nothing left to infer. The token fallback exists only so an older server —
+ * or a committed fixture written before the field existed — still renders something truthful
+ * rather than an empty chip.
+ */
+export function planAuthorship(plan: {
+  generator: string;
+  authored_by?: 'deterministic' | 'model';
+}): PlanGeneratorKind {
+  if (plan.authored_by === 'deterministic') return 'deterministic_fallback';
+  if (plan.authored_by === 'model') return 'model_authored';
+  return planGeneratorKind(plan.generator);
+}
+
 /** Explain an ID mismatch without inferring the current plan's authorship. */
 export function candidateMismatchLabel(planOfRecord: PlanSummary): string {
-  const kind = planGeneratorKind(planOfRecord.generator);
+  const kind = planAuthorship(planOfRecord);
   if (kind === 'deterministic_fallback') {
     return 'not selected; the deterministic playbook remains the plan of record';
   }

@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.assurance.authorship import Authorship
+
 
 class PlanTaskOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -40,6 +42,8 @@ class CandidatePlanOut(BaseModel):
     incident_reference: str
     variant_key: str | None = None
     generator: str
+    #: Decided by the server from the recorded generator, never re-derived by a client.
+    authored_by: Authorship
     #: Set when a model produced the plan. `plan.prompt_version` is what makes it reproducible.
     prompt_version: str | None = None
     generated_at: datetime
@@ -73,6 +77,8 @@ class CandidateComparisonRow(BaseModel):
     plan_id: int | None = None
     plan_hash: str
     generator: str | None = None
+    #: Decided by the server from the recorded generator, never re-derived by a client.
+    authored_by: Authorship
     prompt_version: str | None = None
     admissible: bool
     decision: str

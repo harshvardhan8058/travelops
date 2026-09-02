@@ -387,6 +387,20 @@ export function GroupApprovalQueue() {
   const awaiting = awaitingContributions.reduce((sum, item) => sum + item.value, 0);
   const coveredCount = preview?.covered_count ?? 0;
   const excludedCount = preview?.excluded_count ?? 0;
+  /*
+   * The single sentence this screen was missing.
+   *
+   * Every fact the server returns was already rendered — across seven notices, a decision band, a
+   * restated rule and a per-code grouped list. What was never stated in one place was the sentence
+   * an operator needs first: how many actions are excluded, and for which one reason. Counting the
+   * dominant reason code turns "no actions can be approved as a group" from a verdict into an
+   * explanation, without inventing a rule the server did not apply.
+   */
+  const excludedByReason = new Map<string, number>();
+  for (const item of preview?.excluded ?? []) {
+    excludedByReason.set(item.reason_code, (excludedByReason.get(item.reason_code) ?? 0) + 1);
+  }
+  const dominantExclusion = [...excludedByReason.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
   const canApprove = api.canWrite && reason.trim().length > 0 && coveredCount > 0;
   const unknownExposure = [
     data.exposure.rooms_committed,
@@ -486,8 +500,18 @@ export function GroupApprovalQueue() {
               <p className="mt-0.5 text-subtitle text-fg">
                 {coveredCount > 0
                   ? `Approve ${coveredCount} low/medium risk action${coveredCount === 1 ? '' : 's'}`
-                  : 'No actions can be approved as a group'}
+                  : 'Group approval is not available here'}
               </p>
+              {/* The headline sentence: what is excluded, and for what one reason. */}
+              {dominantExclusion && (
+                <p className="mt-1 max-w-3xl text-body text-fg">
+                  {dominantExclusion[1]} of {excludedCount} excluded action
+                  {excludedCount === 1 ? '' : 's'}{' '}
+                  {dominantExclusion[0] === 'HIGH_RISK_NEEDS_OWN_DECISION'
+                    ? 'are high risk, so each needs its own approval. Review those incidents individually.'
+                    : `were excluded because ${refusalLabel(dominantExclusion[0]).toLowerCase()}. Review those incidents individually.`}
+                </p>
+              )}
               <p className="mt-1 max-w-3xl text-body text-fg-secondary">
                 The server partition below is the scope. One reason is written to every covered
                 evaluation; excluded actions remain separate and must be reviewed on their own

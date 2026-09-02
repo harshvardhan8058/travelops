@@ -320,6 +320,69 @@ async def test_the_blast_radius_carries_the_group_room_shortfall(client):
     assert values["committed_cost_inr"] > 0
 
 
+async def test_the_room_totals_agree_with_the_what_if_baseline(client):
+    """Two screens, one group, one figure. They reported 95 and 166.
+
+    Blast Radius sums the recorded allocations. The What-If baseline re-runs `allocate_rooms`
+    against `load_hotel_options`, which subtracts every active hold — including the 71 rooms this
+    very group had just secured. So the baseline allocated nothing and reported the whole
+    requirement as short, on the same screen, under the same label, both rendered as fact.
+
+    The demand side already had this fix: `_accommodation_basis` reads the recorded requirement
+    rather than recomputing one. The supply side had not been carried across.
+
+    A what-if with no levers accepted returns no deltas, so the comparison uses a lever that cannot
+    move a room: `minimum_connection_minutes` re-evaluates connections and leaves accommodation
+    exactly where the recorded allocations put it.
+    """
+    _drive(client)
+    radius = _detail(client)["blast_radius"]
+    values = {dimension["key"]: dimension["value"] for dimension in radius["dimensions"]}
+
+    what_if = client.post(
+        f"{PREFIX}/incident-groups/{GROUP}/what-if", json={"minimum_connection_minutes": 30}
+    ).json()
+    rooms_short = next(
+        delta for delta in what_if["deltas"] if delta["key"] == "rooms_short"
+    )
+
+    assert rooms_short["baseline"] == values["rooms_short"], (
+        "the what-if baseline must see the inventory this group already holds; "
+        f"blast radius says {values['rooms_short']} short, what-if says {rooms_short['baseline']}"
+    )
+
+
+async def test_a_partly_allocated_group_reports_its_room_totals_as_floors(client, sessionmaker_for):
+    """Completeness for rooms is about hotel coverage, and nothing else was measuring it.
+
+    `compose_blast_radius` marked the room dimensions complete using `rollup.is_complete`, which
+    tests connection and crew assessment and says nothing whatever about whether every incident ran
+    an allocation. `group_hotel_totals` sums only the incidents that did. So a group fully assessed
+    for crew with two of eight allocations run rendered its room requirement as a total when it was
+    a floor — the exact failure `blast_radius`'s own docstring says it exists to prevent.
+    """
+    from app.services.hotel import group_hotel_totals
+
+    _drive(client)
+    async with sessionmaker_for() as session:
+        group_id = (
+            await session.execute(
+                select(IncidentGroup.id).where(IncidentGroup.reference == GROUP)
+            )
+        ).scalar_one()
+        totals = await group_hotel_totals(session, group_id=group_id)
+
+    assert totals is not None
+    assert totals["incidents_declared"] >= totals["incidents_allocated"] > 0
+    assert totals["coverage_is_complete"] == (
+        totals["incidents_allocated"] == totals["incidents_declared"]
+    )
+    if not totals["coverage_is_complete"]:
+        assert "floors rather than totals" in totals["shortfall_note"], (
+            "a partial sum must say so in the sentence the UI renders verbatim"
+        )
+
+
 async def test_display_strings_stay_ascii(client):
     """No U+2192 or U+20B9 in a rendered string.
 

@@ -222,7 +222,15 @@ async def get_report(
     elif incident and incident.group_id:
         rollup = await cascade_rollup(session, group_id=incident.group_id)
         hotel = await group_hotel_totals(session, group_id=incident.group_id)
-        reference = incident.reference
+        # The GROUP's reference, not the incident's.
+        #
+        # Every figure below this line is group-scoped — `cascade_rollup` and `group_hotel_totals`
+        # both take a group id — and the reference is fed to the prompt under the heading
+        # "## Disruption group". Passing the incident's reference there produced an executive
+        # report narrating 445 passengers and 166 rooms under the name of a single flight's
+        # incident. An incident reference is still a legitimate way to *ask* for the report; it is
+        # not a legitimate label for what comes back.
+        reference = rollup.group_reference
     else:
         raise EntityNotFound(
             "no group context for report generation",

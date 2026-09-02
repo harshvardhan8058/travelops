@@ -6,7 +6,7 @@
   "flight": {
     "id": 1,
     "flight_number": "6E 2134",
-    "route": "BLR → DEL",
+    "route": "BLR \u2192 DEL",
     "scheduled_departure": "2026-08-20T15:40:00Z",
     "estimated_departure": "2026-08-20T22:40:00Z",
     "delay_minutes": 420,
@@ -18,12 +18,30 @@
   "state": "executing",
   "opened_at": "2026-08-20T15:36:00Z",
   "state_rail": [
-    { "state": "detected", "reached_at": "2026-08-20T15:36:00Z" },
-    { "state": "assessing", "reached_at": "2026-08-20T15:36:12Z" },
-    { "state": "planning", "reached_at": "2026-08-20T15:36:40Z" },
-    { "state": "assuring", "reached_at": "2026-08-20T15:37:01Z" },
-    { "state": "executing", "reached_at": "2026-08-20T15:37:06Z" },
-    { "state": "resolved", "reached_at": null }
+    {
+      "state": "detected",
+      "reached_at": "2026-08-20T15:36:00Z"
+    },
+    {
+      "state": "assessing",
+      "reached_at": "2026-08-20T15:36:12Z"
+    },
+    {
+      "state": "planning",
+      "reached_at": "2026-08-20T15:36:40Z"
+    },
+    {
+      "state": "assuring",
+      "reached_at": "2026-08-20T15:37:01Z"
+    },
+    {
+      "state": "executing",
+      "reached_at": "2026-08-20T15:37:06Z"
+    },
+    {
+      "state": "resolved",
+      "reached_at": null
+    }
   ],
   "evidence": {
     "risk": {
@@ -31,9 +49,21 @@
       "risk_level": "severe",
       "rule_version": "delay-risk-v1",
       "factors": [
-        { "name": "visibility_below_threshold", "value": "800 m", "threshold": "1500 m" },
-        { "name": "crosswind_elevated", "value": "23.5 kt", "runway": "09L", "threshold": "20 kt" },
-        { "name": "precipitation_present", "value": "rain" }
+        {
+          "name": "visibility_below_threshold",
+          "value": "800 m",
+          "threshold": "1500 m"
+        },
+        {
+          "name": "crosswind_elevated",
+          "value": "23.5 kt",
+          "runway": "09L",
+          "threshold": "20 kt"
+        },
+        {
+          "name": "precipitation_present",
+          "value": "rain"
+        }
       ],
       "note": "A deterministic index and band, not a calibrated probability."
     },
@@ -44,7 +74,11 @@
       "wind_direction_deg": 250,
       "visibility_m": 800,
       "ceiling_ft": 900,
-      "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:weather:VOBL" }
+      "provenance": {
+        "kind": "fixture",
+        "provider": "fixture",
+        "source_ref": "fixture:bengaluru_storm:weather:VOBL"
+      }
     },
     "affected_entities": {
       "passengers": 174,
@@ -55,25 +89,70 @@
     },
     "retrieved_precedent": {
       "incident_reference": "INC-2026-0714-VOBL-03",
-      "matched_on": ["airport=VOBL", "trigger=weather", "severity=high", "night_departure=true"],
+      "matched_on": [
+        "airport=VOBL",
+        "trigger=weather",
+        "severity=high",
+        "night_departure=true"
+      ],
       "outcome": "resolved",
       "note": "Matched by explainable SQL filtering, not vector similarity."
     }
   },
   "plan": {
     "id": 1,
-    "generator": "fallback-playbook · deterministic",
+    "generator": "fallback-playbook",
     "prompt_version": null,
     "model_self_report": null,
     "generated_at": "2026-08-20T15:36:44Z",
     "rationale": "Reasoning agents arrive in Phase 3. This plan came from the deterministic playbook.",
     "tasks": [
-      { "id": 1, "task_order": 1, "action_type": "check_connections", "state": "succeeded", "depends_on": [], "assurance_id": 101 },
-      { "id": 2, "task_order": 2, "action_type": "find_hotel_options", "state": "succeeded", "depends_on": [], "assurance_id": 102 },
-      { "id": 3, "task_order": 3, "action_type": "assess_crew_impact", "state": "succeeded", "depends_on": [], "assurance_id": 105 },
-      { "id": 4, "task_order": 4, "action_type": "notify_passengers", "state": "needs_human", "depends_on": ["1"], "assurance_id": 103 },
-      { "id": 5, "task_order": 5, "action_type": "evaluate_entitlements", "state": "needs_human", "depends_on": [], "assurance_id": 104 }
-    ]
+      {
+        "id": 1,
+        "task_order": 1,
+        "action_type": "check_connections",
+        "state": "succeeded",
+        "depends_on": [],
+        "assurance_id": 101
+      },
+      {
+        "id": 2,
+        "task_order": 2,
+        "action_type": "find_hotel_options",
+        "state": "succeeded",
+        "depends_on": [],
+        "assurance_id": 102
+      },
+      {
+        "id": 3,
+        "task_order": 3,
+        "action_type": "assess_crew_impact",
+        "state": "succeeded",
+        "depends_on": [],
+        "assurance_id": 105
+      },
+      {
+        "id": 4,
+        "task_order": 4,
+        "action_type": "notify_passengers",
+        "state": "needs_human",
+        "depends_on": [
+          "1"
+        ],
+        "assurance_id": 103
+      },
+      {
+        "id": 5,
+        "task_order": 5,
+        "action_type": "evaluate_entitlements",
+        "state": "needs_human",
+        "depends_on": [],
+        "assurance_id": 104
+      }
+    ],
+    "authored_by": "deterministic",
+    "selection_state": "candidate",
+    "model_candidate_available": false
   },
   "actions": [
     {
@@ -103,5 +182,9 @@
       "provenance_kind": "synthetic"
     }
   ],
-  "provenance": { "kind": "fixture", "provider": "fixture", "source_ref": "fixture:bengaluru_storm:incident" }
+  "provenance": {
+    "kind": "fixture",
+    "provider": "fixture",
+    "source_ref": "fixture:bengaluru_storm:incident"
+  }
 }

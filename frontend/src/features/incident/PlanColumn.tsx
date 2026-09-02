@@ -37,18 +37,28 @@ import { utcStamp } from '@/components/ui/format';
 import { refusalFor } from './refusal';
 import {
   candidateMismatchLabel,
-  planGeneratorKind,
+  planAuthorship,
   plannerCandidateAttribution,
   plannerUnavailableAttribution,
 } from './planAttribution';
 
-/** Classify only recorded generator tokens with known semantics; unknown stays unclassified. */
+/**
+ * Who wrote the plan of record, and — the part that matters for a demo — whether a model wrote a
+ * plan that is NOT the one being run.
+ *
+ * The server persists the deterministic playbook first and never auto-selects the planner agent's
+ * output, so "a model was called and succeeded" and "a model planned this recovery" are routinely
+ * different facts. Stating only the first is how a reasonable viewer concludes the second.
+ */
 function GeneratorChip({ plan }: { plan: PlanSummary }) {
-  const generatorKind = planGeneratorKind(plan.generator);
+  const generatorKind = planAuthorship(plan);
   const isDeterministic = generatorKind === 'deterministic_fallback';
   const isModelAuthored = generatorKind === 'model_authored';
   const modelProvider = isModelAuthored ? 'recorded planner' : null;
   const Icon = isDeterministic ? Workflow : isModelAuthored ? Cpu : CircleHelp;
+  // `selected` means a person chose this plan. `candidate` means it is the plan of record only
+  // because it is the earliest one — a default, not a decision, and the two should not read alike.
+  const chosenByPerson = plan.selection_state === 'selected';
 
   return (
     <div className="flex flex-col items-start gap-2">
@@ -83,6 +93,21 @@ function GeneratorChip({ plan }: { plan: PlanSummary }) {
           </span>
         )}
       </div>
+
+      {plan.model_candidate_available === true && !isModelAuthored && (
+        <Notice tone="info">
+          A model-authored plan exists for this incident and is not the plan of record. The
+          deterministic playbook is what will execute. Reasoning being live does not make a model
+          plan authoritative: a person selects a candidate, or the playbook stands.
+        </Notice>
+      )}
+      {plan.selection_state !== undefined && (
+        <span className="text-caption text-fg-muted">
+          {chosenByPerson
+            ? 'Selected by a person, and recorded with an attribution.'
+            : 'Plan of record by default — the earliest plan on this incident. Nobody has selected between candidates.'}
+        </span>
+      )}
 
       <details className="w-full rounded-sm border border-border-subtle bg-inset px-2 py-1.5">
         <summary className="cursor-pointer text-caption uppercase text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">

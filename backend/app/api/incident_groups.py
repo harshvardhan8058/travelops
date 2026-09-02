@@ -959,6 +959,12 @@ def _what_if_response(
         recorded_baseline=payload.get("recorded_baseline") or {},
         levers_applied=payload.get("levers_applied") or {},
         levers_available=list(payload.get("levers_available") or []),
+        lever_descriptions={
+            str(name): str(description)
+            for name, description in (payload.get("levers_available") or {}).items()
+        }
+        if isinstance(payload.get("levers_available"), dict)
+        else {},
         levers_rejected=[
             WhatIfLeverRejectionOut(lever=item["lever"], reason=item["reason"])
             for item in (payload.get("levers_rejected") or [])

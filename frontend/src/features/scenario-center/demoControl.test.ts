@@ -10,6 +10,7 @@ import {
   simulationReadiness,
   simulationToScenarioRequest,
   startBlockedReason,
+  datasetStatus,
 } from './demoControl';
 import type { DemoDatasetResponse, SimulationDefinition } from '@/api/types';
 
@@ -369,5 +370,53 @@ describe('the recorded clock, not the wall clock', () => {
         instant,
       );
     }
+  });
+});
+
+describe('datasetStatus', () => {
+  it('is CLEAN when the dataset is seeded and no group is open', () => {
+    const status = datasetStatus({ isSeeded: true, groupStates: [] });
+    expect(status.status).toBe('CLEAN');
+    expect(status.resetWouldClear).toBe(false);
+  });
+
+  it('is ACTIVE while any group is still being worked, and says reset would clear it', () => {
+    // The exact situation the Scenario Center refuses every simulation in, and the one it could
+    // not previously explain as a single dataset-wide condition.
+    const status = datasetStatus({ isSeeded: true, groupStates: ['detected', 'resolved'] });
+    expect(status.status).toBe('ACTIVE');
+    expect(status.resetWouldClear).toBe(true);
+    expect(status.detail).toContain('1 disruption');
+  });
+
+  it.each([['assessing'], ['planning'], ['assuring'], ['awaiting_approval'], ['executing']])(
+    'treats %s as active work',
+    (state) => {
+      expect(datasetStatus({ isSeeded: true, groupStates: [state] }).status).toBe('ACTIVE');
+    },
+  );
+
+  it('is RESOLVED only when every group resolved', () => {
+    expect(datasetStatus({ isSeeded: true, groupStates: ['resolved', 'resolved'] }).status).toBe(
+      'RESOLVED',
+    );
+  });
+
+  it('is PARTIALLY_PROCESSED when every group stopped but not all resolved', () => {
+    // `resolved` requires every member resolved — seven of eight is not success — and the same
+    // rule has to hold one level up, or a blocked group would read as a finished one.
+    expect(datasetStatus({ isSeeded: true, groupStates: ['resolved', 'blocked'] }).status).toBe(
+      'PARTIALLY_PROCESSED',
+    );
+    expect(datasetStatus({ isSeeded: true, groupStates: ['failed'] }).status).toBe(
+      'PARTIALLY_PROCESSED',
+    );
+  });
+
+  it('reports UNKNOWN rather than guessing when the group list has not arrived', () => {
+    // An unstarted dataset and an unanswered query are different things, and only one of them
+    // means "go ahead".
+    expect(datasetStatus({ isSeeded: true, groupStates: undefined }).status).toBe('UNKNOWN');
+    expect(datasetStatus({ isSeeded: false, groupStates: [] }).status).toBe('UNKNOWN');
   });
 });

@@ -320,6 +320,14 @@ class WhatIfResponse(BaseModel):
     recorded_baseline: dict[str, Any] = Field(default_factory=dict)
     levers_applied: dict[str, Any] = Field(default_factory=dict)
     levers_available: list[str] = Field(default_factory=list)
+    #: What each available lever actually does, keyed by lever name.
+    #:
+    #: `ALLOWED_LEVERS` upstream is a mapping of name to explanation — "Re-evaluates which
+    #: connections hold" — and the response was coercing it with `list(...)`, keeping the keys and
+    #: dropping every sentence. The panel then rendered a snake_case identifier at an operator who
+    #: had to guess what substituting it would mean. Published as a separate field so the existing
+    #: `levers_available` list keeps its shape.
+    lever_descriptions: dict[str, str] = Field(default_factory=dict)
     levers_rejected: list[WhatIfLeverRejectionOut] = Field(default_factory=list)
     deltas: list[WhatIfDeltaOut] = Field(default_factory=list)
 

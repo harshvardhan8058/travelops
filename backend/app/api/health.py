@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Response
 from sqlalchemy import text
 
-from app.config import get_modes, get_settings
+from app.config import get_modes, get_settings, provider_transport
 from app.observability.logging import get_logger
 
 router = APIRouter(tags=["system"])
@@ -82,6 +82,14 @@ async def system_mode() -> dict[str, Any]:
     modes = get_modes()
     payload = modes.to_dict()
     payload["app_env"] = settings.app_env.value
+    # Which endpoint `live` would actually talk to, resolved by the same function the LLM client
+    # uses. Published because `llm_mode` alone cannot answer "live against what?" — and a console
+    # that cannot answer it is how a top bar reading LIVE ended up beside a provenance row naming
+    # a different provider entirely. The key is never published, only whether one is present.
+    transport = provider_transport(settings)
+    payload["llm_provider"] = transport.provider.value
+    payload["llm_model"] = transport.model
+    payload["llm_provider_configured"] = bool(transport.api_key)
     payload["policy_pack"] = _policy_pack_payload(settings)
     payload["data_seed"] = settings.data_seed
     payload["limits"] = {

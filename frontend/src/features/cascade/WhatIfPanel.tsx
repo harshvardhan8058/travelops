@@ -98,6 +98,15 @@ export function WhatIfPanel({ groupRef }: { groupRef: string }) {
             <div className="mb-1 text-caption uppercase text-fg-secondary">
               {lever.replace(/_/g, ' ')}
             </div>
+            {/*
+              The server's own explanation of the lever, which the API used to discard.
+              `ALLOWED_LEVERS` is a mapping of name to sentence; the response coerced it to a list
+              of keys, so this panel rendered a snake_case identifier at an operator who then had
+              to guess what substituting it would re-evaluate.
+            */}
+            {result?.lever_descriptions?.[lever] && (
+              <p className="mb-1 text-caption text-fg-muted">{result.lever_descriptions[lever]}</p>
+            )}
             <div className="flex flex-wrap gap-1" role="group" aria-label={lever}>
               {(LEVER_CHOICES[lever] ?? []).map((choice) => {
                 const active = levers[lever] === choice.value;
@@ -229,6 +238,9 @@ export function WhatIfPanel({ groupRef }: { groupRef: string }) {
                     Figure
                   </th>
                   <th scope="col" className="px-3 py-1 text-right font-medium">
+                    As recorded
+                  </th>
+                  <th scope="col" className="px-3 py-1 text-right font-medium">
                     Same rules, now
                   </th>
                   <th scope="col" className="px-3 py-1 text-right font-medium">
@@ -243,6 +255,22 @@ export function WhatIfPanel({ groupRef }: { groupRef: string }) {
                 {result.deltas.map((delta) => (
                   <tr key={delta.key} className="border-b border-border-subtle">
                     <td className="px-3 py-1 text-fg-secondary">{delta.label}</td>
+                    {/*
+                      What the live services actually found, beside what the rules say now.
+
+                      The server publishes `recorded_baseline` precisely so these two can be
+                      compared — they answer different questions, and quietly showing the
+                      re-evaluated figure alone is how a what-if starts to look like a correction
+                      to the operational numbers. It was returned and never rendered. Absent rather
+                      than zero where the services recorded nothing for a figure.
+                    */}
+                    <td className="px-3 py-1 text-right">
+                      {typeof result.recorded_baseline?.[delta.key] === 'number' ? (
+                        <MonoValue muted>{result.recorded_baseline[delta.key]}</MonoValue>
+                      ) : (
+                        <span className="text-caption text-fg-muted">not recorded</span>
+                      )}
+                    </td>
                     <td className="px-3 py-1 text-right">
                       <MonoValue muted>{delta.baseline}</MonoValue>
                     </td>

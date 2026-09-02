@@ -24,6 +24,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.actors import ACTOR_KINDS, actor_kind
+from app.assurance.authorship import Authorship, authorship_for_generator
 from app.db.session import get_session
 from app.errors import EntityNotFound
 from app.models.enums import IncidentState
@@ -379,9 +380,27 @@ async def _plan_summary(session: AsyncSession, incident_id: int) -> PlanSummary 
         .all()
     )
     latest = await _latest_evaluation_ids(session, [row.id for row in rows])
+    # Whether a model-authored plan exists on this incident that is NOT the one being driven.
+    # Counted here rather than inferred by the console, because the console has no way to know:
+    # it reads the plan of record from this endpoint and the candidates from another.
+    other_generators = (
+        (
+            await session.execute(
+                select(Plan.generator).where(Plan.incident_id == incident_id, Plan.id != plan.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return PlanSummary(
         id=plan.id,
         generator=plan.generator,
+        authored_by=authorship_for_generator(plan.generator),
+        selection_state=plan.selection_state,
+        model_candidate_available=any(
+            authorship_for_generator(generator) is Authorship.model
+            for generator in other_generators
+        ),
         prompt_version=plan.prompt_version,
         model_self_report=plan.model_self_report,
         generated_at=_as_utc(plan.generated_at),

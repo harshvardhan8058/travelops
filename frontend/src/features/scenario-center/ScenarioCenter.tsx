@@ -70,6 +70,7 @@ import {
 import { MetricTile } from '@/components/ui/Metric';
 import {
   datasetHeadlines,
+  datasetStatus,
   RESET_CONFIRMATION,
   resetBlockedReason,
   resetConfirmationMatches,
@@ -103,6 +104,21 @@ export function ScenarioCenter() {
   const mode = useQuery({
     queryKey: ['system-mode'],
     queryFn: api.systemMode,
+    retry: retryUnlessUnavailable,
+  });
+  /*
+   * Every group's state, so this screen can say what the dataset as a whole is doing.
+   *
+   * The backend has no dataset-status field and should not grow one: a group's state is derived
+   * from its members rather than stored, and the same argument holds one level up. This list
+   * already carries every group's state, so the fold is the only missing step.
+   *
+   * Not fatal if it fails. `datasetStatus` reports UNKNOWN rather than guessing, and the rest of
+   * the screen — including the server's own per-simulation refusal — is unaffected.
+   */
+  const groups = useQuery({
+    queryKey: ['incident-groups'],
+    queryFn: api.incidentGroups,
     retry: retryUnlessUnavailable,
   });
 
@@ -227,17 +243,43 @@ export function ScenarioCenter() {
     isBusy,
     typed,
   });
+  const status = datasetStatus({
+    isSeeded: demo.is_seeded,
+    groupStates: groups.data?.groups.map((group) => group.state),
+  });
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <PageHeader
         eyebrow="Demo control"
         title="Scenario Center"
+        /*
+          The dataset's status, not just whether reference rows exist.
+
+          `is_seeded` was the only badge here, and it is `true` whether the dataset is pristine or
+          has eight incidents mid-execution on top of it — so the header said "Dataset seeded"
+          while every simulation below it was refused. Those are the two facts an operator needs
+          to connect, and nothing on the screen connected them.
+        */
         status={
-          <StateBadge
-            status={demo.is_seeded ? 'up' : 'down'}
-            label={demo.is_seeded ? 'Dataset seeded' : 'Dataset not seeded'}
-          />
+          <span className="flex flex-wrap items-center gap-2">
+            <StateBadge
+              status={
+                status.status === 'CLEAN'
+                  ? 'up'
+                  : status.status === 'ACTIVE'
+                    ? 'running'
+                    : status.status === 'UNKNOWN'
+                      ? 'scheduled'
+                      : 'recorded'
+              }
+              label={`Dataset ${status.status.replace(/_/g, ' ').toLowerCase()}`}
+            />
+            <StateBadge
+              status={demo.is_seeded ? 'up' : 'down'}
+              label={demo.is_seeded ? 'Seeded' : 'Not seeded'}
+            />
+          </span>
         }
         meta={
           <>
@@ -264,6 +306,20 @@ export function ScenarioCenter() {
           </span>
         }
       />
+
+      {/*
+        What the dataset as a whole is doing, stated once, above the catalogue.
+
+        Each card already carries the server's precise refusal, naming the incidents that own its
+        flights. What no card could say is that this is one condition affecting all of them, and
+        that one control on this screen clears it.
+      */}
+      <Notice tone={status.status === 'CLEAN' ? 'info' : 'warn'}>
+        <strong className="text-fg">
+          Dataset {status.status.replace(/_/g, ' ').toLowerCase()}.
+        </strong>{' '}
+        {status.detail}
+      </Notice>
 
       <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
@@ -292,6 +348,7 @@ export function ScenarioCenter() {
                     isSeeded: demo.is_seeded,
                     isBusy,
                   })}
+                  offerReset={status.resetWouldClear}
                   isStarting={startingId === simulation.id}
                   onStart={() => start.mutate(simulation)}
                 />
@@ -391,68 +448,73 @@ export function ScenarioCenter() {
 
           <RuntimePosturePanel chips={chips} posture={posture} />
 
-          <Panel title="Reset demo data">
-            <PanelBody>
-              <span className="text-body text-fg-secondary">
-                Removes the workflow rows the orchestrator recorded and re-seeds the reference
-                dataset. It does <strong className="font-semibold text-fg">not</strong> open a
-                cascade afterwards, so nothing will be in progress until you start a simulation.
-              </span>
-              <Notice tone="warn" divider="top">
-                This is destructive and cannot be undone. Incidents, plans, assurance evaluations
-                and decisions in the current dataset are deleted.
-              </Notice>
-              <label className="flex flex-col gap-1" htmlFor="reset-confirm">
-                <span className="text-label uppercase text-fg-secondary">
-                  Type the confirmation phrase
+          {/* The anchor the blocked-simulation notice links to. On the wrapper rather than the
+              Panel, which takes no id — and inventing a prop on a shared primitive to serve one
+              link would be the wrong trade. */}
+          <div id="reset-demo-data" className="scroll-mt-4">
+            <Panel title="Reset demo data">
+              <PanelBody>
+                <span className="text-body text-fg-secondary">
+                  Removes the workflow rows the orchestrator recorded and re-seeds the reference
+                  dataset. It does <strong className="font-semibold text-fg">not</strong> open a
+                  cascade afterwards, so nothing will be in progress until you start a simulation.
                 </span>
-                {/*
+                <Notice tone="warn" divider="top">
+                  This is destructive and cannot be undone. Incidents, plans, assurance evaluations
+                  and decisions in the current dataset are deleted.
+                </Notice>
+                <label className="flex flex-col gap-1" htmlFor="reset-confirm">
+                  <span className="text-label uppercase text-fg-secondary">
+                    Type the confirmation phrase
+                  </span>
+                  {/*
                   The phrase is rendered so the control states what it wants. `uppercase` is on the
                   label above, never on this value: it is the string the server compares.
                 */}
-                <MonoValue muted>{RESET_CONFIRMATION}</MonoValue>
-                <input
-                  id="reset-confirm"
-                  className={FIELD_SHELL}
-                  value={typed}
-                  onChange={(event) => setTyped(event.target.value)}
-                  placeholder={RESET_CONFIRMATION}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={!api.canWrite || !demo.reset_allowed || isBusy}
-                  aria-describedby="reset-confirm-hint"
-                />
-                <span id="reset-confirm-hint" className="text-caption text-fg-muted">
-                  {resetConfirmationMatches(typed)
-                    ? 'The phrase matches. The reset is enabled.'
-                    : 'The server re-checks this phrase, so a mis-click cannot satisfy it.'}
-                </span>
-              </label>
-              <Button
-                variant="danger"
-                icon={RotateCcw}
-                disabled={resetReason !== null}
-                disabledReason={resetReason ?? undefined}
-                onClick={() => reset.mutate()}
-              >
-                {reset.isPending ? 'Resetting' : 'Reset demo data'}
-              </Button>
-            </PanelBody>
-            {resetFailure && (
-              <PanelBody>
-                <Notice tone="crit" alert>
-                  {resetFailure.message}
-                </Notice>
-                <span className="font-mono text-mono-sm text-fg-muted">
-                  {resetFailure instanceof ApiError ? resetFailure.code : 'RESET_FAILED'}
-                  {resetFailure instanceof ApiError && resetFailure.correlationId
-                    ? ` · ${resetFailure.correlationId}`
-                    : ''}
-                </span>
+                  <MonoValue muted>{RESET_CONFIRMATION}</MonoValue>
+                  <input
+                    id="reset-confirm"
+                    className={FIELD_SHELL}
+                    value={typed}
+                    onChange={(event) => setTyped(event.target.value)}
+                    placeholder={RESET_CONFIRMATION}
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={!api.canWrite || !demo.reset_allowed || isBusy}
+                    aria-describedby="reset-confirm-hint"
+                  />
+                  <span id="reset-confirm-hint" className="text-caption text-fg-muted">
+                    {resetConfirmationMatches(typed)
+                      ? 'The phrase matches. The reset is enabled.'
+                      : 'The server re-checks this phrase, so a mis-click cannot satisfy it.'}
+                  </span>
+                </label>
+                <Button
+                  variant="danger"
+                  icon={RotateCcw}
+                  disabled={resetReason !== null}
+                  disabledReason={resetReason ?? undefined}
+                  onClick={() => reset.mutate()}
+                >
+                  {reset.isPending ? 'Resetting' : 'Reset demo data'}
+                </Button>
               </PanelBody>
-            )}
-            {resetReport && <ResetReport report={resetReport} />}
-          </Panel>
+              {resetFailure && (
+                <PanelBody>
+                  <Notice tone="crit" alert>
+                    {resetFailure.message}
+                  </Notice>
+                  <span className="font-mono text-mono-sm text-fg-muted">
+                    {resetFailure instanceof ApiError ? resetFailure.code : 'RESET_FAILED'}
+                    {resetFailure instanceof ApiError && resetFailure.correlationId
+                      ? ` · ${resetFailure.correlationId}`
+                      : ''}
+                  </span>
+                </PanelBody>
+              )}
+              {resetReport && <ResetReport report={resetReport} />}
+            </Panel>
+          </div>
         </div>
       </div>
     </div>
@@ -462,11 +524,14 @@ export function ScenarioCenter() {
 function SimulationCard({
   simulation,
   blockedReason,
+  offerReset,
   isStarting,
   onStart,
 }: {
   simulation: SimulationDefinition;
   blockedReason: string | null;
+  /** Whether resetting the dataset is what would actually clear this refusal. */
+  offerReset: boolean;
   isStarting: boolean;
   onStart: () => void;
 }) {
@@ -532,7 +597,23 @@ function SimulationCard({
       </div>
 
       {!readiness.canStart && readiness.reason && (
-        <Notice tone="warn">Cannot run against the current dataset: {readiness.reason}</Notice>
+        <Notice tone="warn">
+          Cannot run against the current dataset: {readiness.reason}
+          {/*
+            The server's sentence already ends with "or reset the demo data" — and until now
+            nothing on the screen connected those words to the control that does it, which sits in
+            the other grid column and stacks below the fold on a narrow viewport. The operator was
+            told the way out and left to find it.
+          */}
+          {offerReset && (
+            <a
+              href="#reset-demo-data"
+              className="ml-1 rounded-sm underline decoration-dotted underline-offset-2 hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              Go to reset demo data
+            </a>
+          )}
+        </Notice>
       )}
 
       {simulation.members.length > 0 && (

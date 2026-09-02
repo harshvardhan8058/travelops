@@ -163,6 +163,105 @@ export function resetBlockedReason(context: {
   return null;
 }
 
+/**
+ * How much of the dataset is in play, in the four words an operator actually needs.
+ *
+ * `CLEAN` — nothing is open. Every simulation can run.
+ * `ACTIVE` — at least one group is being worked, which is why simulations are refused.
+ * `PARTIALLY_PROCESSED` — every group has stopped, but not all of them at `resolved`.
+ * `RESOLVED` — every group finished, and finished successfully.
+ */
+export type DatasetStatus = 'CLEAN' | 'ACTIVE' | 'PARTIALLY_PROCESSED' | 'RESOLVED' | 'UNKNOWN';
+
+export interface DatasetStatusView {
+  status: DatasetStatus;
+  /** One sentence naming the consequence, not just restating the word. */
+  detail: string;
+  /** True when a reset is the thing that would unblock the operator. */
+  resetWouldClear: boolean;
+}
+
+/** Group states that mean work is still in progress. Mirrors `IncidentState.active()`. */
+const ACTIVE_GROUP_STATES = new Set([
+  'detected',
+  'assessing',
+  'planning',
+  'assuring',
+  'awaiting_approval',
+  'executing',
+]);
+
+/**
+ * Derive the dataset's status from what the server already publishes.
+ *
+ * The backend has no dataset-status field, and deliberately so: a group's state is derived from its
+ * members rather than stored, and the same argument applies one level up. `GET /incident-groups`
+ * already returns every group's state, so the fold is the only missing step and it belongs where it
+ * can be tested — here, not inside a component.
+ *
+ * This exists because the Scenario Center could say "cannot run against the current dataset" with
+ * complete accuracy and still leave an operator with no idea what to do about it. The refusal names
+ * the incidents that own the flights; it does not say that the dataset as a whole is busy, or that
+ * one control on the same screen clears it.
+ *
+ * `UNKNOWN` rather than a guess when the group list has not arrived: an unstarted dataset and an
+ * unanswered query are different things, and only one of them means "go ahead".
+ */
+export function datasetStatus(input: {
+  isSeeded: boolean;
+  groupStates: string[] | undefined;
+}): DatasetStatusView {
+  if (input.groupStates === undefined) {
+    return {
+      status: 'UNKNOWN',
+      detail: 'Waiting for the group list before reporting what is open.',
+      resetWouldClear: false,
+    };
+  }
+  if (!input.isSeeded) {
+    return {
+      status: 'UNKNOWN',
+      detail: 'The reference dataset is not seeded, so there are no recorded flights to work from.',
+      resetWouldClear: true,
+    };
+  }
+  if (input.groupStates.length === 0) {
+    return {
+      status: 'CLEAN',
+      detail: 'No disruption is open. Every simulation can run against this dataset.',
+      resetWouldClear: false,
+    };
+  }
+  const active = input.groupStates.filter((state) => ACTIVE_GROUP_STATES.has(state));
+  if (active.length > 0) {
+    return {
+      status: 'ACTIVE',
+      detail:
+        `${active.length} disruption${active.length === 1 ? '' : 's'} still being worked. Their ` +
+        'flights belong to that workflow, so a new simulation cannot declare them.',
+      resetWouldClear: true,
+    };
+  }
+  // Every group has stopped. `resolved` requires every member resolved — seven of eight is not
+  // success — so a mixed terminal set is partially processed, not finished.
+  if (input.groupStates.every((state) => state === 'resolved')) {
+    return {
+      status: 'RESOLVED',
+      detail:
+        'Every disruption finished and resolved. Flights stay owned by those workflows, so reset ' +
+        'the dataset to run a simulation again.',
+      resetWouldClear: true,
+    };
+  }
+  return {
+    status: 'PARTIALLY_PROCESSED',
+    detail:
+      'Every disruption has stopped, but not all of them resolved. Reset the dataset for a clean ' +
+      'run.',
+    resetWouldClear: true,
+  };
+}
+
 export interface DatasetHeadline {
   label: string;
   value: number;

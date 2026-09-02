@@ -47,6 +47,11 @@ from app.errors import PolicyPackUnavailable
 
 DEFAULT_AUTHORITY_PATH: Final = "./config/proposal_authority.v1.yaml"
 
+#: The orchestrator's own token for the deterministic playbook. Stated here rather than imported
+#: so the assurance layer keeps no import edge back into the orchestrator; a unit test asserts the
+#: two are identical, which is the cheap half of the trade and catches any drift immediately.
+FALLBACK_GENERATOR: Final = "fallback-playbook"
+
 CONSTRAINT_SYSTEM_AUTHORED: Final = "authorship.system_authored_field"
 CONSTRAINT_UNCORROBORATED_EVIDENCE: Final = "authorship.uncorroborated_evidence"
 CONSTRAINT_AUTHORITY_UNAVAILABLE: Final = "authorship.authority_unavailable"
@@ -231,6 +236,30 @@ def authorship_constraints(
             )
 
     return constraints
+
+
+def authorship_for_generator(generator: str | None) -> Authorship:
+    """Who wrote a plan, from its recorded generator token.
+
+    Extracted so exactly one rule answers this question. It previously lived inline in the
+    orchestrator, which meant every other surface that needed the answer re-derived it — and the
+    console re-derived it *in the browser*, by string-matching `plan.generator` against two
+    literals. That classifier returned "unclassified" for the committed fixture's
+    `fallback-playbook · deterministic`, so the Recovery Workspace told operators it could not
+    tell who wrote a plan that was plainly the deterministic playbook.
+
+    The rule is the conservative one the assurance gate already used: anything that is not the
+    fallback playbook is treated as model-authored. A generator this function does not recognise
+    is model-authored too, because assuming a stranger is deterministic would hand it the weaker
+    gate.
+    """
+    if generator is None:
+        return Authorship.model
+    return (
+        Authorship.deterministic
+        if generator.strip().startswith(FALLBACK_GENERATOR)
+        else Authorship.model
+    )
 
 
 def authorship_record(authorship: ProposalAuthorship | None) -> dict[str, Any]:

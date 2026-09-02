@@ -25,6 +25,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import IncidentState, RiskLevel, TaskState
+from app.assurance.authorship import Authorship
 from app.schemas.provenance import Provenance
 
 
@@ -124,11 +125,26 @@ class PlanSummary(BaseModel):
     #: 'fallback-playbook' or 'groq:llama-3.3-70b'. Never ambiguous, so a judge never has to
     #: guess whether a model was involved.
     generator: str
+    #: Who wrote it, decided by the server. Published because the console used to re-derive this
+    #: by string-matching `generator` in the browser, and returned "unclassified" for a plan that
+    #: was plainly the deterministic playbook.
+    authored_by: Authorship
     prompt_version: str | None = None
     #: Diagnostic metadata only. Never used for control flow.
     model_self_report: int | None = None
     generated_at: datetime
     rationale: str | None = None
+    #: 'selected' when a person chose this plan; 'candidate' when it is the plan of record only
+    #: because it is the earliest one. The two are very different claims about who decided.
+    selection_state: str
+    #: A model-authored plan exists on this incident and is NOT the plan of record.
+    #:
+    #: This is the fact the demo most needs stated. The deterministic playbook is persisted first
+    #: and unconditionally, the planner agent's output is stored as a candidate, and nothing
+    #: auto-selects it — so a fully successful live model call still leaves the playbook running.
+    #: Without this field the console can show "LLM live" beside a model-authored candidate and
+    #: leave a viewer to conclude the model planned the recovery, which it did not.
+    model_candidate_available: bool = False
     tasks: list[PlanTaskSummary] = Field(default_factory=list)
 
 

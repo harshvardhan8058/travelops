@@ -1,29 +1,36 @@
 {
-  "generated_by": "wave0-fixture",
-  "incident_reference": "INC-2026-0820-VOBL-01",
-  "metrics": {
-    "time_to_first_action_seconds": 63,
-    "time_to_resolution_seconds": null,
-    "passengers_affected": 174,
-    "passengers_reaccommodated": 0,
-    "connections_identified_at_risk": 6,
-    "actions_executed": 2,
-    "actions_blocked": 2,
-    "human_approvals": 0,
-    "notifications_real": 0,
-    "notifications_simulated": 0,
-    "total_cost_inr": 0,
-    "llm_mode_during_incident": "off",
-    "policy_mode_during_incident": "charter",
-    "note": "Every value is derived from recorded rows. Absent metrics are absent, not estimated."
-  },
-  "narrative": {
-    "generated_by": null,
-    "text": null,
-    "note": "The Report Generator arrives in Phase 3. Until then this is intentionally null rather than a placeholder sentence."
-  },
-  "caveats": [
-    "Prototype run on fixed-seed synthetic data. Not an airline outcome.",
-    "Regulatory figures come from a dated official publication pending CAR verification."
-  ]
+  "reference": "GRP-2026-0820-VOBL",
+  "generator": "fixture:reporter",
+  "prompt_version": "report.v1",
+  "source": "fixture",
+  "llm_mode": "fixture",
+  "authorises_no_action": true,
+  "status": "success",
+  "reason": "Replayed from a committed artefact. No provider was contacted.",
+  "evidence_refs": ["GRP-2026-0820-VOBL", "INC-2026-0820-VOBL-01"],
+  "payload_type": "executive_report",
+  "summary": "A monsoon storm held departures at Kempegowda. Eight flights were declared, impact was assessed on those that had been worked, and accommodation fell short of demand by a margin the operator was asked to decide on.",
+  "sections": [
+    {
+      "heading": "What happened",
+      "body": "Severe weather at VOBL delayed departures across the evening bank. The most delayed departure led the group and the rest of the board followed it. Delay figures are derived from the recorded schedule, not asserted by this report."
+    },
+    {
+      "heading": "What was decided",
+      "body": "The deterministic playbook is the plan of record. A model-authored candidate was proposed alongside it and was not selected, so nothing a model wrote entered execution. Every high-risk action was held for an individual human decision."
+    },
+    {
+      "heading": "What remains outstanding",
+      "body": "Accommodation demand exceeded the rooms available within the rate cap. The shortfall is recorded against the incidents that ran allocation and is not counted as resolved."
+    }
+  ],
+  "metric_refs": ["passengers_affected", "rooms_required", "rooms_secured"],
+  "audit": {
+    "generator": "fixture:reporter",
+    "prompt_version": "report.v1",
+    "model_self_report": null,
+    "input_tokens": null,
+    "output_tokens": null,
+    "latency_ms": 0
+  }
 }

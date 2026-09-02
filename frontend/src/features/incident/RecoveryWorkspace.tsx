@@ -241,9 +241,19 @@ function Header({
              * call. Both say which applies — now in the button's own title as well as beside it,
              * so the reason travels with the control that refused.
              */}
+            {/*
+              Demoted to secondary while a person is being waited on.
+
+              There were two `primary` buttons on this screen at once: this one, always present and
+              high in the visual hierarchy, and Approve, which sits low in a 360px rail below the
+              gate decision and up to three blocking notices. When the workflow is parked on a
+              human decision, the decision is the action — and the control that looked most like
+              the next step was the one that cannot help until the decision is made. Running now
+              re-parks on the same evaluation.
+            */}
             <div className="flex flex-col items-end gap-1">
               <Button
-                variant="primary"
+                variant={incident.state === 'awaiting_approval' ? 'secondary' : 'primary'}
                 size="md"
                 icon={PlayCircle}
                 onClick={onRun}
@@ -254,7 +264,10 @@ function Header({
                 {isRunning ? 'Running…' : 'Run workflow'}
               </Button>
               <span className="max-w-[240px] text-right text-caption text-fg-muted">
-                {blockedReason ?? 'advances the workflow one run'}
+                {blockedReason ??
+                  (incident.state === 'awaiting_approval'
+                    ? 'waiting on your decision first — running now stops at the same gate'
+                    : 'advances the workflow one run')}
               </span>
             </div>
           </Toolbar>
