@@ -31,15 +31,27 @@ export function journeyStateFor(
   }
 
   if (state === 'blocked') {
+    // `blocked` is not a malfunction. It is most often a person needing to decide something the
+    // automated review is not allowed to decide alone — an accommodation shortfall, a rejected
+    // approval, a conflict the gate will not wave through — the same everyday case
+    // `awaiting_approval` describes, just one step further along. Wording this like a system
+    // failure (as it read before, identically to `failed` below) told a passenger something had
+    // gone wrong when nothing had; the operator console never makes that claim for the same state.
     return {
       token: 'blocked',
-      label: 'review needs attention',
-      headline: 'We could not complete the disruption review',
-      detail: 'A problem stopped the review before it could be completed.',
+      label: "needs a person's decision",
+      headline: "Your booking's review is paused for a decision",
+      detail:
+        'The automated review reached a point that needs a person to decide the next step. ' +
+        'That is a normal part of some reviews, not a sign that anything went wrong. You do not ' +
+        'need to do anything here unless your airline contacts you directly.',
     };
   }
 
   if (state === 'failed') {
+    // Genuinely distinct from `blocked`: `failed` is reserved for the review itself breaking,
+    // not for a decision a person still needs to make. This is the one state where "a problem
+    // stopped the review" is an accurate sentence.
     return {
       token: 'failed',
       label: 'review unsuccessful',

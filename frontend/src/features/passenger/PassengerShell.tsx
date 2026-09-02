@@ -28,8 +28,8 @@ export function PassengerShell({ children }: { children: ReactNode }) {
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6">{children}</main>
 
         <footer className="border-t border-border-subtle px-4 py-3 text-caption text-fg-muted sm:px-6">
-          This page shows what TravelOps has on record for your trip. For anything urgent, contact
-          your airline directly rather than waiting on this page to update.
+          This page shows what TravelOps has on record for your trip and checks for changes on its
+          own. For anything urgent, contact your airline directly rather than relying on this page.
         </footer>
       </div>
     </div>
