@@ -61,16 +61,32 @@ describe('passenger journey projection', () => {
     expect(state.detail).toContain('does not mean your booking changed');
   });
 
-  it('uses critical states and plain language for blocked or failed reviews', () => {
+  it('uses plain language for blocked or failed reviews, and never calls either complete', () => {
     for (const terminal of ['blocked', 'failed'] as const) {
       const state = passengerJourneyState(group({ state: terminal }));
       expect(state.token).toBe(terminal);
-      expect(state.headline).toBe('We could not complete the disruption review');
       expect(state.label).not.toBe('review complete');
       expect(`${state.label} ${state.detail}`.toLowerCase()).not.toMatch(
         /\bsuccess\b|operator|terminal exception/,
       );
     }
+  });
+
+  it('does not tell a passenger something went wrong when a review is merely blocked', () => {
+    // `blocked` is most often a person needing to decide something the automated review cannot
+    // decide alone — the same everyday case `awaiting_approval` describes, one step further
+    // along — not the review breaking. Regression for the two states sharing identical, alarmist
+    // "a problem stopped the review" wording regardless of which one actually applied.
+    const state = passengerJourneyState(group({ state: 'blocked' }));
+    expect(`${state.headline} ${state.detail}`.toLowerCase()).not.toMatch(/\ba problem\b/);
+    expect(`${state.headline} ${state.detail}`.toLowerCase()).toMatch(/decision/);
+    expect(state.detail).toContain('not a sign that anything went wrong');
+  });
+
+  it('reserves "a problem stopped the review" for a genuine failure', () => {
+    const state = passengerJourneyState(group({ state: 'failed' }));
+    expect(state.headline).toBe('We could not complete the disruption review');
+    expect(state.detail).toBe('A problem stopped the review before it could be completed.');
   });
 
   it('uses plain in-progress wording while work continues', () => {
