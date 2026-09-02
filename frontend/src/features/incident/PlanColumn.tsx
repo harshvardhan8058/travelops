@@ -342,14 +342,33 @@ export function PlanColumn({
           }
         >
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {/*
+              The two states named in full, because "planner candidate" alone does not say the
+              thing that matters: whether the model's plan is the one that will execute. It usually
+              is not — the deterministic playbook is persisted first and nothing auto-selects a
+              candidate — so the badge says so rather than leaving the reader to work it out from
+              an id comparison further along the sentence.
+            */}
             <StateBadge
               status={plannerCandidate.isPlanOfRecord ? 'executing' : 'proposed'}
               label={
-                plannerCandidate.isPlanOfRecord ? 'planner plan of record' : 'planner candidate'
+                plannerCandidate.isPlanOfRecord
+                  ? 'model-authored · plan of record'
+                  : 'model-authored candidate · NOT plan of record'
               }
             />
             <span>
-              <MonoValue>{plannerCandidate.generator}</MonoValue> · {plannerCandidate.sourceLabel} ·{' '}
+              <MonoValue>{plannerCandidate.generator}</MonoValue> ·{' '}
+              {/* Which endpoint answered. Recorded on the plan event; never inferred from the
+                  agent name, and stated as unavailable when the event predates the field. */}
+              <span title="The provider and model that answered this call">
+                {plannerCandidate.transportGenerator ? (
+                  <MonoValue muted>{plannerCandidate.transportGenerator}</MonoValue>
+                ) : (
+                  <span className="text-fg-muted">provider/model unavailable</span>
+                )}
+              </span>{' '}
+              · {plannerCandidate.sourceLabel} ·{' '}
               {plannerCandidate.isPlanOfRecord
                 ? `candidate id ${plannerCandidate.planId} matches the recorded plan-of-record id`
                 : `candidate id ${plannerCandidate.planId} does not match plan-of-record id ${plan.id}; ${candidateMismatchLabel(plan)}`}

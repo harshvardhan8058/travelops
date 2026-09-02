@@ -245,7 +245,16 @@ export function ScenarioCenter() {
   });
   const status = datasetStatus({
     isSeeded: demo.is_seeded,
-    groupStates: groups.data?.groups.map((group) => group.state),
+    groups: groups.data?.groups.map((group) => ({
+      state: group.state,
+      // The direct answer to "has anything been opened against this group?".
+      incidentsInGroup: group.rollup_status?.incidents_in_group,
+      flightsAffected: group.rollups?.flights_affected ?? 0,
+      // Fallback for a response predating that counter. A declared flight with no incident is
+      // "affected, not yet being worked"; when every declared flight is in that list, the group
+      // has not been started at all — which is exactly the state a freshly reset dataset is in.
+      flightsWithoutIncident: group.rollup_status?.flights_without_incident?.length ?? 0,
+    })),
   });
 
   return (

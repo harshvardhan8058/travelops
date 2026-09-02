@@ -280,6 +280,62 @@ function Header({
         }
       />
 
+      {/*
+        The operator's five questions, answered in order, above the three columns that answer them
+        in detail.
+
+        The workspace was never short of information — evidence, plan and assurance are all there.
+        What it lacked was a first paragraph: an operator arriving at a screen mid-cascade had to
+        assemble "what happened, what do we know, what don't we, what needs me, what next" from
+        three columns and a state rail. Every value below is read from what is already rendered
+        further down; nothing here is a new computation, so this band cannot disagree with the
+        detail beneath it.
+      */}
+      <div className="grid gap-2 rounded border border-border-subtle bg-inset px-3 py-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">What happened</span>
+          <span className="text-body text-fg">
+            {incident.flight?.flight_number ?? incident.reference}
+            {incident.flight?.route ? ` · ${incident.flight.route}` : ''}
+            {typeof incident.flight?.delay_minutes === 'number' && incident.flight.delay_minutes > 0
+              ? ` · delayed ${incident.flight.delay_minutes} min`
+              : ''}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">What needs a human</span>
+          <span
+            className={
+              outstanding.length > 0 ? 'text-body text-state-warn' : 'text-body text-fg-secondary'
+            }
+          >
+            {outstanding.length === 0
+              ? 'Nothing is waiting on a person right now.'
+              : `${outstanding.length} action${outstanding.length === 1 ? '' : 's'} recorded a decision for a person.`}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">What happens next</span>
+          <span className="text-body text-fg-secondary">
+            {incident.state === 'awaiting_approval'
+              ? 'Approve or reject in the assurance rail. Approving records a decision and runs nothing.'
+              : isTerminal
+                ? 'This incident is terminal. Nothing further will run.'
+                : (blockedReason ?? 'Run workflow advances the workflow one run.')}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">Scope</span>
+          {/* Every figure on this screen is one incident — one flight. The group's figures are
+              larger and live on the cascade screen, and saying so here is cheaper than letting a
+              reader discover it by finding two different passenger counts. */}
+          <span className="text-body text-fg-secondary">
+            This incident only — <MonoValue muted>{incident.reference}</MonoValue>, one flight. The
+            disruption group&rsquo;s totals are larger.
+          </span>
+        </div>
+      </div>
+
       {resolvedOwing && (
         <Notice tone="warn" divider="none" className="rounded border">
           <span className="text-fg">Resolved, with operational demand still outstanding. </span>

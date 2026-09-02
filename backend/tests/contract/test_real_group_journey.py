@@ -342,9 +342,7 @@ async def test_the_room_totals_agree_with_the_what_if_baseline(client):
     what_if = client.post(
         f"{PREFIX}/incident-groups/{GROUP}/what-if", json={"minimum_connection_minutes": 30}
     ).json()
-    rooms_short = next(
-        delta for delta in what_if["deltas"] if delta["key"] == "rooms_short"
-    )
+    rooms_short = next(delta for delta in what_if["deltas"] if delta["key"] == "rooms_short")
 
     assert rooms_short["baseline"] == values["rooms_short"], (
         "the what-if baseline must see the inventory this group already holds; "
@@ -366,9 +364,7 @@ async def test_a_partly_allocated_group_reports_its_room_totals_as_floors(client
     _drive(client)
     async with sessionmaker_for() as session:
         group_id = (
-            await session.execute(
-                select(IncidentGroup.id).where(IncidentGroup.reference == GROUP)
-            )
+            await session.execute(select(IncidentGroup.id).where(IncidentGroup.reference == GROUP))
         ).scalar_one()
         totals = await group_hotel_totals(session, group_id=group_id)
 

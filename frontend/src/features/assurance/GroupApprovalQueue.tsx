@@ -180,6 +180,15 @@ function ExposureRow({ exposure }: { exposure: GroupExposure }) {
 
   return (
     <div className="border-t border-border-subtle px-3 py-1.5">
+      {/*
+        Every figure on this row is summed across the whole disruption group, and each label is a
+        bare noun. "rooms committed 71" here and "71 of 87 rooms secured" on an incident screen are
+        the same 71 at two different scopes, and unlabelled they read as one figure that cannot
+        make up its mind. Saying it once, above the row, is cheaper than qualifying four labels.
+      */}
+      <p className="mb-1 text-caption text-fg-muted">
+        Summed across this disruption group, not for any single incident.
+      </p>
       <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
         {figures.map((figure) => (
           <div key={figure.label} className="flex items-baseline gap-2">

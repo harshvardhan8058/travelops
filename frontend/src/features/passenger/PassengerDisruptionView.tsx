@@ -145,6 +145,9 @@ export function PassengerDisruptionView() {
       <div className="flex flex-col gap-6">
         {/* ---------------------------------------------------------------- 1. Trip / flight */}
         <section className="flex flex-col gap-2">
+          {/* Named as the passenger would name it. The operator console calls this a booking
+              reference on an incident; to the person reading it, it is their trip. */}
+          <SectionTitle>My trip</SectionTitle>
           <div className="flex items-center gap-2">
             <Luggage size={18} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
             <h1 className="text-title font-semibold text-fg">

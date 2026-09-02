@@ -408,7 +408,10 @@ try {
   await goto(page, `/incidents/${incidentReference}`);
   await assertHealthyPage(page, observed, [
     incidentReference,
-    'planner candidate',
+    // The badge used to read "planner candidate" — true but silent on the one fact that
+    // matters, whether this candidate is what will execute. It now says so explicitly.
+    'model-authored candidate',
+    'NOT plan of record',
     'Deterministic fallback',
     'recorded plan of record',
     'Fallback playbook · deterministic',

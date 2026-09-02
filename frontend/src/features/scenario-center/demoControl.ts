@@ -207,11 +207,41 @@ const ACTIVE_GROUP_STATES = new Set([
  * `UNKNOWN` rather than a guess when the group list has not arrived: an unstarted dataset and an
  * unanswered query are different things, and only one of them means "go ahead".
  */
+export interface DatasetGroup {
+  state: string;
+  /** How many incidents the group holds. The direct answer, when the server sends it. */
+  incidentsInGroup?: number;
+  /** Declared member flights. */
+  flightsAffected: number;
+  /** Declared member flights that have no incident open. */
+  flightsWithoutIncident: number;
+}
+
+/**
+ * Whether a group has actually been started, by the server's own definition of started.
+ *
+ * A seeded group exists before anything runs, and it sits in `detected` with no incidents at all —
+ * so folding raw states reported a freshly reset dataset as ACTIVE, which is the opposite of the
+ * truth and pointed the operator at a reset they had just performed. `/incident-groups/current`
+ * already draws this line ("a group with no incident has not been started"); this draws the same
+ * one from the fields the list publishes, rather than inventing a second rule.
+ *
+ * `incidents_in_group` answers it outright and is preferred. The flight comparison is the fallback
+ * for a response predating that counter: when every declared flight still has no incident, nothing
+ * has been opened. Both express the same rule; neither infers it from the group's state, because
+ * `detected` is exactly the state a started group and an untouched one share.
+ */
+export function groupIsStarted(group: DatasetGroup): boolean {
+  if (typeof group.incidentsInGroup === 'number') return group.incidentsInGroup > 0;
+  if (group.flightsAffected <= 0) return false;
+  return group.flightsWithoutIncident < group.flightsAffected;
+}
+
 export function datasetStatus(input: {
   isSeeded: boolean;
-  groupStates: string[] | undefined;
+  groups: DatasetGroup[] | undefined;
 }): DatasetStatusView {
-  if (input.groupStates === undefined) {
+  if (input.groups === undefined) {
     return {
       status: 'UNKNOWN',
       detail: 'Waiting for the group list before reporting what is open.',
@@ -225,14 +255,18 @@ export function datasetStatus(input: {
       resetWouldClear: true,
     };
   }
-  if (input.groupStates.length === 0) {
+  // Declared-but-unstarted groups are not part of this answer. They own no flights, block no
+  // simulation, and counting them was the defect above.
+  const started = input.groups.filter(groupIsStarted);
+  if (started.length === 0) {
     return {
       status: 'CLEAN',
       detail: 'No disruption is open. Every simulation can run against this dataset.',
       resetWouldClear: false,
     };
   }
-  const active = input.groupStates.filter((state) => ACTIVE_GROUP_STATES.has(state));
+  const groupStates = started.map((group) => group.state);
+  const active = groupStates.filter((state) => ACTIVE_GROUP_STATES.has(state));
   if (active.length > 0) {
     return {
       status: 'ACTIVE',
@@ -244,7 +278,7 @@ export function datasetStatus(input: {
   }
   // Every group has stopped. `resolved` requires every member resolved — seven of eight is not
   // success — so a mixed terminal set is partially processed, not finished.
-  if (input.groupStates.every((state) => state === 'resolved')) {
+  if (groupStates.every((state) => state === 'resolved')) {
     return {
       status: 'RESOLVED',
       detail:

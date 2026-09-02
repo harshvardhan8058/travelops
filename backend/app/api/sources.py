@@ -466,7 +466,10 @@ def _policy_row() -> SourceRow:
         licence="Government of India publication; redistribution not yet confirmed",
         attribution_required=True,
         health="ok",
-        note="Official but dated. The source PDF hash is not archived, so verified mode stays blocked.",
+        note=(
+            "Official but dated. The source PDF hash is not archived, so verified mode "
+            "stays blocked."
+        ),
     )
 
 

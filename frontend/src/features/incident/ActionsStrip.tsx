@@ -86,6 +86,38 @@ export function ActionsStrip({ incident }: { incident: IncidentDetail }) {
                       status={action.status === 'success' ? 'succeeded' : action.status}
                     />
                   </WhyPopover>
+                  {/*
+                    Delivery is a separate fact from execution, and this is the one action type
+                    where conflating them would be a claim about a real person.
+
+                    A notification action reports `success` when it did what it was asked to do —
+                    which, with no allowlisted recipient, is to record every message as simulated
+                    and send nothing. The server is careful here (`provenance_kind` is `simulated`
+                    unless at least one message really went, and the reason reads "0 real and 604
+                    simulated"), but a green SUCCEEDED badge is the loudest thing in the row, and
+                    "sent" is what a reader takes from it. So the delivery mode is stated beside
+                    the status rather than left in prose two columns away.
+                  */}
+                  {/* `action_type` is present on the real API and absent from the committed
+                      fixture — the cell above already branches on that — so this must not assume
+                      it. An optional-chained test yields `undefined`, which renders nothing. */}
+                  {action.action_type?.includes('notif') && (
+                    <span
+                      className={
+                        'ml-1.5 rounded-sm border px-1 py-0.5 text-caption uppercase ' +
+                        (action.provenance_kind === 'real'
+                          ? 'border-state-ok/40 text-state-ok'
+                          : 'border-border-strong text-fg-muted')
+                      }
+                      title={
+                        action.provenance_kind === 'real'
+                          ? 'At least one message was delivered to a real allowlisted recipient.'
+                          : 'Nothing was delivered to any recipient. Every message is recorded with delivery_mode=simulated.'
+                      }
+                    >
+                      {action.provenance_kind === 'real' ? 'live delivery' : 'simulated'}
+                    </span>
+                  )}
                 </td>
                 {/*
                  * A refusal shows designed copy with its stable code beside it; the raw message

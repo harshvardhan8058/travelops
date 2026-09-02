@@ -24,8 +24,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import IncidentState, RiskLevel, TaskState
 from app.assurance.authorship import Authorship
+from app.models.enums import IncidentState, RiskLevel, TaskState
 from app.schemas.provenance import Provenance
 
 

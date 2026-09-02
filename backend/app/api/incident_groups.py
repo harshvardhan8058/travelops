@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assurance.plan_contract import WhatIfPolicy
 from app.assurance.whatif import WhatIfRequest, assert_zero_write
+from app.config import comparison_provider_modes, get_modes
 from app.db.scenario_queries import CascadeRollup, cascade_rollup
 from app.db.session import get_session
 from app.errors import EntityNotFound
@@ -921,8 +922,10 @@ async def group_what_if(
         request=WhatIfRequest(
             candidate_count=1,
             seed=seed,
-            provider_modes={"weather": "fixture", "notification": "console"},
-            real_dispatch_enabled=False,
+            # The real modes. A hardcoded "fixture" here meant `refuse_when_provider_live` could
+            # never fire, which is the one thing that check exists to do.
+            provider_modes=comparison_provider_modes(get_modes()),
+            real_dispatch_enabled=get_modes().real_email_enabled,
         ),
         policy=policy,
     )

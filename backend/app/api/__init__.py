@@ -22,7 +22,7 @@ Endpoint status after the Phase 2 increment:
 | `POST /incident-groups/{ref}/open`, `/run`, `/what-if` | real (Stream A + C) |
 | `/incident-groups/{ref}/assurance` + `POST .../assurance/decision` | real (Stream A + B) |
 | `/flights` | real (Stream A) — persisted flights, null where nothing has been assessed |
-| `/bookings/{pnr}` | real (Stream A) — the trip behind a booking reference, for the passenger view |
+| `/bookings/{pnr}` | real (Stream A) — the trip behind a booking reference, for passengers |
 | `/demo/dataset`, `/demo/simulations` | real (Stream A) — read-only demo control |
 | `POST /demo/reset` | real (Stream A) — destructive, demo envs only, typed confirmation |
 | `/sources` | real (Stream A) — provenance ledger derived from settings and recorded rows |

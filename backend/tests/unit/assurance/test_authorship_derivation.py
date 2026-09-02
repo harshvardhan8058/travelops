@@ -36,9 +36,7 @@ def test_the_playbook_is_deterministic():
 
 def test_display_prose_appended_to_the_token_does_not_defeat_it():
     """The exact string the committed fixture carried, and the exact case the browser got wrong."""
-    assert (
-        authorship_for_generator("fallback-playbook · deterministic") is Authorship.deterministic
-    )
+    assert authorship_for_generator("fallback-playbook · deterministic") is Authorship.deterministic
 
 
 def test_the_planner_agent_is_model_authored():

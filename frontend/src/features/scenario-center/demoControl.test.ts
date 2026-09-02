@@ -4,13 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   datasetHeadlines,
+  datasetStatus,
+  groupIsStarted,
   RESET_CONFIRMATION,
   resetBlockedReason,
   resetConfirmationMatches,
   simulationReadiness,
   simulationToScenarioRequest,
   startBlockedReason,
-  datasetStatus,
 } from './demoControl';
 import type { DemoDatasetResponse, SimulationDefinition } from '@/api/types';
 
@@ -374,16 +375,31 @@ describe('the recorded clock, not the wall clock', () => {
 });
 
 describe('datasetStatus', () => {
+  const started = (state: string) => ({ state, flightsAffected: 4, flightsWithoutIncident: 1 });
+  const unstarted = (state = 'detected') => ({
+    state,
+    flightsAffected: 8,
+    flightsWithoutIncident: 8,
+  });
+
   it('is CLEAN when the dataset is seeded and no group is open', () => {
-    const status = datasetStatus({ isSeeded: true, groupStates: [] });
+    const status = datasetStatus({ isSeeded: true, groups: [] });
     expect(status.status).toBe('CLEAN');
     expect(status.resetWouldClear).toBe(false);
   });
 
-  it('is ACTIVE while any group is still being worked, and says reset would clear it', () => {
-    // The exact situation the Scenario Center refuses every simulation in, and the one it could
-    // not previously explain as a single dataset-wide condition.
-    const status = datasetStatus({ isSeeded: true, groupStates: ['detected', 'resolved'] });
+  it('is CLEAN when the only group is seeded but never started', () => {
+    // The regression that mattered. A reset re-seeds the group, which then sits in `detected`
+    // with no incidents at all — so folding raw states reported a freshly reset dataset as ACTIVE
+    // and pointed the operator at the very reset they had just performed.
+    expect(datasetStatus({ isSeeded: true, groups: [unstarted()] }).status).toBe('CLEAN');
+  });
+
+  it('is ACTIVE while a started group is still being worked, and says reset would clear it', () => {
+    const status = datasetStatus({
+      isSeeded: true,
+      groups: [started('detected'), started('resolved')],
+    });
     expect(status.status).toBe('ACTIVE');
     expect(status.resetWouldClear).toBe(true);
     expect(status.detail).toContain('1 disruption');
@@ -392,23 +408,29 @@ describe('datasetStatus', () => {
   it.each([['assessing'], ['planning'], ['assuring'], ['awaiting_approval'], ['executing']])(
     'treats %s as active work',
     (state) => {
-      expect(datasetStatus({ isSeeded: true, groupStates: [state] }).status).toBe('ACTIVE');
+      expect(datasetStatus({ isSeeded: true, groups: [started(state)] }).status).toBe('ACTIVE');
     },
   );
 
-  it('is RESOLVED only when every group resolved', () => {
-    expect(datasetStatus({ isSeeded: true, groupStates: ['resolved', 'resolved'] }).status).toBe(
-      'RESOLVED',
-    );
+  it('is RESOLVED only when every started group resolved', () => {
+    expect(
+      datasetStatus({ isSeeded: true, groups: [started('resolved'), started('resolved')] }).status,
+    ).toBe('RESOLVED');
   });
 
-  it('is PARTIALLY_PROCESSED when every group stopped but not all resolved', () => {
+  it('ignores an unstarted group when judging the started ones', () => {
+    expect(
+      datasetStatus({ isSeeded: true, groups: [started('resolved'), unstarted()] }).status,
+    ).toBe('RESOLVED');
+  });
+
+  it('is PARTIALLY_PROCESSED when every started group stopped but not all resolved', () => {
     // `resolved` requires every member resolved — seven of eight is not success — and the same
     // rule has to hold one level up, or a blocked group would read as a finished one.
-    expect(datasetStatus({ isSeeded: true, groupStates: ['resolved', 'blocked'] }).status).toBe(
-      'PARTIALLY_PROCESSED',
-    );
-    expect(datasetStatus({ isSeeded: true, groupStates: ['failed'] }).status).toBe(
+    expect(
+      datasetStatus({ isSeeded: true, groups: [started('resolved'), started('blocked')] }).status,
+    ).toBe('PARTIALLY_PROCESSED');
+    expect(datasetStatus({ isSeeded: true, groups: [started('failed')] }).status).toBe(
       'PARTIALLY_PROCESSED',
     );
   });
@@ -416,7 +438,48 @@ describe('datasetStatus', () => {
   it('reports UNKNOWN rather than guessing when the group list has not arrived', () => {
     // An unstarted dataset and an unanswered query are different things, and only one of them
     // means "go ahead".
-    expect(datasetStatus({ isSeeded: true, groupStates: undefined }).status).toBe('UNKNOWN');
-    expect(datasetStatus({ isSeeded: false, groupStates: [] }).status).toBe('UNKNOWN');
+    expect(datasetStatus({ isSeeded: true, groups: undefined }).status).toBe('UNKNOWN');
+    expect(datasetStatus({ isSeeded: false, groups: [] }).status).toBe('UNKNOWN');
+  });
+});
+
+describe('groupIsStarted', () => {
+  it('prefers the incident counter when the server sends one', () => {
+    // `detected` with zero incidents is a seeded group nobody has touched. Its state is identical
+    // to a group that has just been started, which is why state alone can never answer this.
+    expect(
+      groupIsStarted({
+        state: 'detected',
+        incidentsInGroup: 0,
+        flightsAffected: 8,
+        flightsWithoutIncident: 0,
+      }),
+    ).toBe(false);
+    expect(
+      groupIsStarted({
+        state: 'detected',
+        incidentsInGroup: 1,
+        flightsAffected: 8,
+        flightsWithoutIncident: 8,
+      }),
+    ).toBe(true);
+  });
+
+  it('is false when every declared flight lacks an incident', () => {
+    expect(
+      groupIsStarted({ state: 'detected', flightsAffected: 8, flightsWithoutIncident: 8 }),
+    ).toBe(false);
+  });
+
+  it('is true as soon as one declared flight has an incident', () => {
+    expect(
+      groupIsStarted({ state: 'detected', flightsAffected: 8, flightsWithoutIncident: 7 }),
+    ).toBe(true);
+  });
+
+  it('is false for a group declaring no flights at all', () => {
+    expect(
+      groupIsStarted({ state: 'detected', flightsAffected: 0, flightsWithoutIncident: 0 }),
+    ).toBe(false);
   });
 });

@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-import app.models  # noqa: F401  (model registration)
+import app.models
 from app.config import get_settings, provider_transport
 from app.db.base import Base
 from app.db.seed import seed_demo_dataset
@@ -98,9 +98,7 @@ class TestTheLedgerDescribesThisProcess:
         """Naming it is cheaper than expecting a reader to infer it from an absence."""
         transport = provider_transport(get_settings())
         alternatives = [
-            row
-            for row in _rows(ledger_client)
-            if row["current_mode"] == "not_selected"
+            row for row in _rows(ledger_client) if row["current_mode"] == "not_selected"
         ]
         assert len(alternatives) == 1, "exactly one reasoning transport is registered but unused"
         alternative = alternatives[0]

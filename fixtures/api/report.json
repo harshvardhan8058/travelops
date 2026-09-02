@@ -1,5 +1,8 @@
 {
   "reference": "GRP-2026-0820-VOBL",
+  "scope": "group",
+  "narrative_scope": "group",
+  "scope_note": "Figures cover every flight this disruption group declares.",
   "generator": "fixture:reporter",
   "prompt_version": "report.v1",
   "source": "fixture",
@@ -7,7 +10,10 @@
   "authorises_no_action": true,
   "status": "success",
   "reason": "Replayed from a committed artefact. No provider was contacted.",
-  "evidence_refs": ["GRP-2026-0820-VOBL", "INC-2026-0820-VOBL-01"],
+  "evidence_refs": [
+    "GRP-2026-0820-VOBL",
+    "INC-2026-0820-VOBL-01"
+  ],
   "payload_type": "executive_report",
   "summary": "A monsoon storm held departures at Kempegowda. Eight flights were declared, impact was assessed on those that had been worked, and accommodation fell short of demand by a margin the operator was asked to decide on.",
   "sections": [
@@ -24,7 +30,11 @@
       "body": "Accommodation demand exceeded the rooms available within the rate cap. The shortfall is recorded against the incidents that ran allocation and is not counted as resolved."
     }
   ],
-  "metric_refs": ["passengers_affected", "rooms_required", "rooms_secured"],
+  "metric_refs": [
+    "passengers_affected",
+    "rooms_required",
+    "rooms_secured"
+  ],
   "audit": {
     "generator": "fixture:reporter",
     "prompt_version": "report.v1",

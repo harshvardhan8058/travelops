@@ -56,6 +56,15 @@ export interface PlannerCandidateAttribution {
   planId: number;
   generator: string;
   promptVersion: string | null;
+  /**
+   * Which endpoint actually answered — `openrouter:openai/gpt-oss-120b`, or `fixture:planner` for
+   * a replay.
+   *
+   * `null` when the recorded event predates this field. Rendered as "unavailable", never guessed:
+   * the plan's own `generator` names the agent, not the vendor, and inferring a provider from an
+   * agent name would be exactly the kind of invention this screen exists to avoid.
+   */
+  transportGenerator: string | null;
   isPlanOfRecord: boolean;
   sourceLabel: string;
   sourceVerified: boolean;
@@ -116,10 +125,16 @@ export function plannerCandidateAttribution(
             ? 'fixture-replayed model output'
             : 'model mode off; recorded candidate retained';
 
+  const transportGenerator =
+    typeof detail.transport_generator === 'string' && detail.transport_generator.length > 0
+      ? detail.transport_generator
+      : null;
+
   return {
     planId,
     generator,
     promptVersion,
+    transportGenerator,
     isPlanOfRecord: planOfRecord?.id === planId,
     sourceLabel,
     sourceVerified,

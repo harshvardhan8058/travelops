@@ -30,6 +30,29 @@ import type { WhatIfResponse } from '@/api/types';
 import { MonoValue, Panel, StateBadge } from '@/components/ui/primitives';
 
 /**
+ * What each refusal means in words, keyed by the server's own code.
+ *
+ * The codes are the contract and are still rendered verbatim beside these sentences — this maps
+ * them, it does not replace them. Anything the server refuses with a code not listed here still
+ * renders as its code, which is the right failure mode: an unexplained refusal is visible, and an
+ * invented explanation would not be.
+ */
+const REFUSAL_EXPLANATION: Record<string, string> = {
+  WHATIF_PROVIDER_LIVE:
+    'A data provider is running live, and the configured policy refuses a comparison that could sit alongside a real API call. This is the guard working, not a fault. Point the live provider at its fixture to run the comparison.',
+  WHATIF_DISABLED: 'Comparison is switched off in the versioned assurance config.',
+  WHATIF_NO_CANDIDATES: 'Nothing was supplied to compare.',
+  WHATIF_TOO_MANY_CANDIDATES: 'More candidates were supplied than the config permits.',
+  WHATIF_SEED_MISSING:
+    'No deterministic seed was supplied, and a comparison nobody can reproduce is not evidence.',
+  WHATIF_DISPATCH_ARMED:
+    'Real delivery is armed. A rehearsal must not be able to reach a passenger.',
+  WHATIF_WRITE_REQUESTED: 'A write was requested. What-if is zero-write by definition.',
+  WHATIF_FIGURE_CLAIMED_AUTHORITATIVE:
+    'A comparison figure cannot be an entitlement; only the policy engine authorises a number.',
+};
+
+/**
  * Discrete choices per lever. Values only — which levers exist comes from the server.
  *
  * Chosen to bracket the seeded scenario: the connection minimum either side of 45, occupancy either
@@ -217,10 +240,23 @@ export function WhatIfPanel({ groupRef }: { groupRef: string }) {
                   Not permitted in this configuration
                 </span>
               </div>
-              <ul className="mt-1 flex flex-col gap-0.5">
+              {/*
+                The refusal codes were the whole message, and a code is not an explanation.
+                `WHATIF_PROVIDER_LIVE` in particular became reachable only once the comparison
+                started declaring its real provider modes to the guard — it used to be handed a
+                hardcoded "fixture" and so could never fire. Now that it can, an operator meeting
+                it deserves to know it is the configured policy working, not a fault, and what
+                would change it.
+              */}
+              <ul className="mt-1 flex flex-col gap-1">
                 {result.refusals.map((refusal) => (
                   <li key={refusal} className="text-caption text-state-warn">
                     <MonoValue muted>{refusal}</MonoValue>
+                    {REFUSAL_EXPLANATION[refusal] && (
+                      <span className="ml-1.5 text-fg-secondary">
+                        {REFUSAL_EXPLANATION[refusal]}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

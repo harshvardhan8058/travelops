@@ -447,6 +447,33 @@ def _chat_completions_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/chat/completions"
 
 
+def comparison_provider_modes(modes: ResolvedModes) -> dict[str, str]:
+    """The provider modes a plan comparison must declare to the zero-write guard.
+
+    Both call sites used to pass the literal `{"weather": "fixture", "notification": "console"}`.
+    That is a lie to a safety check. `assert_zero_write` has a `refuse_when_provider_live` policy —
+    enabled in `assurance.v2.yaml` — whose entire job is to refuse a comparison when a provider is
+    live, and a hardcoded "fixture" meant the check could never fire however the deployment was
+    configured. A guard that is fed its own answer is not a guard.
+
+    **Which providers belong here, and why not all of them.** This declares the providers whose
+    data the comparison *consumes*: connections, crew and hotels are re-evaluated from recorded
+    rows that originated with the weather and flight-status providers, so those being live is
+    exactly the condition the policy asks about. The LLM is deliberately absent — comparison
+    candidates are deterministic variants of the playbook and no agent contributes to them, so
+    reporting its mode here would refuse a comparison for a provider that cannot influence it.
+    Notification is an output channel, not an input, and is already covered more precisely by
+    `real_dispatch_enabled`; reporting it twice would refuse the same risk under two names.
+
+    Narrowing the set is a judgement, and it is recorded here rather than made silently at a call
+    site — which is how the hardcoded pair survived as long as it did.
+    """
+    return {
+        "weather": modes.weather.value,
+        "flight_status": modes.flight_status.value,
+    }
+
+
 def provider_transport(settings: Settings) -> ProviderTransport:
     if settings.llm_provider is LLMProvider.groq:
         return ProviderTransport(

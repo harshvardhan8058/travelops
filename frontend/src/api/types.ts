@@ -741,6 +741,18 @@ export interface SourcesResponse {
 /** Metrics are derived from recorded rows. An absent metric is absent, never estimated. */
 export interface ReportResponse {
   reference: string;
+  /**
+   * Which scope the FIGURES describe. The same endpoint answers at incident and group scope, and
+   * the reference alone cannot say which — asking for an incident used to return the whole
+   * cascade's totals under that incident's name.
+   */
+  scope?: 'incident' | 'group';
+  /**
+   * Which scope the PROSE describes. Equal to `scope` for a live call; `group` for a fixture
+   * replay, whose text is fixed at the scope it was recorded at.
+   */
+  narrative_scope?: 'incident' | 'group';
+  scope_note?: string;
   generator: string;
   prompt_version: string | null;
   /** `fixture` or `live`. A replay and a network call carry different weight in a review, and
