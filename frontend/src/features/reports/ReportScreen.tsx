@@ -117,6 +117,29 @@ export function ReportScreen() {
           </div>
         )}
 
+        {/*
+          Operational state, re-derived server-side on every call — never the narrative's own
+          claim. The one thing this screen must never do is let a "Resolution" section outrank
+          this badge: a reader who only glances at the top of the page has to see the true state
+          before the prose. When the agent's own narrative disagreed and was replaced, that is
+          said explicitly rather than left for the reader to notice from the changed tone alone.
+        */}
+        {report.operational_state && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border-subtle px-3 py-2">
+            <StateBadge
+              status={report.operational_state}
+              label={report.is_resolved ? 'resolved' : `not resolved — ${report.operational_state}`}
+            />
+            {report.narrative_overridden && (
+              <span className="max-w-[86ch] text-caption text-state-warn">
+                This has not resolved, so the reporter's own summary and sections were replaced
+                below with a statement built only from recorded rows — nothing the agent wrote is
+                shown while the outcome could still disagree with it.
+              </span>
+            )}
+          </div>
+        )}
+
         {/* The summary is the one-paragraph answer a C-suite reader needs. */}
         <div className="border-b border-border-subtle px-3 py-3">
           <p className="max-w-[86ch] text-body text-fg">{report.summary}</p>
