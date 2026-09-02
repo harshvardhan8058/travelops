@@ -21,9 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import LLMMode, get_settings, provider_transport
 from app.db.session import get_session
 from app.errors import EntityNotFound, ProviderUnavailable
-from app.models.enums import ActionStatus
+from app.models.enums import ActionStatus, IncidentState
 from app.models.workflow import Action, Incident, IncidentGroup, Plan, PlanTask
 from app.observability.logging import get_logger
+from app.orchestrator.group_state import derive_group_state
 
 router = APIRouter(tags=["reasoning"])
 log = get_logger(__name__)
@@ -178,6 +179,69 @@ async def _incident_hotel_totals(
     }
 
 
+#: Plain-language gloss for each non-resolved incident state, used only in the report's
+#: server-composed correction below. Never shown as an LLM claim.
+_STATE_GLOSS: dict[IncidentState, str] = {
+    IncidentState.detected: "just detected; recovery has not started",
+    IncidentState.assessing: "being assessed",
+    IncidentState.planning: "being planned",
+    IncidentState.assuring: "at the assurance gate",
+    IncidentState.awaiting_approval: "awaiting an operator's decision",
+    IncidentState.executing: "still executing",
+    IncidentState.blocked: "blocked — no further automated progress is possible without a "
+    "person's decision",
+    IncidentState.failed: "failed",
+}
+
+
+async def _operational_state(
+    session: AsyncSession, *, group: IncidentGroup | None, incident: Incident | None
+) -> tuple[IncidentState, list[int]]:
+    """The state actually on screen right now, plus the incident id(s) it covers.
+
+    Never read a persisted `incident_group.state` column here. That value is written only when
+    `GroupOrchestrator` runs a step (`_sync_state`), so it can lag behind a member incident that
+    reached `blocked` on its own between group-level runs — exactly the gap that let a report
+    narrate a resolved outcome for a group whose member had stalled. Re-deriving from each
+    member's own current row, the same way `_sync_state` does, means this can never be stale.
+    """
+    if incident is not None:
+        return IncidentState(incident.state), [incident.id]
+    assert group is not None
+    stmt = select(Incident.id, Incident.state).where(Incident.group_id == group.id)
+    rows = (await session.execute(stmt)).all()
+    incident_ids = [row[0] for row in rows]
+    return derive_group_state([row[1] for row in rows]), incident_ids
+
+
+async def _unresolved_evidence(session: AsyncSession, incident_ids: list[int]) -> str | None:
+    """What a person still needs to decide, in the service's own recorded words.
+
+    Reuses the `reason` already written on a `needs_human` action — `reserve_hotel_block` writes
+    its `shortfall_note` there — rather than composing new prose, so the correction below can
+    never assert something the evidence does not already say.
+    """
+    if not incident_ids:
+        return None
+    stmt = (
+        select(PlanTask.action_type, Action.reason)
+        .join(Plan, Plan.id == PlanTask.plan_id)
+        .join(Action, Action.plan_task_id == PlanTask.id)
+        .where(
+            Plan.incident_id.in_(incident_ids),
+            Action.status == ActionStatus.needs_human.value,
+        )
+        .order_by(Action.id)
+    )
+    rows = (await session.execute(stmt)).all()
+    lines: list[str] = []
+    for action_type, reason in rows:
+        line = f"{action_type}: {reason}" if reason else str(action_type)
+        if line not in lines:
+            lines.append(line)
+    return " / ".join(lines) if lines else None
+
+
 def _source_of(generator: str) -> str:
     """`fixture` or `live`, read off the generator the client already recorded.
 
@@ -281,7 +345,7 @@ async def get_explanation(
 
 @router.get(
     "/reports/{report_id}",
-    summary="Executive report for a resolved incident or group (Phase 3 reasoning agent)",
+    summary="Executive report for an incident or group, at its current state (Phase 3 reasoning agent)",
 )
 async def get_report(
     report_id: str,
@@ -289,7 +353,10 @@ async def get_report(
 ) -> dict[str, Any]:
     """On-demand executive report from the Report Generator agent.
 
-    `report_id` is an incident reference or a group reference.
+    `report_id` is an incident reference or a group reference. Callable at any state, not only a
+    resolved one — an operator can ask for this while the recovery is still open. The narrative is
+    never allowed to claim more than `operational_state` supports: see the override below `agent.
+    generate` for what happens when the reference has not resolved.
 
     Returns 404 with mode information when `LLM_MODE=off`.
     """
@@ -346,6 +413,17 @@ async def get_report(
             details={"report_id": report_id},
         )
 
+    # The state actually on screen right now, re-derived from recorded rows rather than trusted
+    # off a stored column — see `_operational_state`. This is the one fact the narrative below is
+    # not permitted to contradict, whatever the reporter agent said.
+    actual_state, member_incident_ids = await _operational_state(
+        session, group=group, incident=incident
+    )
+    is_resolved = actual_state is IncidentState.resolved
+    # Told to the model too, live or fixture: the prompt no longer gets to assume "resolved" just
+    # because that is the only case it used to be asked about.
+    rollup_figures = {**rollup_figures, "current_state": actual_state.value}
+
     from app.agents.reporter import ReportGeneratorAgent
     from app.llm.client import LLMUnavailable
 
@@ -386,6 +464,56 @@ async def get_report(
             "incident's."
         )
 
+    # The reporter's own claim of resolution is never trusted on its own. A fixture is a fixed
+    # artefact recorded for one scenario's happy path and replayed unchanged for every request —
+    # it has no way to know this reference is still blocked. A live call can in principle get it
+    # right now that `current_state` is in its prompt, but a model can still say the wrong thing,
+    # and a C-suite reader has no way to catch it. So whenever the recorded state disagrees with
+    # "resolved", `status` moves off `success` — the one signal every caller of this endpoint, UI
+    # included, already renders — and the summary and EVERY section are replaced with a
+    # server-composed statement built only from recorded rows, never from the agent's prose.
+    #
+    # Earlier this only dropped sections whose heading matched "resolution" / "outcome" /
+    # "conclusion" and kept the rest verbatim. That missed a whole class of stale claim: this
+    # fixture's own "Recovery actions" section says the high-risk notification "received explicit
+    # operator approval" — true in the happy path the fixture was recorded for, false the moment a
+    # real run rejects that approval instead. A heading keyword cannot tell those runs apart, and
+    # neither can any other heading-based filter, because the fixture is one fixed artefact replayed
+    # for every request regardless of what actually happened. So nothing short of dropping every
+    # agent-authored section is a real guarantee: this is enforced here, in the endpoint, not left
+    # to a screen to notice and relabel, and not left to a keyword list that the next canned section
+    # can slip past.
+    narrative_overridden = False
+    if not is_resolved:
+        evidence = await _unresolved_evidence(session, member_incident_ids)
+        state_gloss = _STATE_GLOSS.get(actual_state, actual_state.value)
+        correction = (
+            f"{reference} has not resolved. Current state: {state_gloss}."
+            + (f" Recorded: {evidence}." if evidence else "")
+            + " Nothing in this report should be read as a final, resolved outcome — it describes"
+            " the disruption and the recovery attempted so far, not its conclusion."
+        )
+        from app.agents.contract import ReportSection
+
+        response = response.model_copy(
+            update={
+                "status": (
+                    ActionStatus.failure
+                    if actual_state is IncidentState.failed
+                    else ActionStatus.needs_human
+                ),
+                "reason": (
+                    f"Executive summary generated while {reference} remains "
+                    f"{actual_state.value}, not resolved."
+                ),
+                "summary": correction,
+                # Every section, not a filtered subset: see the note above for why a keyword
+                # filter over headings already proved insufficient.
+                "sections": [ReportSection(heading="Current status", body=correction)],
+            }
+        )
+        narrative_overridden = True
+
     return {
         "reference": reference,
         #: Which scope the FIGURES describe. Published rather than implied, because the same
@@ -395,6 +523,16 @@ async def get_report(
         #: replay, whose text is fixed at the scope it was recorded at.
         "narrative_scope": narrative_scope,
         "scope_note": scope_note,
+        #: The state this report was generated against, re-derived from recorded rows every call
+        #: (see `_operational_state`) — never the persisted `incident_group.state` column, which
+        #: can lag a member that reached `blocked` on its own. This is the fact the narrative is
+        #: not permitted to contradict.
+        "operational_state": actual_state.value,
+        "is_resolved": is_resolved,
+        #: True when the agent's own narrative (fixture or live) disagreed with `operational_state`
+        #: and was replaced. Published so a reader — and a test — can tell a corrected report from
+        #: one the agent got right unprompted.
+        "narrative_overridden": narrative_overridden,
         "generator": audit.generator,
         "prompt_version": audit.prompt_version,
         "source": source,

@@ -753,6 +753,20 @@ export interface ReportResponse {
    */
   narrative_scope?: 'incident' | 'group';
   scope_note?: string;
+  /**
+   * The state this report was generated against, re-derived from recorded rows on every call —
+   * never a stale, previously-cached outcome. The narrative below is not permitted to contradict
+   * it: see `narrative_overridden`.
+   */
+  operational_state?: IncidentState;
+  /** `operational_state === 'resolved'`, published directly so callers do not have to compare. */
+  is_resolved?: boolean;
+  /**
+   * True when the agent's own narrative (fixture or live) claimed an outcome the recorded state
+   * disagreed with, and the server replaced `summary`/`sections`/`status`/`reason` with a
+   * statement built only from recorded rows. A corrected report, not a wrong one left standing.
+   */
+  narrative_overridden?: boolean;
   generator: string;
   prompt_version: string | null;
   /** `fixture` or `live`. A replay and a network call carry different weight in a review, and
