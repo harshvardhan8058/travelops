@@ -44,11 +44,33 @@ import { WhatIfPanel } from './WhatIfPanel';
  * discovered rather than required or secured. Connections and crew impact are the only two counted
  * from recorded service actions, so they are the only two whose zero can lie.
  */
+/*
+ * Every tile here is GROUP-scoped, and every tile now says so.
+ *
+ * The incident workspace shows "174 passengers" for one flight; this panel shows "445" for the
+ * four flights the group declares. Both are right. Side by side in one product with neither
+ * labelled, they read as one figure that cannot make its mind up — which is precisely the
+ * complaint these footnotes answer. `candidate_hotels` keeps its own more specific footnote,
+ * because "discovered at airport" already tells a reader it is a search space rather than a
+ * finding, and that is the more surprising fact about it.
+ */
+const GROUP_SCOPE = 'across this disruption group';
+
 const ROLLUP_TILES = [
-  { field: 'flights_affected', label: 'Flights', measure: null, footnote: null },
-  { field: 'passengers_affected', label: 'Passengers', measure: null, footnote: null },
-  { field: 'connections_at_risk', label: 'Connections', measure: 'connections', footnote: null },
-  { field: 'crew_pairings_affected', label: 'Crew pairings', measure: 'crew', footnote: null },
+  { field: 'flights_affected', label: 'Flights', measure: null, footnote: GROUP_SCOPE },
+  { field: 'passengers_affected', label: 'Passengers', measure: null, footnote: GROUP_SCOPE },
+  {
+    field: 'connections_at_risk',
+    label: 'Connections',
+    measure: 'connections',
+    footnote: GROUP_SCOPE,
+  },
+  {
+    field: 'crew_pairings_affected',
+    label: 'Crew pairings',
+    measure: 'crew',
+    footnote: GROUP_SCOPE,
+  },
   { field: 'candidate_hotels', label: 'Hotels', measure: null, footnote: 'discovered at airport' },
 ] as const;
 
@@ -233,7 +255,10 @@ export function CascadeExplorer() {
                 value={measured ? value : null}
                 provenance={{ kind: group.provenance.kind, provider: group.provenance.provider }}
                 derivation={countDerivation(tile.label, measured ? value : null, {
-                  endpoint: 'GET /incident-groups/{id}',
+                  // The group's actual reference, not the literal path template. This passed
+                  // `{id}` verbatim, so the one place a reader could go to ask "which group is
+                  // this 445 about?" answered with a URL pattern.
+                  endpoint: `GET /incident-groups/${group.reference}`,
                   field: `rollups.${tile.field}`,
                   provenance: group.provenance,
                 })}

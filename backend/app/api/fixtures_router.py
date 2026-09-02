@@ -48,9 +48,12 @@ def _load(name: str) -> Any:
 # (`VITE_USE_FIXTURES=true`) serves it statically, and that mode cannot author scenarios at all.
 
 
-@router.get("/sources", summary="Provenance ledger [fixture]")
-async def list_sources() -> Any:
-    return _load("sources")
+# `/sources` moved to `app/api/sources.py` and is now derived from the running process. The
+# fixture it used to serve was the reason the console's provenance claims disagreed with each
+# other: it named a reasoning provider the configuration did not select, published a mode
+# unrelated to `LLM_MODE`, and marked never-called sources `real`. `fixtures/api/sources.json` is
+# retained for the console's own offline mode (`VITE_USE_FIXTURES=true`), where it describes that
+# mode's posture honestly and nothing can drift because nothing is running.
 
 
 # ---------------------------------------------------------------- Stream A

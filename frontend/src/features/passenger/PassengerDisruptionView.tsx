@@ -145,6 +145,9 @@ export function PassengerDisruptionView() {
       <div className="flex flex-col gap-6">
         {/* ---------------------------------------------------------------- 1. Trip / flight */}
         <section className="flex flex-col gap-2">
+          {/* Named as the passenger would name it. The operator console calls this a booking
+              reference on an incident; to the person reading it, it is their trip. */}
+          <SectionTitle>My trip</SectionTitle>
           <div className="flex items-center gap-2">
             <Luggage size={18} strokeWidth={1.5} className="text-fg-muted" aria-hidden />
             <h1 className="text-title font-semibold text-fg">
@@ -276,8 +279,21 @@ export function PassengerDisruptionView() {
                     Passenger impact: still outstanding.
                   </p>
                   <p className="text-body text-fg-secondary">
-                    Review finished, but the following still needs a person to complete:
+                    Review finished, but the following still needs a person to complete
+                    {trip.disruptedSegment ? ` for ${trip.disruptedSegment.flight_number}` : ''}:
                   </p>
+                  {/*
+                    The flight number belongs beside these sentences.
+
+                    Each one is a service's own words, and they routinely contain a bare ratio —
+                    "0 of 79 rooms secured". The operator console shows the same sentence for a
+                    different flight ("71 of 87"), because accommodation is allocated per flight
+                    against one shared inventory and whichever flight runs second sees what is
+                    left. Both figures are correct. Presented without the flight they belong to,
+                    they read as the same number disagreeing with itself, and a passenger reading
+                    "0 of 79" has no way to tell it is about their flight rather than the whole
+                    disruption.
+                  */}
                   <ul className="flex flex-col gap-1">
                     {status.outstanding.map((item) => (
                       <li key={item.actionId} className="text-body text-fg-secondary">
@@ -285,6 +301,14 @@ export function PassengerDisruptionView() {
                       </li>
                     ))}
                   </ul>
+                  {trip.disruptedSegment && (
+                    <p className="text-caption text-fg-muted">
+                      These figures cover {trip.disruptedSegment.flight_number} (
+                      {trip.disruptedSegment.origin_icao} to{' '}
+                      {trip.disruptedSegment.destination_icao}) only, not every flight affected by
+                      this weather.
+                    </p>
+                  )}
                 </>
               ) : (
                 <p className="text-body text-fg-secondary">

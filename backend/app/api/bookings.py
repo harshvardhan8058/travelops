@@ -45,7 +45,10 @@ router = APIRouter(prefix="/bookings", tags=["bookings"])
 
 
 class BookingSegmentOut(BaseModel):
-    """One flight in the trip. Delay and incident linkage are derived exactly as `GET /flights` derives them."""
+    """One flight in the trip.
+
+    Delay and incident linkage are derived exactly as `GET /flights` derives them.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -56,7 +59,8 @@ class BookingSegmentOut(BaseModel):
     destination_icao: str
     scheduled_departure: datetime
     estimated_departure: datetime | None = None
-    #: Derived by the same function `GET /flights` and `POST /scenarios` use. Never a second formula.
+    #: Derived by the same function `GET /flights` and `POST /scenarios` use.
+    #: Never a second formula.
     delay_minutes: int
     status: str
     #: The incident an operator would follow from this segment, or `null` if none is open.
@@ -84,9 +88,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-async def _incident_reference_for(
-    session: AsyncSession, flight_ids: list[int]
-) -> dict[int, str]:
+async def _incident_reference_for(session: AsyncSession, flight_ids: list[int]) -> dict[int, str]:
     """The incident an operator would follow from each flight, active winning over closed.
 
     Scoped to the handful of flights in one booking rather than `GET /flights`'s whole-table read
@@ -122,8 +124,8 @@ async def get_booking(
 ) -> BookingLookupResponse:
     normalised = pnr.strip().upper()
     booking = (
-        await session.execute(select(Booking).where(Booking.pnr == normalised))
-    ).scalars().first()
+        (await session.execute(select(Booking).where(Booking.pnr == normalised))).scalars().first()
+    )
     if booking is None:
         raise EntityNotFound(
             "booking not found",

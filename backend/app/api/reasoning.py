@@ -76,6 +76,108 @@ async def _actions_summary(session: AsyncSession, incident_id: int) -> list[dict
     ]
 
 
+def _group_figures(rollup: Any) -> dict[str, Any]:
+    """The group-scoped figures the reporter prompt consumes."""
+    return {
+        "flights_affected": rollup.flights_affected,
+        "passengers_affected": rollup.passengers_affected,
+        "connections_at_risk": rollup.connections_at_risk,
+        "crew_pairings_affected": rollup.crew_pairings_affected,
+        "candidate_hotels": rollup.candidate_hotels,
+    }
+
+
+async def _incident_figures(session: AsyncSession, incident: Incident) -> dict[str, Any]:
+    """The same figures at INCIDENT scope — one flight, counted the way the incident detail counts.
+
+    Reuses `app.api.incidents._passenger_count` rather than writing a second passenger query, so an
+    incident-scoped report and the incident screen can never disagree about how many people are on
+    the flight. Connections and crew are read from this incident's own recorded actions; where no
+    such action has run the figure is `None`, not zero — "no assessment" and "nothing found" are
+    different, and a report is exactly the artefact that must not blur them.
+    """
+    from app.api.incidents import _passenger_count
+    from app.db.scenario_queries import recorded_actions
+    from app.models.enums import ActionType
+
+    passengers = await _passenger_count(session, incident.flight_id)
+
+    async def _finding(action_type: str, key: str) -> int | None:
+        """A recorded count from this incident's own action payload, or None if it never ran."""
+        rows = await recorded_actions(
+            session, [incident.id], action_type, statuses=("success", "needs_human")
+        )
+        if not rows:
+            return None
+        return sum(int((payload or {}).get(key) or 0) for _i, _a, payload in rows)
+
+    async def _hotel_options() -> int | None:
+        rows = await recorded_actions(
+            session,
+            [incident.id],
+            ActionType.find_hotel_options.value,
+            statuses=("success", "needs_human"),
+        )
+        if not rows:
+            return None
+        return sum(len((payload or {}).get("options") or []) for _i, _a, payload in rows)
+
+    return {
+        # One incident is one flight, by construction.
+        "flights_affected": 1,
+        "passengers_affected": passengers,
+        "connections_at_risk": await _finding(ActionType.check_connections.value, "at_risk_count"),
+        "crew_pairings_affected": await _finding(
+            ActionType.assess_crew_impact.value, "pairings_at_risk"
+        ),
+        "candidate_hotels": await _hotel_options(),
+    }
+
+
+async def _incident_hotel_totals(
+    session: AsyncSession, incident: Incident
+) -> dict[str, Any] | None:
+    """This incident's own accommodation figures, in the shape `group_hotel_totals` returns.
+
+    Same shape so the reporter prompt takes one summary type whatever the scope, and `None` — never
+    a dictionary of zeros — when no allocation has run, so an unknown requirement cannot read as no
+    requirement.
+    """
+    from app.db.scenario_queries import recorded_actions
+    from app.models.enums import ActionType
+
+    rows = await recorded_actions(
+        session,
+        [incident.id],
+        ActionType.reserve_hotel_block.value,
+        statuses=("success", "needs_human"),
+    )
+    if not rows:
+        return None
+    required = sum(int((payload or {}).get("rooms_required") or 0) for _i, _a, payload in rows)
+    allocated = sum(int((payload or {}).get("rooms_allocated") or 0) for _i, _a, payload in rows)
+    cost = sum(int((payload or {}).get("total_cost_inr") or 0) for _i, _a, payload in rows)
+    short = max(0, required - allocated)
+    return {
+        "rooms_required": required,
+        "rooms_allocated": allocated,
+        "shortfall_rooms": short,
+        "total_cost_inr": cost,
+        "is_complete": short == 0,
+        "coverage_is_complete": True,
+        "incidents_allocated": 1,
+        "incidents_declared": 1,
+        "shortfall_note": (
+            f"All {required} rooms secured for {incident.reference}."
+            if short == 0
+            else (
+                f"{allocated} of {required} rooms secured for {incident.reference}. {short} rooms "
+                "short. This figure covers this incident's flight alone, not the whole disruption."
+            )
+        ),
+    }
+
+
 def _source_of(generator: str) -> str:
     """`fixture` or `live`, read off the generator the client already recorded.
 
@@ -216,13 +318,28 @@ async def get_report(
     from app.services.hotel import group_hotel_totals
 
     if group:
-        rollup = await cascade_rollup(session, group_id=group.id)
+        rollup_figures = _group_figures(await cascade_rollup(session, group_id=group.id))
         hotel = await group_hotel_totals(session, group_id=group.id)
         reference = group.reference
+        scope = "group"
+        scope_note = "Figures cover every flight this disruption group declares."
     elif incident and incident.group_id:
-        rollup = await cascade_rollup(session, group_id=incident.group_id)
-        hotel = await group_hotel_totals(session, group_id=incident.group_id)
+        # An incident reference produces an INCIDENT-scoped report.
+        #
+        # It used to produce a group-scoped one under the incident's own name: `cascade_rollup` and
+        # `group_hotel_totals` both take a group id, so a request for INC-...-01 came back
+        # narrating 445 passengers and 166 rooms — the whole cascade — beneath the heading of a
+        # single flight's incident. Relabelling it to the group's reference would have made the
+        # heading honest while still answering a question nobody asked. The report now answers the
+        # question it was asked, at the scope it was asked at, and `scope` says which that is.
+        rollup_figures = await _incident_figures(session, incident)
+        hotel = await _incident_hotel_totals(session, incident)
         reference = incident.reference
+        scope = "incident"
+        scope_note = (
+            f"Figures cover {incident.reference} alone — one flight — not the wider disruption "
+            "group it belongs to."
+        )
     else:
         raise EntityNotFound(
             "no group context for report generation",
@@ -236,13 +353,7 @@ async def get_report(
     try:
         response, audit = await agent.generate(
             group_reference=reference,
-            rollup={
-                "flights_affected": rollup.flights_affected,
-                "passengers_affected": rollup.passengers_affected,
-                "connections_at_risk": rollup.connections_at_risk,
-                "crew_pairings_affected": rollup.crew_pairings_affected,
-                "candidate_hotels": rollup.candidate_hotels,
-            },
+            rollup=rollup_figures,
             hotel_summary=hotel,
         )
     except LLMUnavailable as exc:
@@ -260,11 +371,33 @@ async def get_report(
         )
         raise _unavailable(exc, artifact="report", mode=settings.llm_mode.value) from exc
 
+    # A fixture replay's prose is a committed artefact. It was written about the whole disruption
+    # and it does not change with the figures this request passed in, so an incident-scoped request
+    # served from a fixture gets incident-scoped FIGURES and a group-scoped NARRATIVE. Saying so is
+    # the whole point of this endpoint's scope work: the alternative is a group story under an
+    # incident heading, which is exactly the defect being fixed. A live call builds its prompt from
+    # the scoped figures, so there the two agree.
+    source = _source_of(audit.generator)
+    narrative_scope = "group" if source == "fixture" else scope
+    if narrative_scope != scope:
+        scope_note = (
+            f"{scope_note} The narrative below is a committed artefact written at group scope and "
+            "replayed unchanged, so it describes the whole disruption; the figures are this "
+            "incident's."
+        )
+
     return {
         "reference": reference,
+        #: Which scope the FIGURES describe. Published rather than implied, because the same
+        #: endpoint legitimately answers at two scopes and the reference alone cannot say which.
+        "scope": scope,
+        #: Which scope the PROSE describes. Equal to `scope` for a live call; `group` for a fixture
+        #: replay, whose text is fixed at the scope it was recorded at.
+        "narrative_scope": narrative_scope,
+        "scope_note": scope_note,
         "generator": audit.generator,
         "prompt_version": audit.prompt_version,
-        "source": _source_of(audit.generator),
+        "source": source,
         "llm_mode": settings.llm_mode.value,
         **response.model_dump(mode="json"),
         "audit": audit.model_dump(mode="json"),

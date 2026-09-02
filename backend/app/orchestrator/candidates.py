@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.assurance.authorship import authorship_for_generator
 from app.assurance.candidates import CandidateInput, CandidateSet, evaluate_candidates
 from app.assurance.plan_contract import (
     CoverageDeclaration,
@@ -38,7 +39,7 @@ from app.assurance.plan_contract import (
     PlanUnderReview,
     WhatIfPolicy,
 )
-from app.config import Settings, get_settings
+from app.config import Settings, comparison_provider_modes, get_modes, get_settings
 from app.db.plan_identity import compute_plan_hash
 from app.errors import EntityNotFound, InvalidStateTransition
 from app.models.enums import TaskState
@@ -303,8 +304,10 @@ class CandidateService:
             # running one under unknown rules.
             what_if_policy=loaded.what_if if loaded else WhatIfPolicy(),
             seed=COMPARISON_SEED,
-            provider_modes={"weather": "fixture", "notification": "console"},
-            real_dispatch_enabled=False,
+            # The real modes, so `refuse_when_provider_live` can actually fire. See
+            # `comparison_provider_modes` for which providers are declared and why.
+            provider_modes=comparison_provider_modes(get_modes()),
+            real_dispatch_enabled=get_modes().real_email_enabled,
         )
         log.info(
             "plan_candidates_compared",
@@ -409,6 +412,15 @@ def comparison_payload(result: CandidateSet, plans: list[Plan]) -> dict[str, Any
                 "generator": by_variant[comparison.candidate_id].generator
                 if comparison.candidate_id in by_variant
                 else None,
+                # Decided once, server-side, by the same rule the assurance gate applies. A
+                # comparison table whose authorship column is computed in the browser is how a
+                # reviewer ends up told a plan is "unclassified" when the server knows exactly
+                # what wrote it.
+                "authored_by": authorship_for_generator(
+                    by_variant[comparison.candidate_id].generator
+                    if comparison.candidate_id in by_variant
+                    else None
+                ).value,
                 "prompt_version": by_variant[comparison.candidate_id].prompt_version
                 if comparison.candidate_id in by_variant
                 else None,

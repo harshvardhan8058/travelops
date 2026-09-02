@@ -317,6 +317,12 @@ try {
     'current group did not select the UI-created scenario',
   );
   assert(selected.state === 'detected', `new scenario started in ${selected.state}`);
+  // `waitForURL` resolves on `load`, which is before React has rendered the cascade — the panel is
+  // still its skeleton for a moment. Asserting the body text straight after the navigation therefore
+  // failed intermittently on a slower machine, reporting a missing string for a screen that was
+  // merely a beat behind. Waiting for one element the cascade always renders turns that race into a
+  // wait. A false failure in this gate is expensive: it reads exactly like a real one.
+  await page.getByText(/approving nothing/i).first().waitFor({ state: 'visible', timeout: 30000 });
   await assertHealthyPage(page, observed, [groupReference, 'approving nothing']);
   record('PASS', 'Scenario Builder creates and starts one recorded scenario', `${groupReference} · ${selected.state}`);
 
@@ -402,7 +408,10 @@ try {
   await goto(page, `/incidents/${incidentReference}`);
   await assertHealthyPage(page, observed, [
     incidentReference,
-    'planner candidate',
+    // The badge used to read "planner candidate" — true but silent on the one fact that
+    // matters, whether this candidate is what will execute. It now says so explicitly.
+    'model-authored candidate',
+    'NOT plan of record',
     'Deterministic fallback',
     'recorded plan of record',
     'Fallback playbook · deterministic',

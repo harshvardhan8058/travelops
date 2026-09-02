@@ -105,6 +105,15 @@ export interface SystemMode {
   notification_mode: 'console' | 'mailtrap' | 'gmail';
   policy_mode: 'demo' | 'charter' | 'verified';
   real_email_enabled: boolean;
+  /**
+   * Which endpoint `live` would actually talk to, resolved by the same function the server's LLM
+   * client uses. `llm_mode` alone cannot answer "live against what?", and that gap is what let a
+   * top bar reading LIVE sit beside a provenance row naming a different provider.
+   */
+  llm_provider?: string;
+  llm_model?: string | null;
+  /** Whether a key is present. Never the key itself, and never a claim that it was used. */
+  llm_provider_configured?: boolean;
   app_env: string;
   assurance: {
     config_present: boolean;
@@ -617,6 +626,28 @@ export interface PlanSummary {
    * committed fixture appends ' · deterministic'. Classify on the token, never on the prose.
    */
   generator: string;
+  /**
+   * Who wrote it, decided by the server from the recorded generator.
+   *
+   * Optional only because an older server may not send it. When it is present it is authoritative
+   * and `planAttribution` must not second-guess it: classifying in the browser is what produced
+   * "unclassified generator" for a plan that was plainly the deterministic playbook.
+   */
+  authored_by?: 'deterministic' | 'model';
+  /**
+   * 'selected' when a person chose this plan; 'candidate' when it is the plan of record only
+   * because it is the earliest one. Two very different claims about who decided.
+   */
+  selection_state?: string;
+  /**
+   * A model-authored plan exists on this incident and is NOT the plan of record.
+   *
+   * The deterministic playbook is persisted first and nothing auto-selects the planner agent's
+   * output, so a fully successful model call still leaves the playbook running. Without this the
+   * console can show "LLM live" beside a model-authored candidate and let a viewer conclude the
+   * model planned the recovery.
+   */
+  model_candidate_available?: boolean;
   prompt_version: string | null;
   /** Diagnostic metadata only. Never drives a decision. */
   model_self_report: number | null;
@@ -665,26 +696,63 @@ export interface IncidentGroupsResponse {
   groups: IncidentGroupSummary[];
 }
 
+/**
+ * Whether a source actually served this run.
+ *
+ * Deliberately separate from `kind`. `kind` says what the data is; `usage` says what this process
+ * did. A configured provider nobody called is `unused`, which is not a fault and is a different
+ * statement from `unavailable` — something was asked and could not answer.
+ */
+export type SourceUsage = 'used' | 'unused' | 'unavailable';
+
 /** One row of the provenance ledger. The definitive answer to "is any of this real?". */
 export interface SourceRow {
   name: string;
+  /** What this source is for, in the product's own terms. */
+  role: string;
   kind: ProvenanceKind;
   provider: string;
+  /** The model identifier where the provider has one; null everywhere else. */
+  model?: string | null;
   current_mode: string;
+  /** Whether the credential or configuration this source needs is present. Never the key. */
+  configured: boolean;
+  usage: SourceUsage;
+  /** One sentence a reader can act on. For `unavailable`, the actual reason. */
+  usage_detail: string;
+  /** What backs the `usage` claim. Null when `unused`, because there is nothing to show. */
+  evidence?: string | null;
   last_checked?: string | null;
   licence: string;
   attribution_required?: boolean;
   health: string;
-  note?: string;
+  note?: string | null;
 }
 
 export interface SourcesResponse {
   sources: SourceRow[];
+  /** Sources that are BOTH `kind: real` and `usage: used`. Never one standing in for the other. */
+  live_count: number;
+  unused_count: number;
+  unavailable_count: number;
+  note: string;
 }
 
 /** Metrics are derived from recorded rows. An absent metric is absent, never estimated. */
 export interface ReportResponse {
   reference: string;
+  /**
+   * Which scope the FIGURES describe. The same endpoint answers at incident and group scope, and
+   * the reference alone cannot say which — asking for an incident used to return the whole
+   * cascade's totals under that incident's name.
+   */
+  scope?: 'incident' | 'group';
+  /**
+   * Which scope the PROSE describes. Equal to `scope` for a live call; `group` for a fixture
+   * replay, whose text is fixed at the scope it was recorded at.
+   */
+  narrative_scope?: 'incident' | 'group';
+  scope_note?: string;
   generator: string;
   prompt_version: string | null;
   /** `fixture` or `live`. A replay and a network call carry different weight in a review, and
@@ -913,6 +981,8 @@ export interface CandidatePlan {
   incident_reference: string;
   variant_key: string | null;
   generator: string;
+  /** Decided by the server, never re-derived here. Optional only for older servers. */
+  authored_by?: 'deterministic' | 'model';
   generated_at: string;
   rationale: string | null;
   selection_state: string;
@@ -940,6 +1010,8 @@ export interface CandidateComparisonRow {
   plan_id: number | null;
   plan_hash: string;
   generator: string | null;
+  /** Decided by the server, never re-derived here. Optional only for older servers. */
+  authored_by?: 'deterministic' | 'model';
   prompt_version: string | null;
   admissible: boolean;
   decision: string;
@@ -1176,6 +1248,8 @@ export interface WhatIfResponse {
   recorded_baseline: Record<string, number>;
   levers_applied: Record<string, unknown>;
   levers_available: string[];
+  /** What each lever does, keyed by lever name. Optional only for older servers. */
+  lever_descriptions?: Record<string, string>;
   levers_rejected: { lever: string; reason: string }[];
   deltas: WhatIfDelta[];
 }

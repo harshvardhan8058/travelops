@@ -302,9 +302,24 @@ async def _re_evaluate(
     # the what-if a different definition of "rooms required" from the live allocation, and two
     # definitions of one figure in one product is how a demo ends up contradicting itself on
     # screen.
+    # The group's own holds are excluded from the inventory this re-evaluation sees.
+    #
+    # `load_hotel_options` normally subtracts every active hold, which is right for an operational
+    # read: those rooms are gone. It is wrong here. The re-evaluation is asking what the rules
+    # would find for *this* disruption, and the rooms this disruption already secured are part of
+    # the answer being re-derived, not a constraint on deriving it. Leaving them subtracted made
+    # the baseline allocate nothing and report the entire requirement as short — 166 against Blast
+    # Radius's 95, for the same group, on the same screen, both rendered as fact.
+    #
+    # The demand side already had this fix (`_accommodation_basis` reads the recorded
+    # requirement rather than recomputing one); the supply side had simply not been carried across.
     allocation = allocate_rooms(
         passengers=await _accommodation_basis(session, baseline=baseline),
-        options=await load_hotel_options(session, airport_icao=baseline.airport_icao),
+        options=await load_hotel_options(
+            session,
+            airport_icao=baseline.airport_icao,
+            excluding_group_id=await _group_id_for(session, baseline=baseline),
+        ),
         constraints=constraints,
     )
 
@@ -314,6 +329,25 @@ async def _re_evaluate(
         "rooms_required": allocation.rooms_required,
         "rooms_short": allocation.shortfall_rooms,
     }
+
+
+async def _group_id_for(session: AsyncSession, *, baseline: CascadeRollup) -> int | None:
+    """The disruption group behind a rollup, found through its member flights' incidents.
+
+    `CascadeRollup` carries the group's reference and its member flight ids but not its id, and
+    this is the only place that needs the id. Resolved the same way `_accommodation_basis` resolves
+    the incidents, so the two cannot end up talking about different groups.
+    """
+    from app.models.workflow import Incident
+
+    return (
+        await session.execute(
+            select(Incident.group_id)
+            .where(Incident.flight_id.in_(baseline.member_flight_ids or [0]))
+            .where(Incident.group_id.isnot(None))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 async def _accommodation_basis(session: AsyncSession, *, baseline: CascadeRollup) -> int:

@@ -940,6 +940,21 @@ class Orchestrator:
                     "prompt_version": PROMPT_VERSION,
                     "model_self_report": audit.model_self_report,
                     "llm_mode": self.modes.llm.value,
+                    # WHICH endpoint actually answered.
+                    #
+                    # `plan.generator` records the AGENT (`planner-agent`), which is the right
+                    # thing for the gate to branch on — authorship, not vendor. But it meant the
+                    # only durable trace of the transport was nothing at all: `ProviderTransport`
+                    # composes `openrouter:openai/gpt-oss-120b`, `ModelCallAudit` carries it, and
+                    # persistence dropped it. A reviewer asking "which model wrote this candidate?"
+                    # had no answer, and the console had no honest field to render.
+                    #
+                    # Recorded here rather than as a new column: `decision_log.detail` already
+                    # carries this call's latency, tokens and self-report, so the transport belongs
+                    # beside them and no migration is needed for a diagnostic fact. A fixture
+                    # replay records `fixture:planner`, which is equally the truth about what
+                    # answered.
+                    "transport_generator": audit.generator,
                     "actions": [t.action.value for t in reflection.tasks],
                     "precedents_used": len(precedents),
                     # What the model proposed, what was removed, and why. In the record a

@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.assurance.authorship import authorship_for_generator
 from app.db.session import get_session
 from app.errors import EntityNotFound
 from app.models.workflow import Incident, IncidentGroup, PlanTask
@@ -74,6 +75,7 @@ async def _plan_out(session: AsyncSession, plan, incident_reference: str) -> Can
         incident_reference=incident_reference,
         variant_key=plan.variant_key,
         generator=plan.generator,
+        authored_by=authorship_for_generator(plan.generator),
         prompt_version=plan.prompt_version,
         generated_at=plan.generated_at,
         rationale=plan.rationale,

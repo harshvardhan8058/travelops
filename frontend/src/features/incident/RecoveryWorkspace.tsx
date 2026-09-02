@@ -241,9 +241,19 @@ function Header({
              * call. Both say which applies — now in the button's own title as well as beside it,
              * so the reason travels with the control that refused.
              */}
+            {/*
+              Demoted to secondary while a person is being waited on.
+
+              There were two `primary` buttons on this screen at once: this one, always present and
+              high in the visual hierarchy, and Approve, which sits low in a 360px rail below the
+              gate decision and up to three blocking notices. When the workflow is parked on a
+              human decision, the decision is the action — and the control that looked most like
+              the next step was the one that cannot help until the decision is made. Running now
+              re-parks on the same evaluation.
+            */}
             <div className="flex flex-col items-end gap-1">
               <Button
-                variant="primary"
+                variant={incident.state === 'awaiting_approval' ? 'secondary' : 'primary'}
                 size="md"
                 icon={PlayCircle}
                 onClick={onRun}
@@ -254,7 +264,10 @@ function Header({
                 {isRunning ? 'Running…' : 'Run workflow'}
               </Button>
               <span className="max-w-[240px] text-right text-caption text-fg-muted">
-                {blockedReason ?? 'advances the workflow one run'}
+                {blockedReason ??
+                  (incident.state === 'awaiting_approval'
+                    ? 'waiting on your decision first — running now stops at the same gate'
+                    : 'advances the workflow one run')}
               </span>
             </div>
           </Toolbar>
@@ -266,6 +279,62 @@ function Header({
           </div>
         }
       />
+
+      {/*
+        The operator's five questions, answered in order, above the three columns that answer them
+        in detail.
+
+        The workspace was never short of information — evidence, plan and assurance are all there.
+        What it lacked was a first paragraph: an operator arriving at a screen mid-cascade had to
+        assemble "what happened, what do we know, what don't we, what needs me, what next" from
+        three columns and a state rail. Every value below is read from what is already rendered
+        further down; nothing here is a new computation, so this band cannot disagree with the
+        detail beneath it.
+      */}
+      <div className="grid gap-2 rounded border border-border-subtle bg-inset px-3 py-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">What happened</span>
+          <span className="text-body text-fg">
+            {incident.flight?.flight_number ?? incident.reference}
+            {incident.flight?.route ? ` · ${incident.flight.route}` : ''}
+            {typeof incident.flight?.delay_minutes === 'number' && incident.flight.delay_minutes > 0
+              ? ` · delayed ${incident.flight.delay_minutes} min`
+              : ''}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">What needs a human</span>
+          <span
+            className={
+              outstanding.length > 0 ? 'text-body text-state-warn' : 'text-body text-fg-secondary'
+            }
+          >
+            {outstanding.length === 0
+              ? 'Nothing is waiting on a person right now.'
+              : `${outstanding.length} action${outstanding.length === 1 ? '' : 's'} recorded a decision for a person.`}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">What happens next</span>
+          <span className="text-body text-fg-secondary">
+            {incident.state === 'awaiting_approval'
+              ? 'Approve or reject in the assurance rail. Approving records a decision and runs nothing.'
+              : isTerminal
+                ? 'This incident is terminal. Nothing further will run.'
+                : (blockedReason ?? 'Run workflow advances the workflow one run.')}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label uppercase text-fg-muted">Scope</span>
+          {/* Every figure on this screen is one incident — one flight. The group's figures are
+              larger and live on the cascade screen, and saying so here is cheaper than letting a
+              reader discover it by finding two different passenger counts. */}
+          <span className="text-body text-fg-secondary">
+            This incident only — <MonoValue muted>{incident.reference}</MonoValue>, one flight. The
+            disruption group&rsquo;s totals are larger.
+          </span>
+        </div>
+      </div>
 
       {resolvedOwing && (
         <Notice tone="warn" divider="none" className="rounded border">

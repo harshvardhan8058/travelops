@@ -189,7 +189,17 @@ function TopBar({ mode, clock }: { mode?: SystemMode; clock: string }) {
         <PackStandingChip uiLabel={mode?.policy_pack?.ui_label} />
       </div>
 
+      {/*
+        The word `capability` sits with the chips deliberately.
+
+        Every one of these values is resolved once, at boot, from configuration — no provider is
+        ever contacted to produce them. Without the word adjacent, `LLM LIVE` reads as "a model is
+        answering right now", which is a claim this row cannot make and which contradicted the
+        provenance ledger on screen. The ledger is where usage is recorded, and it is one click
+        away through the strip below.
+      */}
       <div className="ml-2 flex flex-wrap items-center gap-2">
+        <span className="text-caption uppercase text-fg-muted">capability</span>
         {chips.map((chip) => (
           <ModeChip key={chip.label} chip={chip} />
         ))}
@@ -227,14 +237,14 @@ function SourceStrip({ mode }: { mode?: SystemMode }) {
         className="mr-1 shrink-0 rounded-sm text-caption uppercase text-fg-muted underline decoration-dotted underline-offset-2 transition-colors duration-hover ease-out hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         aria-label="Open source ledger for effective mode provenance"
       >
-        effective modes
+        configured capability
       </NavLink>
       {chips.map((chip) => (
         <ModeChip key={chip.label} chip={chip} />
       ))}
       <span className="min-w-0 text-caption text-fg-muted">
-        Recorded runtime capability; source records and deliveries remain auditable in their own
-        views.
+        What this deployment is configured to do, resolved once at startup. Whether a source was
+        actually read — and by what — is recorded in the source ledger.
       </span>
     </footer>
   );

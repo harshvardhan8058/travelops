@@ -37,18 +37,28 @@ import { utcStamp } from '@/components/ui/format';
 import { refusalFor } from './refusal';
 import {
   candidateMismatchLabel,
-  planGeneratorKind,
+  planAuthorship,
   plannerCandidateAttribution,
   plannerUnavailableAttribution,
 } from './planAttribution';
 
-/** Classify only recorded generator tokens with known semantics; unknown stays unclassified. */
+/**
+ * Who wrote the plan of record, and — the part that matters for a demo — whether a model wrote a
+ * plan that is NOT the one being run.
+ *
+ * The server persists the deterministic playbook first and never auto-selects the planner agent's
+ * output, so "a model was called and succeeded" and "a model planned this recovery" are routinely
+ * different facts. Stating only the first is how a reasonable viewer concludes the second.
+ */
 function GeneratorChip({ plan }: { plan: PlanSummary }) {
-  const generatorKind = planGeneratorKind(plan.generator);
+  const generatorKind = planAuthorship(plan);
   const isDeterministic = generatorKind === 'deterministic_fallback';
   const isModelAuthored = generatorKind === 'model_authored';
   const modelProvider = isModelAuthored ? 'recorded planner' : null;
   const Icon = isDeterministic ? Workflow : isModelAuthored ? Cpu : CircleHelp;
+  // `selected` means a person chose this plan. `candidate` means it is the plan of record only
+  // because it is the earliest one — a default, not a decision, and the two should not read alike.
+  const chosenByPerson = plan.selection_state === 'selected';
 
   return (
     <div className="flex flex-col items-start gap-2">
@@ -83,6 +93,21 @@ function GeneratorChip({ plan }: { plan: PlanSummary }) {
           </span>
         )}
       </div>
+
+      {plan.model_candidate_available === true && !isModelAuthored && (
+        <Notice tone="info">
+          A model-authored plan exists for this incident and is not the plan of record. The
+          deterministic playbook is what will execute. Reasoning being live does not make a model
+          plan authoritative: a person selects a candidate, or the playbook stands.
+        </Notice>
+      )}
+      {plan.selection_state !== undefined && (
+        <span className="text-caption text-fg-muted">
+          {chosenByPerson
+            ? 'Selected by a person, and recorded with an attribution.'
+            : 'Plan of record by default — the earliest plan on this incident. Nobody has selected between candidates.'}
+        </span>
+      )}
 
       <details className="w-full rounded-sm border border-border-subtle bg-inset px-2 py-1.5">
         <summary className="cursor-pointer text-caption uppercase text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
@@ -317,14 +342,33 @@ export function PlanColumn({
           }
         >
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {/*
+              The two states named in full, because "planner candidate" alone does not say the
+              thing that matters: whether the model's plan is the one that will execute. It usually
+              is not — the deterministic playbook is persisted first and nothing auto-selects a
+              candidate — so the badge says so rather than leaving the reader to work it out from
+              an id comparison further along the sentence.
+            */}
             <StateBadge
               status={plannerCandidate.isPlanOfRecord ? 'executing' : 'proposed'}
               label={
-                plannerCandidate.isPlanOfRecord ? 'planner plan of record' : 'planner candidate'
+                plannerCandidate.isPlanOfRecord
+                  ? 'model-authored · plan of record'
+                  : 'model-authored candidate · NOT plan of record'
               }
             />
             <span>
-              <MonoValue>{plannerCandidate.generator}</MonoValue> · {plannerCandidate.sourceLabel} ·{' '}
+              <MonoValue>{plannerCandidate.generator}</MonoValue> ·{' '}
+              {/* Which endpoint answered. Recorded on the plan event; never inferred from the
+                  agent name, and stated as unavailable when the event predates the field. */}
+              <span title="The provider and model that answered this call">
+                {plannerCandidate.transportGenerator ? (
+                  <MonoValue muted>{plannerCandidate.transportGenerator}</MonoValue>
+                ) : (
+                  <span className="text-fg-muted">provider/model unavailable</span>
+                )}
+              </span>{' '}
+              · {plannerCandidate.sourceLabel} ·{' '}
               {plannerCandidate.isPlanOfRecord
                 ? `candidate id ${plannerCandidate.planId} matches the recorded plan-of-record id`
                 : `candidate id ${plannerCandidate.planId} does not match plan-of-record id ${plan.id}; ${candidateMismatchLabel(plan)}`}

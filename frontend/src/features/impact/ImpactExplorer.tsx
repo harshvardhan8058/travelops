@@ -256,15 +256,24 @@ export function ImpactExplorer() {
                   ruleVersion: hotels.ruleVersion,
                   note: hotels.constraintsNote,
                 })}
+                /*
+                  Scope on the tile, not only inside the derivation popover.
+
+                  Accommodation is allocated per incident — one flight — against one shared
+                  inventory, so this product legitimately shows "87 required" here and "166
+                  required" on the group's blast radius. Unlabelled, those read as one number
+                  contradicting itself rather than as two scopes, which is how they were read.
+                */
                 footnote={
                   hotels.passengersPerRoom !== null
-                    ? `${hotels.passengersPerRoom} per room`
-                    : undefined
+                    ? `${hotels.incidentReference} · ${hotels.passengersPerRoom} per room`
+                    : hotels.incidentReference
                 }
               />
               <MetricTile
                 label="Rooms secured"
                 value={hotels.roomsAllocated}
+                footnote={`${hotels.incidentReference} · this incident only`}
                 derivation={impactFieldDerivation({
                   label: 'Rooms secured',
                   value: hotels.roomsAllocated,
@@ -852,6 +861,17 @@ function HotelTable({ impact }: { impact: ReturnType<typeof hotelImpact> }) {
       {impact.shortfallNote && (
         <p className="border-b border-state-warn/30 bg-state-warn-bg px-3 py-1.5 text-caption text-state-warn">
           {impact.shortfallNote}
+          {/*
+            The sentence the service wrote contains a bare ratio — "71 of 87 rooms secured". Its
+            twin on another incident reads "0 of 79", because the two flights draw on one finite
+            inventory and the second to run sees what the first left. Naming the incident is what
+            turns an apparent contradiction back into two true statements.
+          */}
+          {impact.incidentReference && (
+            <span className="ml-1 text-fg-muted">
+              (for {impact.incidentReference}, this incident only)
+            </span>
+          )}
         </p>
       )}
       {impact.scopeNote && !impact.shortfallNote && (

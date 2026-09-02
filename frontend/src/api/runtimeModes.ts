@@ -104,19 +104,37 @@ const PENDING: Omit<ModeChipView, 'label'> = {
   degradation: null,
 };
 
+/**
+ * Name the endpoint `live` would actually talk to.
+ *
+ * `llm_mode` alone cannot answer "live against what?", and that gap is exactly what let a chip
+ * reading LIVE sit on screen beside a provenance row naming a different provider entirely. The
+ * server now publishes the resolved provider, so the chip can say it.
+ */
+function providerSuffix(mode: SystemMode): string {
+  if (!mode.llm_provider) return '';
+  return mode.llm_model ? ` (${mode.llm_provider}, ${mode.llm_model})` : ` (${mode.llm_provider})`;
+}
+
 function llmChip(mode: SystemMode): Omit<ModeChipView, 'label' | 'degradation'> {
+  const provider = providerSuffix(mode);
   switch (mode.llm_mode) {
     case 'live':
       return {
         value: 'live',
         posture: 'live',
-        detail: 'Reasoning calls a real provider. Output is generated per request.',
+        detail:
+          `Reasoning is configured to call a real provider${provider}. This is a capability: ` +
+          'it does not claim any request was made or succeeded, and it never means a model ' +
+          'authored the plan of record. The source ledger records what was actually called.',
       };
     case 'fixture':
       return {
         value: 'fixture',
         posture: 'fixture',
-        detail: 'Reasoning replays a committed artefact. No provider call is made.',
+        detail: `Reasoning replays a committed artefact. No provider call is made${
+          provider ? `, so${provider.replace(' (', ' ').replace(')', '')} is not contacted` : ''
+        }.`,
       };
     case 'off':
       return {

@@ -68,8 +68,12 @@ const FIELDS: {
   { key: 'approvals_required', label: 'Approvals required' },
   { key: 'external_effects', label: 'External effects', hint: 'Reaches outside our systems' },
   { key: 'exposure_inr', label: 'Exposure (INR)' },
-  { key: 'passengers_affected', label: 'Passengers' },
-  { key: 'rooms_committed', label: 'Rooms committed' },
+  // Scope on the label. Every candidate here belongs to ONE incident — the comparison is over
+  // variants of that incident's plan — while the same nouns appear group-scoped on the approval
+  // queue and the cascade. Without the qualifier, a reader moving between screens sees one word
+  // carrying two magnitudes and reads a contradiction.
+  { key: 'passengers_affected', label: 'Passengers', hint: 'This incident' },
+  { key: 'rooms_committed', label: 'Rooms committed', hint: 'This incident' },
   { key: 'uncovered_entities', label: 'Uncovered entities' },
 ];
 
@@ -298,6 +302,35 @@ export function PlanComparison() {
                   <span className="block text-caption font-normal normal-case text-fg-muted">
                     {row.generator ?? 'unknown'}
                     {row.prompt_version ? ` · ${row.prompt_version}` : ''}
+                  </span>
+                  {/*
+                    Who wrote it, and whether it is the one that will run.
+
+                    The server decides authorship (`authored_by`) and reports selection
+                    (`selection_state`); both were returned on every row and neither was rendered,
+                    so a reviewer could not tell from this table which column was the plan of
+                    record — the single most useful thing on the screen. `candidate` is not a
+                    neutral word here: the deterministic playbook is persisted first and nothing
+                    auto-selects, so a model-authored candidate is routinely NOT what executes.
+                  */}
+                  <span className="block font-normal normal-case text-fg-muted">
+                    {row.authored_by === 'model'
+                      ? 'model-authored'
+                      : row.authored_by === 'deterministic'
+                        ? 'deterministic'
+                        : 'authorship unavailable'}
+                  </span>
+                  <span
+                    className={clsx(
+                      'block font-normal normal-case',
+                      row.selection_state === 'selected' ? 'text-accent' : 'text-fg-muted',
+                    )}
+                  >
+                    {row.selection_state === 'selected'
+                      ? 'PLAN OF RECORD'
+                      : row.selection_state === 'discarded'
+                        ? 'discarded'
+                        : 'candidate · not plan of record'}
                   </span>
                   <span
                     className={clsx(

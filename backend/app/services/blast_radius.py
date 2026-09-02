@@ -210,6 +210,12 @@ def compose_blast_radius(
         )
 
     if hotel_payload:
+        # Hotel coverage has its own completeness question, and `rollup.is_complete` is not it.
+        # That flag tests connection and crew assessment; the room totals sum only the incidents
+        # that ran allocation. A group fully assessed for crew with two of eight allocations run
+        # was rendering "166 rooms required" with no qualifier — a floor presented as a total,
+        # which is the exact failure this module's own docstring exists to prevent.
+        rooms_complete = bool(hotel_payload.get("coverage_is_complete", complete))
         dimensions.append(
             BlastRadiusDimension(
                 key="rooms_required",
@@ -217,7 +223,7 @@ def compose_blast_radius(
                 value=int(hotel_payload.get("rooms_required") or 0),
                 unit="rooms",
                 measured_by="hotel_allocation",
-                is_complete=complete,
+                is_complete=rooms_complete,
                 note="Passengers needing overnight accommodation, rounded up.",
             )
         )
@@ -228,7 +234,7 @@ def compose_blast_radius(
                 value=int(hotel_payload.get("shortfall_rooms") or 0),
                 unit="rooms",
                 measured_by="hotel_allocation",
-                is_complete=complete,
+                is_complete=rooms_complete,
                 note=str(hotel_payload.get("shortfall_note") or ""),
             )
         )

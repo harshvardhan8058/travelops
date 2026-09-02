@@ -294,25 +294,39 @@ def allocate_rooms(
 # ------------------------------------------------------------------------ availability
 
 
-async def load_hotel_options(session: AsyncSession, *, airport_icao: str) -> list[HotelOption]:
+async def load_hotel_options(
+    session: AsyncSession, *, airport_icao: str, excluding_group_id: int | None = None
+) -> list[HotelOption]:
     """Properties at an airport with availability computed from the hold ledger.
 
     The single reason this is async: availability is a query over `hotel_inventory_hold`, not a
     column read. `hotel.available_rooms` is intentionally ignored.
+
+    `excluding_group_id` leaves out the holds a given disruption group already placed. Only one
+    caller wants that, and it is the what-if: re-evaluating a group against inventory its own
+    commitments have been subtracted from asks a different question from the one the live services
+    answered. It made the What-If panel report `rooms_short: 166` on the same screen where Blast
+    Radius reported 95 — the same group, the same label, two numbers, because the baseline could
+    not see the 71 rooms it had itself secured. Every other caller passes None and sees the world
+    as it stands, which is what an operational read should see.
     """
     from app.models.cascade import HotelInventoryHold
     from app.models.reference import Hotel
 
-    held_rows = (
-        await session.execute(
-            select(
-                HotelInventoryHold.hotel_id,
-                func.coalesce(func.sum(HotelInventoryHold.rooms), 0),
-            )
-            .where(HotelInventoryHold.released_at.is_(None))
-            .group_by(HotelInventoryHold.hotel_id)
+    held_stmt = (
+        select(
+            HotelInventoryHold.hotel_id,
+            func.coalesce(func.sum(HotelInventoryHold.rooms), 0),
         )
-    ).all()
+        .where(HotelInventoryHold.released_at.is_(None))
+        .group_by(HotelInventoryHold.hotel_id)
+    )
+    if excluding_group_id is not None:
+        held_stmt = held_stmt.where(
+            (HotelInventoryHold.incident_group_id.is_(None))
+            | (HotelInventoryHold.incident_group_id != excluding_group_id)
+        )
+    held_rows = (await session.execute(held_stmt)).all()
     held = {int(hotel_id): int(rooms) for hotel_id, rooms in held_rows}
 
     hotels = (
@@ -551,6 +565,24 @@ async def group_hotel_totals(session: AsyncSession, *, group_id: int) -> dict[st
         allocations.extend(payload.get("allocations") or [])
 
     short = max(0, required - allocated)
+    # How much of the group these totals actually cover.
+    #
+    # The sum runs over incidents that have executed `reserve_hotel_block`, which on a partly-worked
+    # group is fewer than the group has. Reporting the sum without that ratio is how "166 rooms
+    # required" renders as a total when it is a floor — and the caller had no way to know, because
+    # the only completeness signal available to it tested connection and crew assessment, which say
+    # nothing whatever about hotel coverage.
+    incidents_allocated = len({incident_id for incident_id, _action_id, _payload in rows})
+    incidents_declared = len(incident_ids)
+    coverage_is_complete = incidents_allocated >= incidents_declared and incidents_declared > 0
+    coverage_note = (
+        ""
+        if coverage_is_complete
+        else (
+            f" Allocation has run on {incidents_allocated} of {incidents_declared} incidents in "
+            "this group, so these are floors rather than totals."
+        )
+    )
     return {
         "rooms_required": required,
         "rooms_allocated": allocated,
@@ -558,13 +590,19 @@ async def group_hotel_totals(session: AsyncSession, *, group_id: int) -> dict[st
         "total_cost_inr": cost,
         "allocations": allocations,
         "is_complete": short == 0,
+        #: Whether every member incident contributed. Distinct from `is_complete`, which is about
+        #: the shortfall being closed — a group can have no shortfall in the part that has run.
+        "coverage_is_complete": coverage_is_complete,
+        "incidents_allocated": incidents_allocated,
+        "incidents_declared": incidents_declared,
         "shortfall_note": (
-            f"All {required} rooms secured across the group."
+            f"All {required} rooms secured across the group.{coverage_note}"
             if short == 0
             else (
                 f"{allocated} of {required} rooms secured across the group. {short} rooms short. "
                 "Every property within the rate cap is exhausted, so closing the gap needs a "
-                "decision: raise the cap, go further out, or accept that some passengers wait."
+                f"decision: raise the cap, go further out, or accept that some passengers wait."
+                f"{coverage_note}"
             )
         ),
     }

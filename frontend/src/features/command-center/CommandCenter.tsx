@@ -439,16 +439,28 @@ function GroupCard({ group }: { group: IncidentGroupSummary }) {
               label={tile.label}
               value={measured ? value : null}
               derivation={countDerivation(tile.label, measured ? value : null, {
-                endpoint: 'GET /incident-groups',
+                // The group's own reference, not the bare collection path: this card is one group
+                // among several, and "which group is this 445 about?" has to be answerable.
+                endpoint: `GET /incident-groups · ${group.reference}`,
                 field: `rollups.${tile.field}`,
                 provenance: group.provenance,
               })}
+              /*
+                Scope, on every tile that has one. These are group totals; an incident screen shows
+                the same nouns for one flight, an order of magnitude smaller. Where a dimension also
+                has an assessment note, that note is the more urgent thing and wins the line — an
+                unassessed dimension's problem is not its scope.
+              */
               footnote={
                 tile.measure && tile.measure.note ? (
                   <span className={measured ? undefined : 'text-state-warn'}>
                     {measured ? tile.measure.note : 'not assessed'}
                   </span>
-                ) : undefined
+                ) : tile.measure && !measured ? (
+                  <span className="text-state-warn">not assessed</span>
+                ) : (
+                  'across this group'
+                )
               }
             />
           );

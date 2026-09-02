@@ -557,6 +557,22 @@ function ReplayEntry({
           {expanded ? '\u2212' : '+'}
         </button>
       </div>
+      {/*
+        The gap between a decision and its execution, said out loud.
+
+        The ordering is already in the data — the decision frame, then a later ACTION_COMPLETED —
+        but nothing paired them and nothing marked the interval, so the reasonable reading of two
+        adjacent rows is that signing the decision performed the action. It did not: the approval
+        endpoint writes a `human_decision` row and dispatches nothing, and execution happens on the
+        next explicit run. That is the property this whole screen exists to evidence, so it is
+        stated on the frame rather than left to be inferred from timestamps.
+      */}
+      {frame.human_decision_id !== null && (
+        <p className="border-t border-border-subtle bg-inset px-3 py-1 text-caption text-fg-muted">
+          A person&rsquo;s decision, recorded here and nothing more. Whatever it authorised executed
+          separately, further down this list.
+        </p>
+      )}
       {expanded && (
         <div className="border-t border-border-subtle bg-inset px-3 py-2">
           <DefinitionList width="sm">

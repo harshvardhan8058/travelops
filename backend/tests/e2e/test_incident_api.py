@@ -608,15 +608,28 @@ class TestOpenApiSchemas:
             summary = spec["paths"][path]["get"]["summary"]
             assert "[fixture]" not in summary, f"{path} is still fixture-backed"
 
-    def test_the_endpoints_not_yet_real_are_still_labelled_fixture(self, client):
-        """Honest labelling: an unimplemented endpoint must not look finished."""
+    def test_no_endpoint_claims_to_be_a_fixture_any_more(self, client):
+        """Honest labelling: an unimplemented endpoint must not look finished — and none is left.
+
+        This check used to enumerate the endpoints still backed by a committed file and assert
+        each kept saying so. `/incidents/{id}/policy` left that list when G4 made it real,
+        `/flights` when it started reading persisted state, and `/sources` when the provenance
+        ledger became a derivation over settings and recorded rows instead of a hand-written
+        document — which is what made it name a reasoning provider the configuration did not
+        select.
+
+        The list is now empty, so the assertion inverts and gets stronger: no path may carry the
+        label. A future fixture-backed endpoint fails here and has to be labelled deliberately,
+        which is the outcome the original test wanted.
+        """
         spec = client.get("/openapi.json").json()
-        # `/incidents/{id}/policy` left this list when G4 made it real, and `/flights` left it when
-        # it started reading persisted state; `/sources` is still fixture-backed and must keep
-        # saying so. The rule is unchanged — the list is the set of endpoints that are still
-        # fixtures, so an endpoint leaving it is the label becoming true, not the check relaxing.
-        for path in ("/api/v1/sources",):
-            assert "[fixture]" in spec["paths"][path]["get"]["summary"]
+        mislabelled = [
+            f"{method.upper()} {path}"
+            for path, operations in spec["paths"].items()
+            for method, operation in operations.items()
+            if isinstance(operation, dict) and "[fixture]" in (operation.get("summary") or "")
+        ]
+        assert mislabelled == [], f"fixture-backed endpoints still published: {mislabelled}"
 
     def test_the_flight_board_no_longer_claims_to_be_a_fixture(self, client):
         """It is the board the Scenario Builder resolves flight ids against.

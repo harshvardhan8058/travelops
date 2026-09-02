@@ -15,7 +15,14 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { api, ApiError } from '@/api/client';
-import { EmptyState, ErrorState, LoadingState, MonoValue, Panel } from '@/components/ui/primitives';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  MonoValue,
+  Panel,
+  StateBadge,
+} from '@/components/ui/primitives';
 
 export function ReportScreen() {
   const { incidentId = '' } = useParams();
@@ -83,6 +90,33 @@ export function ReportScreen() {
           </span>
         }
       >
+        {/*
+          Scope, stated before the prose it qualifies.
+
+          This endpoint answers at two scopes, and the reference alone cannot say which — asking
+          for an incident used to return the whole cascade's totals under that incident's name. A
+          fixture replay is a further wrinkle worth naming rather than hiding: its narrative is a
+          committed artefact written at group scope and replayed unchanged, so an incident-scoped
+          request served from a fixture has incident figures and group prose. The server publishes
+          both facts; this renders them.
+        */}
+        {report.scope && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-border-subtle px-3 py-2">
+            <StateBadge
+              status={report.scope === 'group' ? 'recorded' : 'proposed'}
+              label={`${report.scope} scope`}
+            />
+            {report.narrative_scope && report.narrative_scope !== report.scope && (
+              <StateBadge status="scheduled" label={`narrative: ${report.narrative_scope} scope`} />
+            )}
+            {report.scope_note && (
+              <span className="max-w-[86ch] text-caption text-fg-secondary">
+                {report.scope_note}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* The summary is the one-paragraph answer a C-suite reader needs. */}
         <div className="border-b border-border-subtle px-3 py-3">
           <p className="max-w-[86ch] text-body text-fg">{report.summary}</p>

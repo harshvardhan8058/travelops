@@ -6,6 +6,7 @@ import {
   isDeterministicGenerator,
   planGeneratorKind,
   plannerCandidateAttribution,
+  planAuthorship,
   plannerUnavailableAttribution,
 } from './planAttribution';
 
@@ -175,5 +176,27 @@ describe('plan attribution', () => {
       ),
     ).toBeNull();
     expect(plannerUnavailableAttribution(timeline([]))).toBeNull();
+  });
+});
+
+describe('planAuthorship prefers the server’s own decision', () => {
+  it('takes authored_by when the server sent it', () => {
+    // The exact case the browser classifier got wrong: display prose appended to the token. The
+    // server states authorship as a fact, so the token no longer has to be parsed at all.
+    expect(
+      planAuthorship({
+        generator: 'fallback-playbook · deterministic',
+        authored_by: 'deterministic',
+      }),
+    ).toBe('deterministic_fallback');
+    expect(planAuthorship({ generator: 'anything-at-all', authored_by: 'model' })).toBe(
+      'model_authored',
+    );
+  });
+
+  it('falls back to the token only when the server said nothing', () => {
+    expect(planAuthorship({ generator: 'fallback-playbook' })).toBe('deterministic_fallback');
+    expect(planAuthorship({ generator: 'planner-agent' })).toBe('model_authored');
+    expect(planAuthorship({ generator: 'some-future-generator' })).toBe('unclassified');
   });
 });
